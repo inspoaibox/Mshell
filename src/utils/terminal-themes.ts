@@ -9,7 +9,8 @@ export interface TerminalTheme {
   foreground: string
   cursor: string
   cursorAccent?: string
-  selection?: string
+  selectionBackground?: string
+  selectionForeground?: string
   black: string
   red: string
   green: string
@@ -34,7 +35,7 @@ export const themes: Record<string, TerminalTheme> = {
     background: '#1e1e1e',
     foreground: '#d4d4d4',
     cursor: '#d4d4d4',
-    selection: '#264f78',
+    selectionBackground: '#264f78',
     black: '#000000',
     red: '#cd3131',
     green: '#0dbc79',
@@ -58,7 +59,7 @@ export const themes: Record<string, TerminalTheme> = {
     background: '#ffffff',
     foreground: '#333333',
     cursor: '#333333',
-    selection: '#add6ff',
+    selectionBackground: '#ADD6FF',
     black: '#000000',
     red: '#cd3131',
     green: '#00bc00',
@@ -82,7 +83,7 @@ export const themes: Record<string, TerminalTheme> = {
     background: '#002b36',
     foreground: '#839496',
     cursor: '#839496',
-    selection: '#073642',
+    selectionBackground: '#073642',
     black: '#073642',
     red: '#dc322f',
     green: '#859900',
@@ -106,7 +107,7 @@ export const themes: Record<string, TerminalTheme> = {
     background: '#fdf6e3',
     foreground: '#657b83',
     cursor: '#657b83',
-    selection: '#eee8d5',
+    selectionBackground: '#93a1a1',
     black: '#073642',
     red: '#dc322f',
     green: '#859900',
@@ -130,7 +131,7 @@ export const themes: Record<string, TerminalTheme> = {
     background: '#272822',
     foreground: '#f8f8f2',
     cursor: '#f8f8f0',
-    selection: '#49483e',
+    selectionBackground: '#49483e',
     black: '#272822',
     red: '#f92672',
     green: '#a6e22e',
@@ -154,7 +155,7 @@ export const themes: Record<string, TerminalTheme> = {
     background: '#282a36',
     foreground: '#f8f8f2',
     cursor: '#f8f8f2',
-    selection: '#44475a',
+    selectionBackground: '#44475a',
     black: '#21222c',
     red: '#ff5555',
     green: '#50fa7b',
@@ -178,7 +179,7 @@ export const themes: Record<string, TerminalTheme> = {
     background: '#2e3440',
     foreground: '#d8dee9',
     cursor: '#d8dee9',
-    selection: '#434c5e',
+    selectionBackground: '#434c5e',
     black: '#3b4252',
     red: '#bf616a',
     green: '#a3be8c',
@@ -202,7 +203,7 @@ export const themes: Record<string, TerminalTheme> = {
     background: '#282c34',
     foreground: '#abb2bf',
     cursor: '#528bff',
-    selection: '#3e4451',
+    selectionBackground: '#3e4451',
     black: '#282c34',
     red: '#e06c75',
     green: '#98c379',

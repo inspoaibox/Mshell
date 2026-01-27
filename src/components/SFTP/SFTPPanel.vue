@@ -167,9 +167,23 @@
             <el-button :icon="Back" size="small" @click="goBackRemote" :disabled="!canGoBackRemote">
               返回
             </el-button>
-            <el-button :icon="FolderAdd" size="small" @click="showCreateRemoteDialog = true">
-              新建
-            </el-button>
+            <el-dropdown @command="handleCreateCommand" trigger="click">
+              <el-button :icon="FolderAdd" size="small">
+                新建<el-icon class="el-icon--right"><arrow-down /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="folder">
+                    <el-icon><FolderAdd /></el-icon>
+                    新建文件夹
+                  </el-dropdown-item>
+                  <el-dropdown-item command="file">
+                    <el-icon><Document /></el-icon>
+                    新建文件
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button :icon="Refresh" size="small" @click="refreshRemoteDirectory">
               刷新
             </el-button>
@@ -252,11 +266,20 @@
     </div>
 
     <!-- 新建远程文件夹对话框 -->
-    <el-dialog v-model="showCreateRemoteDialog" title="新建远程文件夹" width="400px">
+    <el-dialog v-model="showCreateRemoteFolderDialog" title="新建远程文件夹" width="400px">
       <el-input v-model="newRemoteFolderName" placeholder="输入文件夹名称" @keyup.enter="createRemoteFolder" />
       <template #footer>
-        <el-button @click="showCreateRemoteDialog = false">取消</el-button>
+        <el-button @click="showCreateRemoteFolderDialog = false">取消</el-button>
         <el-button type="primary" @click="createRemoteFolder">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 新建远程文件对话框 -->
+    <el-dialog v-model="showCreateRemoteFileDialog" title="新建远程文件" width="400px">
+      <el-input v-model="newRemoteFileName" placeholder="输入文件名称" @keyup.enter="createRemoteFile" />
+      <template #footer>
+        <el-button @click="showCreateRemoteFileDialog = false">取消</el-button>
+        <el-button type="primary" @click="createRemoteFile">创建</el-button>
       </template>
     </el-dialog>
 
@@ -268,6 +291,80 @@
         <el-button type="primary" @click="confirmRename">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 移动文件对话框 -->
+    <el-dialog v-model="showMoveDialog" title="移动文件/文件夹" width="500px">
+      <div style="margin-bottom: 12px;">
+        <strong>源文件：</strong> {{ movingFile?.name }}
+      </div>
+      <el-input v-model="moveTargetPath" placeholder="输入目标路径" />
+      <template #footer>
+        <el-button @click="showMoveDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmMove">移动</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 复制文件对话框 -->
+    <el-dialog v-model="showCopyDialog" title="复制文件/文件夹" width="500px">
+      <div style="margin-bottom: 12px;">
+        <strong>源文件：</strong> {{ copyingFile?.name }}
+      </div>
+      <el-input v-model="copyTargetPath" placeholder="输入目标路径" />
+      <template #footer>
+        <el-button @click="showCopyDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmCopy">复制</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 权限编辑对话框 -->
+    <el-dialog v-model="showPermissionsDialog" title="修改权限" width="450px">
+      <div style="margin-bottom: 16px;">
+        <strong>文件：</strong> {{ editingPermissions?.name }}
+      </div>
+
+      <div class="permissions-editor">
+        <!-- 所有者权限 -->
+        <div class="permission-group">
+          <h4>所有者 (Owner)</h4>
+          <div class="permission-checkboxes">
+            <el-checkbox v-model="permissionBits.ownerRead">读取 (r)</el-checkbox>
+            <el-checkbox v-model="permissionBits.ownerWrite">写入 (w)</el-checkbox>
+            <el-checkbox v-model="permissionBits.ownerExecute">执行 (x)</el-checkbox>
+          </div>
+        </div>
+
+        <!-- 组权限 -->
+        <div class="permission-group">
+          <h4>组 (Group)</h4>
+          <div class="permission-checkboxes">
+            <el-checkbox v-model="permissionBits.groupRead">读取 (r)</el-checkbox>
+            <el-checkbox v-model="permissionBits.groupWrite">写入 (w)</el-checkbox>
+            <el-checkbox v-model="permissionBits.groupExecute">执行 (x)</el-checkbox>
+          </div>
+        </div>
+
+        <!-- 其他用户权限 -->
+        <div class="permission-group">
+          <h4>其他 (Others)</h4>
+          <div class="permission-checkboxes">
+            <el-checkbox v-model="permissionBits.otherRead">读取 (r)</el-checkbox>
+            <el-checkbox v-model="permissionBits.otherWrite">写入 (w)</el-checkbox>
+            <el-checkbox v-model="permissionBits.otherExecute">执行 (x)</el-checkbox>
+          </div>
+        </div>
+
+        <!-- 八进制表示 -->
+        <div class="permission-octal">
+          <strong>八进制表示：</strong>
+          <span class="octal-value">{{ computedOctalPermission }}</span>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="showPermissionsDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmPermissions">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -276,7 +373,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Connection, FolderOpened, Back, FolderAdd,
-  Upload, Download, Refresh, Folder, Document, Link
+  Upload, Download, Refresh, Folder, Document, Link, ArrowDown
 } from '@element-plus/icons-vue'
 import type { SessionConfig } from '@/types/session'
 
@@ -324,11 +421,38 @@ const loadingRemote = ref(false)
 const transfers = ref<Transfer[]>([])
 
 // 对话框
-const showCreateRemoteDialog = ref(false)
+const showCreateRemoteFolderDialog = ref(false)
+const showCreateRemoteFileDialog = ref(false)
 const showRenameDialog = ref(false)
 const newRemoteFolderName = ref('')
+const newRemoteFileName = ref('')
 const renameValue = ref('')
 const renamingFile = ref<{ file: FileInfo; isRemote: boolean } | null>(null)
+
+// 移动文件相关
+const showMoveDialog = ref(false)
+const movingFile = ref<FileInfo | null>(null)
+const moveTargetPath = ref('')
+
+// 复制文件相关
+const showCopyDialog = ref(false)
+const copyingFile = ref<FileInfo | null>(null)
+const copyTargetPath = ref('')
+
+// 权限编辑相关
+const showPermissionsDialog = ref(false)
+const editingPermissions = ref<FileInfo | null>(null)
+const permissionBits = ref({
+  ownerRead: false,
+  ownerWrite: false,
+  ownerExecute: false,
+  groupRead: false,
+  groupWrite: false,
+  groupExecute: false,
+  otherRead: false,
+  otherWrite: false,
+  otherExecute: false
+})
 
 const canGoBackLocal = computed(() => {
   if (!localPath.value) return false
@@ -342,6 +466,20 @@ const canGoBackRemote = computed(() => {
 
 const activeTransfers = computed(() => {
   return transfers.value.filter(t => t.status === 'active' || t.status === 'pending').length
+})
+
+// 计算八进制权限值
+const computedOctalPermission = computed(() => {
+  const owner = (permissionBits.value.ownerRead ? 4 : 0) +
+                (permissionBits.value.ownerWrite ? 2 : 0) +
+                (permissionBits.value.ownerExecute ? 1 : 0)
+  const group = (permissionBits.value.groupRead ? 4 : 0) +
+                (permissionBits.value.groupWrite ? 2 : 0) +
+                (permissionBits.value.groupExecute ? 1 : 0)
+  const other = (permissionBits.value.otherRead ? 4 : 0) +
+                (permissionBits.value.otherWrite ? 2 : 0) +
+                (permissionBits.value.otherExecute ? 1 : 0)
+  return `${owner}${group}${other}`
 })
 
 onMounted(async () => {
@@ -653,15 +791,45 @@ const refreshRemoteDirectory = () => {
 
 const createRemoteFolder = async () => {
   if (!newRemoteFolderName.value.trim() || !currentSession.value) return
-  
+
   try {
     const newPath = `${remotePath.value}/${newRemoteFolderName.value}`.replace(/\/+/g, '/')
     const result = await window.electronAPI.sftp.createDirectory(currentSession.value.id, newPath)
-    
+
     if (result.success) {
       ElMessage.success('文件夹创建成功')
-      showCreateRemoteDialog.value = false
+      showCreateRemoteFolderDialog.value = false
       newRemoteFolderName.value = ''
+      await loadRemoteDirectory()
+    } else {
+      ElMessage.error(`创建失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    ElMessage.error(`创建失败: ${error.message}`)
+  }
+}
+
+// 处理新建命令
+const handleCreateCommand = (command: string) => {
+  if (command === 'folder') {
+    showCreateRemoteFolderDialog.value = true
+  } else if (command === 'file') {
+    showCreateRemoteFileDialog.value = true
+  }
+}
+
+// 新建远程文件
+const createRemoteFile = async () => {
+  if (!newRemoteFileName.value.trim() || !currentSession.value) return
+
+  try {
+    const newPath = `${remotePath.value}/${newRemoteFileName.value}`.replace(/\/+/g, '/')
+    const result = await window.electronAPI.sftp.createFile(currentSession.value.id, newPath)
+
+    if (result.success) {
+      ElMessage.success('文件创建成功')
+      showCreateRemoteFileDialog.value = false
+      newRemoteFileName.value = ''
       await loadRemoteDirectory()
     } else {
       ElMessage.error(`创建失败: ${result.error}`)
@@ -684,24 +852,30 @@ const handleRemoteDoubleClick = (row: FileInfo) => {
 
 const handleRemoteContextMenu = async (row: FileInfo, column: any, event: MouseEvent) => {
   event.preventDefault()
-  
+
   if (!currentSession.value) return
-  
+
   const menuItems = row.type === 'directory'
     ? [
         { label: '打开', action: 'open' },
         { label: '重命名', action: 'rename' },
+        { label: '移动', action: 'move' },
+        { label: '复制', action: 'copy' },
+        { label: '权限', action: 'permissions' },
         { label: '删除', action: 'delete' }
       ]
     : [
         { label: '下载', action: 'download' },
         { label: '重命名', action: 'rename' },
+        { label: '移动', action: 'move' },
+        { label: '复制', action: 'copy' },
+        { label: '权限', action: 'permissions' },
         { label: '删除', action: 'delete' }
       ]
-  
+
   try {
     const result = await window.electronAPI.dialog.showContextMenu(menuItems)
-    
+
     if (result === 'open' && row.type === 'directory') {
       remotePath.value = row.path
       await loadRemoteDirectory()
@@ -712,6 +886,30 @@ const handleRemoteContextMenu = async (row: FileInfo, column: any, event: MouseE
       renamingFile.value = { file: row, isRemote: true }
       renameValue.value = row.name
       showRenameDialog.value = true
+    } else if (result === 'move') {
+      movingFile.value = row
+      moveTargetPath.value = remotePath.value
+      showMoveDialog.value = true
+    } else if (result === 'copy') {
+      copyingFile.value = row
+      copyTargetPath.value = remotePath.value
+      showCopyDialog.value = true
+    } else if (result === 'permissions') {
+      editingPermissions.value = row
+      // 将八进制权限转换为复选框状态
+      const perms = row.permissions || 0o644
+      permissionBits.value = {
+        ownerRead: !!(perms & 0o400),
+        ownerWrite: !!(perms & 0o200),
+        ownerExecute: !!(perms & 0o100),
+        groupRead: !!(perms & 0o040),
+        groupWrite: !!(perms & 0o020),
+        groupExecute: !!(perms & 0o010),
+        otherRead: !!(perms & 0o004),
+        otherWrite: !!(perms & 0o002),
+        otherExecute: !!(perms & 0o001)
+      }
+      showPermissionsDialog.value = true
     } else if (result === 'delete') {
       await deleteRemoteFile(row)
     }
@@ -787,6 +985,106 @@ const confirmRename = async () => {
     renameValue.value = ''
   } catch (error: any) {
     ElMessage.error(`重命名失败: ${error.message}`)
+  }
+}
+
+// 移动文件
+const confirmMove = async () => {
+  if (!moveTargetPath.value.trim() || !movingFile.value || !currentSession.value) return
+
+  try {
+    const sourcePath = movingFile.value.path
+    const targetPath = moveTargetPath.value.endsWith('/')
+      ? moveTargetPath.value + movingFile.value.name
+      : moveTargetPath.value + '/' + movingFile.value.name
+
+    const result = await window.electronAPI.sftp.renameFile(
+      currentSession.value.id,
+      sourcePath,
+      targetPath
+    )
+
+    if (result.success) {
+      ElMessage.success('移动成功')
+      await loadRemoteDirectory()
+      showMoveDialog.value = false
+      movingFile.value = null
+    } else {
+      ElMessage.error(`移动失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    ElMessage.error(`移动失败: ${error.message}`)
+  }
+}
+
+// 复制文件
+const confirmCopy = async () => {
+  if (!copyTargetPath.value.trim() || !copyingFile.value || !currentSession.value) return
+
+  try {
+    const sourcePath = copyingFile.value.path
+    const targetPath = copyTargetPath.value.endsWith('/')
+      ? copyTargetPath.value + copyingFile.value.name
+      : copyTargetPath.value + '/' + copyingFile.value.name
+
+    ElMessage.info('正在复制文件...')
+
+    // 使用 SFTP 的复制功能（通过读取和写入实现）
+    const result = await window.electronAPI.sftp.copyFile(
+      currentSession.value.id,
+      sourcePath,
+      targetPath
+    )
+
+    if (result.success) {
+      ElMessage.success('复制成功')
+      await loadRemoteDirectory()
+      showCopyDialog.value = false
+      copyingFile.value = null
+    } else {
+      ElMessage.error(`复制失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    ElMessage.error(`复制失败: ${error.message}`)
+  }
+}
+
+// 修改权限
+const confirmPermissions = async () => {
+  if (!editingPermissions.value || !currentSession.value) return
+
+  try {
+    const filePath = editingPermissions.value.path
+
+    // 从复选框计算权限值
+    const owner = (permissionBits.value.ownerRead ? 4 : 0) +
+                  (permissionBits.value.ownerWrite ? 2 : 0) +
+                  (permissionBits.value.ownerExecute ? 1 : 0)
+    const group = (permissionBits.value.groupRead ? 4 : 0) +
+                  (permissionBits.value.groupWrite ? 2 : 0) +
+                  (permissionBits.value.groupExecute ? 1 : 0)
+    const other = (permissionBits.value.otherRead ? 4 : 0) +
+                  (permissionBits.value.otherWrite ? 2 : 0) +
+                  (permissionBits.value.otherExecute ? 1 : 0)
+
+    const mode = parseInt(`${owner}${group}${other}`, 8)
+
+    const result = await window.electronAPI.sftp.chmod(
+      currentSession.value.id,
+      filePath,
+      mode
+    )
+
+    if (result.success) {
+      ElMessage.success('权限修改成功')
+      await loadRemoteDirectory()
+      showPermissionsDialog.value = false
+      editingPermissions.value = null
+    } else {
+      ElMessage.error(`权限修改失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    ElMessage.error(`权限修改失败: ${error.message}`)
   }
 }
 
@@ -1001,7 +1299,7 @@ const formatSpeed = (speed: number) => {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  background: #2d2d2d;
+  background: var(--bg-secondary);
   border-bottom: 1px solid #3e3e3e;
 }
 
@@ -1015,7 +1313,7 @@ const formatSpeed = (speed: number) => {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: #cccccc;
+  color: var(--text-secondary);
 }
 
 .drive-selector {
@@ -1031,7 +1329,7 @@ const formatSpeed = (speed: number) => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: #1e1e1e;
+  background: var(--bg-main);
   border: 1px solid #007acc;
   border-radius: 4px;
 }
@@ -1092,7 +1390,7 @@ const formatSpeed = (speed: number) => {
 }
 
 .connected-icon {
-  color: #0dbc79;
+  color: var(--success-color);
   font-size: 16px;
 }
 
@@ -1104,7 +1402,7 @@ const formatSpeed = (speed: number) => {
 
 .session-host {
   font-size: 11px;
-  color: #999;
+  color: var(--text-tertiary);
 }
 
 /* Central Control Strip */
@@ -1296,5 +1594,48 @@ const formatSpeed = (speed: number) => {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
 }
+
+/* 权限编辑器样式 */
+.permissions-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.permission-group {
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+}
+
+.permission-group h4 {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.permission-checkboxes {
+  display: flex;
+  gap: 16px;
+}
+
+.permission-octal {
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-medium);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.octal-value {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--primary-color);
+}
 </style>
-```

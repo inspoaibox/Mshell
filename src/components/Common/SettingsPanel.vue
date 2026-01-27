@@ -847,6 +847,11 @@ const checkForUpdates = async () => {
   height: 100%;
 }
 
+.settings-tabs :deep(.el-tabs__header) {
+  padding-left: var(--spacing-xl);
+  margin: 0;
+}
+
 .settings-tabs :deep(.el-tabs__content) {
   height: calc(100% - 55px);
   overflow-y: auto;

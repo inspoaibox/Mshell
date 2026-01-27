@@ -291,6 +291,14 @@ const applyTheme = (theme: 'light' | 'dark' | 'auto') => {
     root.classList.remove('dark')
     root.classList.add('light-theme')
   }
+
+  // 自动切换终端主题以匹配应用主题
+  // 只有当终端主题是默认的 dark/light 时才自动切换
+  // 如果用户选择了其他主题（如 monokai, dracula），则保持不变
+  const currentTerminalTheme = terminalOptions.value.theme
+  if (currentTerminalTheme === 'dark' || currentTerminalTheme === 'light') {
+    terminalOptions.value.theme = isDark ? 'dark' : 'light'
+  }
 }
 
 const handleMenuSelect = (index: string) => {

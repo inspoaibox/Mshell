@@ -149,6 +149,14 @@ function createWindow() {
     mainWindow?.show()
   })
 
+  // Handle external links
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https:') || url.startsWith('http:')) {
+      require('electron').shell.openExternal(url)
+    }
+    return { action: 'deny' }
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })

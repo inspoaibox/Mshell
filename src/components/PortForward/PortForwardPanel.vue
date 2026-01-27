@@ -392,14 +392,14 @@ const getStatusTagType = (status: string) => {
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: var(--bg-main);
+  color: var(--text-primary);
 }
 
 .panel-header {
   padding: 16px;
-  background: #2d2d2d;
-  border-bottom: 1px solid #3e3e3e;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -418,26 +418,26 @@ const getStatusTagType = (status: string) => {
 }
 
 .text-muted {
-  color: #858585;
+  color: var(--text-tertiary);
   font-style: italic;
 }
 
 .form-help {
   margin-top: 8px;
   font-size: 12px;
-  color: #858585;
+  color: var(--text-tertiary);
   line-height: 1.5;
 }
 
 :deep(.el-table) {
   background: transparent;
-  color: #d4d4d4;
+  color: var(--text-primary);
 }
 
 :deep(.el-table th.el-table__cell) {
-  background: #2d2d2d;
-  color: #cccccc;
-  border-bottom: 1px solid #3e3e3e;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
 }
 
 :deep(.el-table tr) {
@@ -445,10 +445,10 @@ const getStatusTagType = (status: string) => {
 }
 
 :deep(.el-table td.el-table__cell) {
-  border-bottom: 1px solid #3e3e3e;
+  border-bottom: 1px solid var(--border-light);
 }
 
 :deep(.el-table__body tr:hover > td) {
-  background: #2a2d2e !important;
+  background: var(--bg-hover) !important;
 }
 </style>

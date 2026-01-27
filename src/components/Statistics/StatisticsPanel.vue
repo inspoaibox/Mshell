@@ -172,14 +172,6 @@ const maxUsage = computed(() => {
 // ... totals
 
 const detectProvider = (session: SessionConfig): string => {
-  // 1. Explicit provider field
-  if (session.provider && session.provider.trim()) {
-    return session.provider
-  }
-  
-  // 2. Infer from Name or Host
-  const text = `${session.name || ''} ${session.host || ''}`.toLowerCase()
-  
   const keywords: Record<string, string[]> = {
     '阿里云 (Aliyun)': ['aliyun', '阿里云', 'ali'],
     '腾讯云 (Tencent)': ['tencent', 'qcloud', '腾讯云'],
@@ -198,14 +190,26 @@ const detectProvider = (session: SessionConfig): string => {
     'RackNerd': ['racknerd', 'rn'],
     'CloudCone': ['cloudcone', 'cc']
   }
-  
-  for (const [provider, keys] of Object.entries(keywords)) {
-    if (keys.some(k => text.includes(k))) {
-      return provider
+
+  // helper to check against keywords
+  const findCanonical = (str: string): string | null => {
+    const lower = str.toLowerCase()
+    for (const [provider, keys] of Object.entries(keywords)) {
+      if (keys.some(k => lower.includes(k))) {
+        return provider
+      }
     }
+    return null
+  }
+
+  // 1. Explicit provider field - Strictly use user input
+  if (session.provider && session.provider.trim()) {
+    return session.provider
   }
   
-  return '未分类'
+  // 2. Infer from Name or Host if provider is empty
+  const text = `${session.name || ''} ${session.host || ''}`
+  return findCanonical(text) || '未分类'
 }
 
 const getMonthlyCost = (session: SessionConfig): number => {

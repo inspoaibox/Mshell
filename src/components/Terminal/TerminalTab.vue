@@ -9,6 +9,28 @@
         <span class="status-text">{{ connectionStatus }}</span>
       </div>
       <div class="header-actions">
+        <el-tooltip content="主题" placement="bottom">
+          <el-dropdown @command="handleThemeChange" trigger="click">
+            <el-button
+              type="primary"
+              link
+              :icon="Brush"
+              class="action-btn"
+            />
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  v-for="(theme, key) in availableThemes"
+                  :key="key"
+                  :command="key"
+                  :class="{ 'is-active': currentTheme === key }"
+                >
+                  {{ theme.name }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </el-tooltip>
         <el-tooltip content="Snippets" placement="bottom">
           <el-button
             type="primary"
@@ -179,10 +201,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Close, Loading, Search, Document } from '@element-plus/icons-vue'
+import { Close, Loading, Search, Document, Brush } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TerminalView from './TerminalView.vue'
 import TerminalSearch from './TerminalSearch.vue'
+import { themes } from '@/utils/terminal-themes'
 import type { SessionConfig as BaseSessionConfig } from '@/types/session'
 
 // Extend base config if needed, or simply alias it
@@ -226,6 +249,10 @@ const filterTags = ref<string[]>([])
 const snippets = ref<CommandSnippet[]>([])
 const selectedSnippet = ref<CommandSnippet | null>(null)
 const variableValues = ref<Record<string, string>>({})
+
+// 主题相关
+const availableThemes = themes
+const currentTheme = computed(() => props.terminalOptions?.theme || 'dark')
 
 const filteredSnippets = computed(() => {
   let result = snippets.value
@@ -344,6 +371,26 @@ onUnmounted(async () => {
 
 const handleClose = () => {
   emit('close', props.connectionId)
+}
+
+const handleThemeChange = async (themeName: string) => {
+  try {
+    // 更新终端选项中的主题
+    if (props.terminalOptions) {
+      props.terminalOptions.theme = themeName
+    }
+
+    // 保存到设置中
+    await window.electronAPI.settings.update({
+      terminal: {
+        theme: themeName
+      }
+    })
+
+    ElMessage.success(`主题已切换到 ${themes[themeName].name}`)
+  } catch (error: any) {
+    ElMessage.error(`切换主题失败: ${error.message}`)
+  }
 }
 
 const handleSearch = (term: string, options: { caseSensitive: boolean; regex: boolean }) => {
@@ -493,7 +540,7 @@ defineExpose({
 }
 
 .glass-header {
-  background: rgba(30, 41, 59, 0.95);
+  background: var(--bg-secondary);
   backdrop-filter: blur(10px);
 }
 
@@ -752,14 +799,21 @@ defineExpose({
 .snippet-command {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  color: var(--success-color);
-  background: rgba(0, 0, 0, 0.3);
+  color: #2563eb;
+  background: var(--bg-tertiary);
   padding: 6px 8px;
   border-radius: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   margin-bottom: 8px;
+  border: 1px solid var(--border-medium);
+  font-weight: 500;
+}
+
+/* 深色模式下的代码颜色 */
+:global(.dark) .snippet-command {
+  color: #60a5fa;
 }
 
 .snippet-tags {
@@ -814,5 +868,18 @@ defineExpose({
   color: var(--success-color);
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* 主题切换下拉菜单样式 */
+.el-dropdown-menu__item.is-active {
+  color: var(--primary-color);
+  font-weight: 600;
+  background: rgba(14, 165, 233, 0.1);
+}
+
+.el-dropdown-menu__item.is-active::before {
+  content: '✓';
+  margin-right: 8px;
+  color: var(--primary-color);
 }
 </style>

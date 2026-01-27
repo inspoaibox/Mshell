@@ -775,11 +775,12 @@ const resetForm = () => {
 }
 
 .command-block {
-  background: var(--bg-secondary);
+  background: var(--bg-tertiary);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-md);
   padding: var(--spacing-lg);
   overflow-x: auto;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .command-block pre {
@@ -789,10 +790,16 @@ const resetForm = () => {
 .command-block code {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  color: var(--text-primary);
+  color: #2563eb;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-all;
+  font-weight: 500;
+}
+
+/* 深色模式下的代码颜色 */
+:global(.dark) .command-block code {
+  color: #60a5fa;
 }
 
 .variables-list,
@@ -885,15 +892,23 @@ const resetForm = () => {
 
 .command-preview {
   padding: var(--spacing-md);
-  background: var(--bg-main);
+  background: var(--bg-tertiary);
   border-radius: var(--radius-sm);
+  border: 1px solid var(--border-medium);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .command-preview code {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  color: var(--text-primary);
+  color: #2563eb;
   word-break: break-all;
+  font-weight: 500;
+}
+
+/* 深色模式下的代码颜色 */
+:global(.dark) .command-preview code {
+  color: #60a5fa;
 }
 
 /* 响应式 */

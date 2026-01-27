@@ -86,7 +86,11 @@ onMounted(() => {
   searchAddon = new SearchAddon()
   terminal.loadAddon(searchAddon)
 
-  webLinksAddon = new WebLinksAddon()
+  webLinksAddon = new WebLinksAddon((event, uri) => {
+    event.preventDefault()
+    // Open in default external browser
+    window.open(uri, '_blank')
+  })
   terminal.loadAddon(webLinksAddon)
 
   // Try to load WebGL renderer with fallback
