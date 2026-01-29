@@ -17,6 +17,7 @@ export interface SessionConfig {
   passphrase?: string
   portForwards?: any[]
   color?: string
+  sortOrder?: number // 用于拖拽排序
   // 服务器管理字段
   provider?: string // 提供商
   region?: string // 地区
@@ -252,6 +253,50 @@ export class SessionManager {
    */
   getAllSessions(): SessionConfig[] {
     return Array.from(this.sessions.values())
+  }
+
+  /**
+   * 搜索会话
+   */
+  searchSessions(query: string): SessionConfig[] {
+    if (!query || query.trim() === '') {
+      return this.getAllSessions()
+    }
+
+    const lowerQuery = query.toLowerCase().trim()
+    return Array.from(this.sessions.values()).filter(session => {
+      // 搜索名称
+      if (session.name.toLowerCase().includes(lowerQuery)) {
+        return true
+      }
+      
+      // 搜索主机
+      if (session.host.toLowerCase().includes(lowerQuery)) {
+        return true
+      }
+      
+      // 搜索用户名
+      if (session.username.toLowerCase().includes(lowerQuery)) {
+        return true
+      }
+      
+      // 搜索提供商
+      if (session.provider && session.provider.toLowerCase().includes(lowerQuery)) {
+        return true
+      }
+      
+      // 搜索地区
+      if (session.region && session.region.toLowerCase().includes(lowerQuery)) {
+        return true
+      }
+      
+      // 搜索备注
+      if (session.notes && session.notes.toLowerCase().includes(lowerQuery)) {
+        return true
+      }
+      
+      return false
+    })
   }
 
   /**

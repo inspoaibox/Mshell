@@ -8,24 +8,46 @@ contextBridge.exposeInMainWorld('electronAPI', {
     connect: (id: string, options: any) => ipcRenderer.invoke('ssh:connect', id, options),
     disconnect: (id: string) => ipcRenderer.invoke('ssh:disconnect', id),
     write: (id: string, data: string) => ipcRenderer.send('ssh:write', id, data),
+    executeCommand: (id: string, command: string, timeout?: number) =>
+      ipcRenderer.invoke('ssh:executeCommand', id, command, timeout),
     resize: (id: string, cols: number, rows: number) =>
       ipcRenderer.send('ssh:resize', id, cols, rows),
     getConnection: (id: string) => ipcRenderer.invoke('ssh:getConnection', id),
     getAllConnections: () => ipcRenderer.invoke('ssh:getAllConnections'),
+    cancelReconnect: (id: string) => ipcRenderer.invoke('ssh:cancelReconnect', id),
+    setReconnectConfig: (id: string, maxAttempts: number, interval: number) =>
+      ipcRenderer.invoke('ssh:setReconnectConfig', id, maxAttempts, interval),
+    // 返回取消订阅函数，防止内存泄漏
     onData: (callback: (id: string, data: string) => void) => {
       ipcRenderer.on('ssh:data', (_event, id, data) => callback(id, data))
+      return () => { } // No-op for now to test stability
     },
     onError: (callback: (id: string, error: string) => void) => {
       ipcRenderer.on('ssh:error', (_event, id, error) => callback(id, error))
+      return () => { }
     },
     onClose: (callback: (id: string) => void) => {
       ipcRenderer.on('ssh:close', (_event, id) => callback(id))
+      return () => { }
+    },
+    onReconnecting: (callback: (id: string, attempt: number, maxAttempts: number) => void) => {
+      ipcRenderer.on('ssh:reconnecting', (_event, id, attempt, maxAttempts) => callback(id, attempt, maxAttempts))
+      return () => { }
+    },
+    onReconnected: (callback: (id: string) => void) => {
+      ipcRenderer.on('ssh:reconnected', (_event, id) => callback(id))
+      return () => { }
+    },
+    onReconnectFailed: (callback: (id: string, reason: string) => void) => {
+      ipcRenderer.on('ssh:reconnect-failed', (_event, id, reason) => callback(id, reason))
+      return () => { }
     }
   },
 
   // Session operations
   session: {
     getAll: () => ipcRenderer.invoke('session:getAll'),
+    search: (query: string) => ipcRenderer.invoke('session:search', query),
     get: (id: string) => ipcRenderer.invoke('session:get', id),
     create: (config: any) => ipcRenderer.invoke('session:create', config),
     update: (id: string, updates: any) => ipcRenderer.invoke('session:update', id, updates),
@@ -58,6 +80,40 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('sftp:changePermissions', connectionId, path, mode),
     getAllTasks: () => ipcRenderer.invoke('sftp:getAllTasks'),
     cancelTask: (taskId: string) => ipcRenderer.invoke('sftp:cancelTask', taskId),
+    uploadFiles: (connectionId: string, files: Array<{ localPath: string; remotePath: string }>) =>
+      ipcRenderer.invoke('sftp:uploadFiles', connectionId, files),
+    downloadFiles: (connectionId: string, files: Array<{ remotePath: string; localPath: string }>) =>
+      ipcRenderer.invoke('sftp:downloadFiles', connectionId, files),
+    deleteFiles: (connectionId: string, filePaths: string[]) =>
+      ipcRenderer.invoke('sftp:deleteFiles', connectionId, filePaths),
+    deleteDirectories: (connectionId: string, dirPaths: string[]) =>
+      ipcRenderer.invoke('sftp:deleteDirectories', connectionId, dirPaths),
+    pauseTransfer: (taskId: string) =>
+      ipcRenderer.invoke('sftp:pauseTransfer', taskId),
+    resumeTransfer: (connectionId: string, taskId: string) =>
+      ipcRenderer.invoke('sftp:resumeTransfer', connectionId, taskId),
+    getIncompleteTransfers: (connectionId?: string) =>
+      ipcRenderer.invoke('sftp:getIncompleteTransfers', connectionId),
+    getTransferRecord: (taskId: string) =>
+      ipcRenderer.invoke('sftp:getTransferRecord', taskId),
+    getAllTransferRecords: () =>
+      ipcRenderer.invoke('sftp:getAllTransferRecords'),
+    deleteTransferRecord: (taskId: string) =>
+      ipcRenderer.invoke('sftp:deleteTransferRecord', taskId),
+    cleanupCompletedRecords: () =>
+      ipcRenderer.invoke('sftp:cleanupCompletedRecords'),
+    readFile: (connectionId: string, filePath: string) =>
+      ipcRenderer.invoke('sftp:readFile', connectionId, filePath),
+    readFileBuffer: (connectionId: string, filePath: string) =>
+      ipcRenderer.invoke('sftp:readFileBuffer', connectionId, filePath),
+    writeFile: (connectionId: string, filePath: string, content: string) =>
+      ipcRenderer.invoke('sftp:writeFile', connectionId, filePath, content),
+    createFile: (connectionId: string, filePath: string) =>
+      ipcRenderer.invoke('sftp:createFile', connectionId, filePath),
+    copyFile: (connectionId: string, sourcePath: string, targetPath: string) =>
+      ipcRenderer.invoke('sftp:copyFile', connectionId, sourcePath, targetPath),
+    chmod: (connectionId: string, path: string, mode: number) =>
+      ipcRenderer.invoke('sftp:chmod', connectionId, path, mode),
     onProgress: (callback: (taskId: string, progress: any) => void) => {
       ipcRenderer.on('sftp:progress', (_event, taskId, progress) => callback(taskId, progress))
     },
@@ -128,7 +184,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stop: (connectionId: string, forwardId: string) =>
       ipcRenderer.invoke('portForward:stop', connectionId, forwardId),
     delete: (connectionId: string, forwardId: string) =>
-      ipcRenderer.invoke('portForward:delete', connectionId, forwardId)
+      ipcRenderer.invoke('portForward:delete', connectionId, forwardId),
+    update: (forwardId: string, updates: any) =>
+      ipcRenderer.invoke('portForward:update', forwardId, updates),
+    getTrafficStats: (forwardId: string) =>
+      ipcRenderer.invoke('portForward:getTrafficStats', forwardId),
+    getAllTrafficStats: () =>
+      ipcRenderer.invoke('portForward:getAllTrafficStats'),
+    resetTrafficStats: (forwardId: string) =>
+      ipcRenderer.invoke('portForward:resetTrafficStats', forwardId),
+    createTemplate: (data: any) =>
+      ipcRenderer.invoke('portForward:createTemplate', data),
+    getAllTemplates: () =>
+      ipcRenderer.invoke('portForward:getAllTemplates'),
+    getTemplate: (id: string) =>
+      ipcRenderer.invoke('portForward:getTemplate', id),
+    updateTemplate: (id: string, updates: any) =>
+      ipcRenderer.invoke('portForward:updateTemplate', id, updates),
+    deleteTemplate: (id: string) =>
+      ipcRenderer.invoke('portForward:deleteTemplate', id),
+    getTemplatesByTag: (tag: string) =>
+      ipcRenderer.invoke('portForward:getTemplatesByTag', tag),
+    searchTemplates: (query: string) =>
+      ipcRenderer.invoke('portForward:searchTemplates', query),
+    createFromTemplate: (templateId: string, connectionId: string) =>
+      ipcRenderer.invoke('portForward:createFromTemplate', templateId, connectionId),
+    autoStart: (connectionId: string) =>
+      ipcRenderer.invoke('portForward:autoStart', connectionId)
   },
 
   // Snippet operations
@@ -141,8 +223,72 @@ contextBridge.exposeInMainWorld('electronAPI', {
     incrementUsage: (id: string) => ipcRenderer.invoke('snippet:incrementUsage', id),
     getByCategory: (category: string) => ipcRenderer.invoke('snippet:getByCategory', category),
     getByTag: (tag: string) => ipcRenderer.invoke('snippet:getByTag', tag),
+    search: (query: string) => ipcRenderer.invoke('snippet:search', query),
+    searchByShortcut: (prefix: string) => ipcRenderer.invoke('snippet:searchByShortcut', prefix),
+    getByShortcut: (shortcut: string) => ipcRenderer.invoke('snippet:getByShortcut', shortcut),
+    getAllWithShortcut: () => ipcRenderer.invoke('snippet:getAllWithShortcut'),
     export: (filePath: string) => ipcRenderer.invoke('snippet:export', filePath),
-    import: (filePath: string) => ipcRenderer.invoke('snippet:import', filePath)
+    import: (filePath: string) => ipcRenderer.invoke('snippet:import', filePath),
+    replaceVariables: (command: string, values: Record<string, string>) =>
+      ipcRenderer.invoke('snippet:replaceVariables', command, values),
+    extractVariables: (command: string) => ipcRenderer.invoke('snippet:extractVariables', command),
+    getPredefinedVariables: () => ipcRenderer.invoke('snippet:getPredefinedVariables')
+  },
+
+  // Command History operations
+  commandHistory: {
+    add: (data: any) => ipcRenderer.invoke('commandHistory:add', data),
+    getAll: (limit?: number) => ipcRenderer.invoke('commandHistory:getAll', limit),
+    getBySession: (sessionId: string) => ipcRenderer.invoke('commandHistory:getBySession', sessionId),
+    search: (query: string, sessionId?: string) => ipcRenderer.invoke('commandHistory:search', query, sessionId),
+    getFavorites: () => ipcRenderer.invoke('commandHistory:getFavorites'),
+    toggleFavorite: (id: string) => ipcRenderer.invoke('commandHistory:toggleFavorite', id),
+    getMostUsed: (limit?: number) => ipcRenderer.invoke('commandHistory:getMostUsed', limit),
+    getRecentUnique: (limit?: number) => ipcRenderer.invoke('commandHistory:getRecentUnique', limit),
+    getToday: () => ipcRenderer.invoke('commandHistory:getToday'),
+    getByTimeRange: (startDate: string, endDate: string) => ipcRenderer.invoke('commandHistory:getByTimeRange', startDate, endDate),
+    export: (filePath: string) => ipcRenderer.invoke('commandHistory:export', filePath),
+    clearSession: (sessionId: string) => ipcRenderer.invoke('commandHistory:clearSession', sessionId),
+    clearAll: (keepFavorites?: boolean) => ipcRenderer.invoke('commandHistory:clearAll', keepFavorites),
+    getStatistics: () => ipcRenderer.invoke('commandHistory:getStatistics'),
+    delete: (id: string) => ipcRenderer.invoke('commandHistory:delete', id)
+  },
+
+  // Connection Statistics operations
+  connectionStats: {
+    start: (sessionId: string, sessionName: string) => ipcRenderer.invoke('connectionStats:start', sessionId, sessionName),
+    end: (sessionId: string) => ipcRenderer.invoke('connectionStats:end', sessionId),
+    updateTraffic: (sessionId: string, bytesIn: number, bytesOut: number) => ipcRenderer.invoke('connectionStats:updateTraffic', sessionId, bytesIn, bytesOut),
+    incrementCommand: (sessionId: string) => ipcRenderer.invoke('connectionStats:incrementCommand', sessionId),
+    getBySession: (sessionId: string) => ipcRenderer.invoke('connectionStats:getBySession', sessionId),
+    getAll: () => ipcRenderer.invoke('connectionStats:getAll'),
+    getTotalDuration: (sessionId?: string) => ipcRenderer.invoke('connectionStats:getTotalDuration', sessionId),
+    getTotalTraffic: (sessionId?: string) => ipcRenderer.invoke('connectionStats:getTotalTraffic', sessionId),
+    getAverageDuration: (sessionId?: string) => ipcRenderer.invoke('connectionStats:getAverageDuration', sessionId),
+    getRecent: (limit?: number) => ipcRenderer.invoke('connectionStats:getRecent', limit),
+    getToday: () => ipcRenderer.invoke('connectionStats:getToday'),
+    getWeek: () => ipcRenderer.invoke('connectionStats:getWeek'),
+    getMonth: () => ipcRenderer.invoke('connectionStats:getMonth'),
+    getSummary: () => ipcRenderer.invoke('connectionStats:getSummary'),
+    cleanup: () => ipcRenderer.invoke('connectionStats:cleanup')
+  },
+
+  // Session Template operations
+  sessionTemplate: {
+    getAll: () => ipcRenderer.invoke('sessionTemplate:getAll'),
+    get: (id: string) => ipcRenderer.invoke('sessionTemplate:get', id),
+    create: (data: any) => ipcRenderer.invoke('sessionTemplate:create', data),
+    update: (id: string, updates: any) => ipcRenderer.invoke('sessionTemplate:update', id, updates),
+    delete: (id: string) => ipcRenderer.invoke('sessionTemplate:delete', id),
+    getByTag: (tag: string) => ipcRenderer.invoke('sessionTemplate:getByTag', tag),
+    getByProvider: (provider: string) => ipcRenderer.invoke('sessionTemplate:getByProvider', provider),
+    search: (query: string) => ipcRenderer.invoke('sessionTemplate:search', query),
+    getAllTags: () => ipcRenderer.invoke('sessionTemplate:getAllTags'),
+    getAllProviders: () => ipcRenderer.invoke('sessionTemplate:getAllProviders'),
+    createSession: (templateId: string, overrides?: any) => ipcRenderer.invoke('sessionTemplate:createSession', templateId, overrides),
+    export: (filePath: string, templateIds?: string[]) => ipcRenderer.invoke('sessionTemplate:export', filePath, templateIds),
+    import: (filePath: string) => ipcRenderer.invoke('sessionTemplate:import', filePath),
+    duplicate: (id: string, newName?: string) => ipcRenderer.invoke('sessionTemplate:duplicate', id, newName)
   },
 
   // Backup operations
@@ -169,6 +315,133 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App info
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion')
+  },
+
+  // Server Monitor operations
+  serverMonitor: {
+    start: (sessionId: string, config?: any) => ipcRenderer.invoke('serverMonitor:start', sessionId, config),
+    stop: (sessionId: string) => ipcRenderer.invoke('serverMonitor:stop', sessionId),
+    getMetrics: (sessionId: string) => ipcRenderer.invoke('serverMonitor:getMetrics', sessionId),
+    getMonitoredSessions: () => ipcRenderer.invoke('serverMonitor:getMonitoredSessions'),
+    updateConfig: (sessionId: string, config: any) => ipcRenderer.invoke('serverMonitor:updateConfig', sessionId, config),
+    onMetrics: (callback: (sessionId: string, metrics: any) => void) => {
+      ipcRenderer.on('serverMonitor:metrics', (_event, sessionId, metrics) => callback(sessionId, metrics))
+    },
+    onError: (callback: (sessionId: string, error: any) => void) => {
+      ipcRenderer.on('serverMonitor:error', (_event, sessionId, error) => callback(sessionId, error))
+    }
+  },
+
+  // SSH Key operations
+  sshKey: {
+    getAll: () => ipcRenderer.invoke('sshKey:getAll'),
+    get: (id: string) => ipcRenderer.invoke('sshKey:get', id),
+    generate: (options: any) => ipcRenderer.invoke('sshKey:generate', options),
+    add: (keyData: any) => ipcRenderer.invoke('sshKey:add', keyData),
+    import: (name: string, privateKeyPath: string, passphrase?: string) => ipcRenderer.invoke('sshKey:import', name, privateKeyPath, passphrase),
+    export: (id: string, exportPath: string) => ipcRenderer.invoke('sshKey:export', id, exportPath),
+    update: (id: string, updates: any) => ipcRenderer.invoke('sshKey:update', id, updates),
+    delete: (id: string) => ipcRenderer.invoke('sshKey:delete', id),
+    readPrivateKey: (id: string) => ipcRenderer.invoke('sshKey:readPrivateKey', id),
+    getStatistics: () => ipcRenderer.invoke('sshKey:getStatistics'),
+    selectPrivateKeyFile: () => ipcRenderer.invoke('sshKey:selectPrivateKeyFile'),
+    selectExportPath: (defaultName: string) => ipcRenderer.invoke('sshKey:selectExportPath', defaultName)
+  },
+
+  // Audit Log operations
+  auditLog: {
+    getAll: () => ipcRenderer.invoke('auditLog:getAll'),
+    get: (id: string) => ipcRenderer.invoke('auditLog:get', id),
+    query: (filter: any) => ipcRenderer.invoke('auditLog:filter', filter),
+    filter: (filter: any) => ipcRenderer.invoke('auditLog:filter', filter),
+    getByTimeRange: (startDate: string, endDate: string) => ipcRenderer.invoke('auditLog:getByTimeRange', startDate, endDate),
+    getByLevel: (level: string) => ipcRenderer.invoke('auditLog:getByLevel', level),
+    getByAction: (action: string) => ipcRenderer.invoke('auditLog:getByAction', action),
+    getBySession: (sessionId: string) => ipcRenderer.invoke('auditLog:getBySession', sessionId),
+    getBySuccess: (success: boolean) => ipcRenderer.invoke('auditLog:getBySuccess', success),
+    getStatistics: (startDate?: string, endDate?: string) => ipcRenderer.invoke('auditLog:getStatistics', startDate, endDate),
+    getToday: () => ipcRenderer.invoke('auditLog:getToday'),
+    getWeek: () => ipcRenderer.invoke('auditLog:getWeek'),
+    getMonth: () => ipcRenderer.invoke('auditLog:getMonth'),
+    export: (filter?: any) => ipcRenderer.invoke('auditLog:export', filter),
+    exportToCSV: (filter?: any) => ipcRenderer.invoke('auditLog:exportToCSV', filter),
+    clear: () => ipcRenderer.invoke('auditLog:clearAll'),
+    clearAll: () => ipcRenderer.invoke('auditLog:clearAll'),
+    delete: (id: string) => ipcRenderer.invoke('auditLog:delete', id)
+  },
+
+  // Session Lock operations
+  sessionLock: {
+    getConfig: () => ipcRenderer.invoke('sessionLock:getConfig'),
+    updateConfig: (updates: any) => ipcRenderer.invoke('sessionLock:updateConfig', updates),
+    setPassword: (password: string) => ipcRenderer.invoke('sessionLock:setPassword', password),
+    verifyPassword: (password: string) => ipcRenderer.invoke('sessionLock:verifyPassword', password),
+    hasPassword: () => ipcRenderer.invoke('sessionLock:hasPassword'),
+    removePassword: () => ipcRenderer.invoke('sessionLock:removePassword'),
+    lock: () => ipcRenderer.invoke('sessionLock:lock'),
+    unlock: (password?: string) => ipcRenderer.invoke('sessionLock:unlock', password),
+    isLocked: () => ipcRenderer.invoke('sessionLock:isLocked'),
+    updateActivity: () => ipcRenderer.invoke('sessionLock:updateActivity'),
+    getStatus: () => ipcRenderer.invoke('sessionLock:getStatus'),
+    onLocked: (callback: () => void) => {
+      ipcRenderer.on('session:locked', callback)
+    },
+    onUnlocked: (callback: () => void) => {
+      ipcRenderer.on('session:unlocked', callback)
+    }
+  },
+
+  // Task Scheduler operations
+  taskScheduler: {
+    getAll: () => ipcRenderer.invoke('taskScheduler:getAll'),
+    get: (id: string) => ipcRenderer.invoke('taskScheduler:get', id),
+    create: (data: any) => ipcRenderer.invoke('taskScheduler:create', data),
+    update: (id: string, updates: any) => ipcRenderer.invoke('taskScheduler:update', id, updates),
+    delete: (id: string) => ipcRenderer.invoke('taskScheduler:delete', id),
+    enable: (id: string) => ipcRenderer.invoke('taskScheduler:enable', id),
+    disable: (id: string) => ipcRenderer.invoke('taskScheduler:disable', id),
+    execute: (id: string) => ipcRenderer.invoke('taskScheduler:execute', id),
+    getExecutions: (taskId: string, limit?: number) => ipcRenderer.invoke('taskScheduler:getExecutions', taskId, limit),
+    getAllExecutions: () => ipcRenderer.invoke('taskScheduler:getAllExecutions'),
+    clearExecutions: (taskId: string) => ipcRenderer.invoke('taskScheduler:clearExecutions', taskId),
+    search: (query: string) => ipcRenderer.invoke('taskScheduler:search', query),
+    getByTag: (tag: string) => ipcRenderer.invoke('taskScheduler:getByTag', tag),
+    getStatistics: () => ipcRenderer.invoke('taskScheduler:getStatistics'),
+    onTaskStarted: (callback: (data: any) => void) => {
+      ipcRenderer.on('taskScheduler:task-started', (_event, data) => callback(data))
+    },
+    onTaskCompleted: (callback: (data: any) => void) => {
+      ipcRenderer.on('taskScheduler:task-completed', (_event, data) => callback(data))
+    },
+    onTaskFailed: (callback: (data: any) => void) => {
+      ipcRenderer.on('taskScheduler:task-failed', (_event, data) => callback(data))
+    },
+    onTaskNotify: (callback: (data: any) => void) => {
+      ipcRenderer.on('taskScheduler:task-notify', (_event, data) => callback(data))
+    }
+  },
+
+  // Workflow operations
+  workflow: {
+    getAll: () => ipcRenderer.invoke('workflow:getAll'),
+    get: (id: string) => ipcRenderer.invoke('workflow:get', id),
+    create: (data: any) => ipcRenderer.invoke('workflow:create', data),
+    update: (id: string, updates: any) => ipcRenderer.invoke('workflow:update', id, updates),
+    delete: (id: string) => ipcRenderer.invoke('workflow:delete', id),
+    execute: (id: string, variables?: any) => ipcRenderer.invoke('workflow:execute', id, variables),
+    getExecutions: (workflowId: string, limit?: number) => ipcRenderer.invoke('workflow:getExecutions', workflowId, limit),
+    search: (query: string) => ipcRenderer.invoke('workflow:search', query),
+    getByTag: (tag: string) => ipcRenderer.invoke('workflow:getByTag', tag),
+    getStatistics: () => ipcRenderer.invoke('workflow:getStatistics'),
+    onStarted: (callback: (data: any) => void) => {
+      ipcRenderer.on('workflow:started', (_event, data) => callback(data))
+    },
+    onCompleted: (callback: (data: any) => void) => {
+      ipcRenderer.on('workflow:completed', (_event, data) => callback(data))
+    },
+    onFailed: (callback: (data: any) => void) => {
+      ipcRenderer.on('workflow:failed', (_event, data) => callback(data))
+    }
   }
 })
 
@@ -178,6 +451,7 @@ export interface ElectronAPI {
     connect: (id: string, options: any) => Promise<void>
     disconnect: (id: string) => Promise<void>
     write: (id: string, data: string) => void
+    executeCommand: (id: string, command: string, timeout?: number) => Promise<{ success: boolean; data?: string; error?: string }>
     resize: (id: string, cols: number, rows: number) => void
     getConnection: (id: string) => Promise<any>
     getAllConnections: () => Promise<any[]>

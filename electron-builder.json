@@ -6,7 +6,15 @@
   },
   "files": [
     "dist/**/*",
-    "dist-electron/**/*"
+    "dist-electron/**/*",
+    "build/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "build",
+      "to": "build",
+      "filter": ["**/*"]
+    }
   ],
   "win": {
     "target": [

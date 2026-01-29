@@ -48,59 +48,81 @@
             </div>
           </template>
           
-          <div class="session-items">
-            <div
-              v-for="session in getGroupSessions(group.id)"
-              :key="session.id"
-              class="session-card"
-              @click="handleSessionClick(session)"
-              @contextmenu.prevent="handleContextMenu(session, $event)"
-            >
-              <div class="session-status">
-                <div class="status-dot"></div>
-              </div>
-              
-              <div class="session-icon" :class="{ 'has-flag': !!getRegionFlag(session.region) }">
-                <span 
-                  v-if="getRegionFlag(session.region)" 
-                  class="session-flag-icon"
-                  v-html="getRegionFlag(session.region)"
-                  :title="session.region"
-                ></span>
-                <el-icon v-else :size="20"><Connection /></el-icon>
-              </div>
-              
-              <div class="session-content">
-                <div class="session-name-row">
-                  <span class="session-name">{{ session.name }}</span>
-                </div>
-                <div class="session-details">
-                  <span class="detail-item">
-                    <el-icon :size="12"><User /></el-icon>
-                    {{ session.username }}
-                  </span>
-                  <span class="detail-separator">•</span>
-                  <span class="detail-item">
-                    <el-icon :size="12"><Monitor /></el-icon>
-                    {{ session.host }}
-                  </span>
-                </div>
-              </div>
-              
-              <div class="session-actions-wrapper">
-                <div v-if="session.expiryDate" class="expiry-info">
-                  <el-tag 
-                    :type="getExpiryTagType(session.expiryDate)" 
-                    size="small"
-                    effect="plain"
-                    class="expiry-tag"
+          <DroppableGroup
+            :group-id="group.id"
+            :group-name="group.name"
+            @drop="handleSessionDropToGroup"
+          >
+            <div class="session-items">
+              <VirtualList
+                v-if="getGroupSessions(group.id).length > 0"
+                :items="getGroupSessions(group.id)"
+                :item-height="54"
+                :buffer="3"
+                key-field="id"
+              >
+                <template #default="{ item: session, index }">
+                  <DraggableSessionItem
+                    :session-id="session.id"
+                    :session-data="session"
+                    :index="index"
+                    @reorder="(from, to) => handleSessionReorder(group.id, from, to)"
+                    @move-to-group="handleSessionDropToGroup"
                   >
-                    {{ getExpiryText(session.expiryDate) }}
-                  </el-tag>
-                </div>
-              </div>
+                    <div
+                      class="session-card"
+                      @click="handleSessionClick(session)"
+                      @contextmenu.prevent="handleContextMenu(session, $event)"
+                    >
+                      <div class="session-status">
+                        <div class="status-dot"></div>
+                      </div>
+                      
+                      <div class="session-icon" :class="{ 'has-flag': !!getRegionFlag(session.region) }">
+                        <span 
+                          v-if="getRegionFlag(session.region)" 
+                          class="session-flag-icon"
+                          v-html="getRegionFlag(session.region)"
+                          :title="session.region"
+                        ></span>
+                        <el-icon v-else :size="20"><Connection /></el-icon>
+                      </div>
+                      
+                      <div class="session-content">
+                        <div class="session-name-row">
+                          <span class="session-name">{{ session.name }}</span>
+                        </div>
+                        <div class="session-details">
+                          <span class="detail-item">
+                            <el-icon :size="12"><User /></el-icon>
+                            {{ session.username }}
+                          </span>
+                          <span class="detail-separator">•</span>
+                          <span class="detail-item">
+                            <el-icon :size="12"><Monitor /></el-icon>
+                            {{ session.host }}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div class="session-actions-wrapper">
+                        <div v-if="session.expiryDate" class="expiry-info">
+                          <el-tag 
+                            :type="getExpiryTagType(session.expiryDate)" 
+                            size="small"
+                            effect="plain"
+                            class="expiry-tag"
+                          >
+                            {{ getExpiryText(session.expiryDate) }}
+                          </el-tag>
+                        </div>
+                      </div>
+                    </div>
+                  </DraggableSessionItem>
+                </template>
+              </VirtualList>
             </div>
-          </div>
+          </DroppableGroup>
         </el-collapse-item>
         
         <!-- 未分组会话 -->
@@ -120,57 +142,73 @@
           </template>
           
           <div class="session-items">
-            <div
-              v-for="session in ungroupedSessions"
-              :key="session.id"
-              class="session-card"
-              @click="handleSessionClick(session)"
-              @contextmenu.prevent="handleContextMenu(session, $event)"
+            <VirtualList
+              v-if="ungroupedSessions.length > 0"
+              :items="ungroupedSessions"
+              :item-height="54"
+              :buffer="3"
+              key-field="id"
             >
-              <div class="session-status">
-                <div class="status-dot"></div>
-              </div>
-              
-              <div class="session-icon" :class="{ 'has-flag': !!getRegionFlag(session.region) }">
-                <span 
-                  v-if="getRegionFlag(session.region)" 
-                  class="session-flag-icon"
-                  v-html="getRegionFlag(session.region)"
-                  :title="session.region"
-                ></span>
-                <el-icon v-else :size="20"><Connection /></el-icon>
-              </div>
-              
-              <div class="session-content">
-                <div class="session-name-row">
-                  <span class="session-name">{{ session.name }}</span>
-                </div>
-                <div class="session-details">
-                  <span class="detail-item">
-                    <el-icon :size="12"><User /></el-icon>
-                    {{ session.username }}
-                  </span>
-                  <span class="detail-separator">•</span>
-                  <span class="detail-item">
-                    <el-icon :size="12"><Monitor /></el-icon>
-                    {{ session.host }}
-                  </span>
-                </div>
-              </div>
-              
-              <div class="session-actions-wrapper">
-                <div v-if="session.expiryDate" class="expiry-info">
-                  <el-tag 
-                    :type="getExpiryTagType(session.expiryDate)" 
-                    size="small"
-                    effect="plain"
-                    class="expiry-tag"
+              <template #default="{ item: session, index }">
+                <DraggableSessionItem
+                  :session-id="session.id"
+                  :session-data="session"
+                  :index="index"
+                  @reorder="(from, to) => handleSessionReorder('ungrouped', from, to)"
+                  @move-to-group="handleSessionDropToGroup"
+                >
+                  <div
+                    class="session-card"
+                    @click="handleSessionClick(session)"
+                    @contextmenu.prevent="handleContextMenu(session, $event)"
                   >
-                    {{ getExpiryText(session.expiryDate) }}
-                  </el-tag>
-                </div>
-              </div>
-            </div>
+                    <div class="session-status">
+                      <div class="status-dot"></div>
+                    </div>
+                    
+                    <div class="session-icon" :class="{ 'has-flag': !!getRegionFlag(session.region) }">
+                      <span 
+                        v-if="getRegionFlag(session.region)" 
+                        class="session-flag-icon"
+                        v-html="getRegionFlag(session.region)"
+                        :title="session.region"
+                      ></span>
+                      <el-icon v-else :size="20"><Connection /></el-icon>
+                    </div>
+                    
+                    <div class="session-content">
+                      <div class="session-name-row">
+                        <span class="session-name">{{ session.name }}</span>
+                      </div>
+                      <div class="session-details">
+                        <span class="detail-item">
+                          <el-icon :size="12"><User /></el-icon>
+                          {{ session.username }}
+                        </span>
+                        <span class="detail-separator">•</span>
+                        <span class="detail-item">
+                          <el-icon :size="12"><Monitor /></el-icon>
+                          {{ session.host }}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div class="session-actions-wrapper">
+                      <div v-if="session.expiryDate" class="expiry-info">
+                        <el-tag 
+                          :type="getExpiryTagType(session.expiryDate)" 
+                          size="small"
+                          effect="plain"
+                          class="expiry-tag"
+                        >
+                          {{ getExpiryText(session.expiryDate) }}
+                        </el-tag>
+                      </div>
+                    </div>
+                  </div>
+                </DraggableSessionItem>
+              </template>
+            </VirtualList>
           </div>
         </el-collapse-item>
       </el-collapse>
@@ -269,6 +307,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import type { SessionConfig, SessionGroup } from '@/types/session'
 import * as FlagIcons from 'country-flag-icons/string/3x2'
+import VirtualList from '../Common/VirtualList.vue'
+import DraggableSessionItem from './DraggableSessionItem.vue'
+import DroppableGroup from './DroppableGroup.vue'
+import { useLocale } from '@/composables/useLocale'
+
+// 国际化
+const { t } = useLocale()
 
 // 使用 store - 不需要 props!
 const appStore = useAppStore()
@@ -301,7 +346,10 @@ const filteredSessions = computed(() => {
     (session) =>
       session.name.toLowerCase().includes(query) ||
       session.host.toLowerCase().includes(query) ||
-      session.username.toLowerCase().includes(query)
+      session.username.toLowerCase().includes(query) ||
+      (session.provider && session.provider.toLowerCase().includes(query)) ||
+      (session.region && session.region.toLowerCase().includes(query)) ||
+      (session.notes && session.notes.toLowerCase().includes(query))
   )
 })
 
@@ -540,6 +588,50 @@ const handleRenameGroup = async () => {
     ElMessage.error(`重命名失败: ${error.message}`)
   }
 }
+
+// 处理会话拖拽排序
+const handleSessionReorder = async (groupId: string, fromIndex: number, toIndex: number) => {
+  console.log('[SessionList] Reordering sessions in group:', groupId, fromIndex, '->', toIndex)
+  
+  try {
+    // 获取该分组的所有会话
+    const sessions = getGroupSessions(groupId)
+    
+    if (fromIndex < 0 || fromIndex >= sessions.length || toIndex < 0 || toIndex >= sessions.length) {
+      console.error('Invalid index for reordering')
+      return
+    }
+    
+    // 重新排序
+    const [movedSession] = sessions.splice(fromIndex, 1)
+    sessions.splice(toIndex, 0, movedSession)
+    
+    // 更新每个会话的 sortOrder
+    for (let i = 0; i < sessions.length; i++) {
+      const session = sessions[i]
+      await appStore.updateSession(session.id, { sortOrder: i })
+    }
+    
+    // 重新加载会话列表以反映更改
+    await appStore.loadSessions()
+    
+    ElMessage.success('会话已重新排序')
+  } catch (error: any) {
+    console.error('Failed to reorder sessions:', error)
+    ElMessage.error(`排序失败: ${error.message}`)
+  }
+}
+
+// 处理会话拖拽到分组
+const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
+  console.log('[SessionList] Moving session to group:', sessionId, '->', groupId)
+  try {
+    await appStore.updateSession(sessionId, { group: groupId || undefined })
+    ElMessage.success('会话已移动到新分组')
+  } catch (error: any) {
+    ElMessage.error(`移动失败: ${error.message}`)
+  }
+}
 </script>
 
 
@@ -553,7 +645,7 @@ const handleRenameGroup = async () => {
 }
 
 .session-list-header {
-  padding: var(--spacing-lg) var(--spacing-md);
+  padding: 12px 8px;
   border-bottom: 1px solid var(--border-light);
   background: var(--bg-secondary);
 }
@@ -562,12 +654,12 @@ const handleRenameGroup = async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: var(--spacing-md);
+  margin-bottom: 8px;
 }
 
 .header-title {
   margin: 0;
-  font-size: var(--text-lg);
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.5px;
@@ -580,7 +672,7 @@ const handleRenameGroup = async () => {
 .session-groups-container {
   flex: 1;
   overflow-y: auto;
-  padding: var(--spacing-sm);
+  padding: 5px; /* 统一为5px */
 }
 
 .session-collapse {
@@ -591,12 +683,14 @@ const handleRenameGroup = async () => {
 }
 
 .group-item {
-  margin-bottom: var(--spacing-sm);
+  margin: 5px; /* 统一为5px */
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--bg-secondary);
   border: 1px solid var(--border-light);
   transition: all var(--transition-fast);
+  width: calc(100% - 10px); /* 减去左右margin */
+  box-sizing: border-box;
 }
 
 .group-item:hover {
@@ -605,10 +699,10 @@ const handleRenameGroup = async () => {
 }
 
 .session-groups-container :deep(.el-collapse-item__header) {
-  height: 48px;
-  line-height: 48px;
-  padding: 0 var(--spacing-md);
-  font-size: var(--text-sm);
+  height: 40px;
+  line-height: 40px;
+  padding: 0 8px;
+  font-size: 13px;
   font-weight: 600;
   border: none;
   background: transparent;
@@ -625,7 +719,7 @@ const handleRenameGroup = async () => {
 }
 
 .session-groups-container :deep(.el-collapse-item__content) {
-  padding: 0 var(--spacing-sm) var(--spacing-sm);
+  padding: 5px; /* 统一为5px */
 }
 
 .session-groups-container :deep(.el-collapse-item__arrow) {
@@ -638,37 +732,50 @@ const handleRenameGroup = async () => {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding-right: var(--spacing-md);
+  padding-right: 8px;
 }
 
 .group-info {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: 6px;
   color: var(--text-primary);
 }
 
 .group-icon {
   color: var(--primary-color);
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .group-name {
   font-weight: 600;
-  font-size: var(--text-sm);
+  font-size: 13px;
 }
 
 .session-items {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 8px;
+  padding: 5px; /* 统一为5px */
+  max-height: 600px;
+  width: 100%;
+}
+
+.session-items :deep(.virtual-scroll) {
+  padding: 0;
+  width: 100%;
+}
+
+.session-items :deep(.virtual-scroll-item) {
+  padding: 0;
+  width: 100%;
 }
 
 .session-card {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
+  padding: 6px 8px;
+  margin: 5px; /* 统一为5px */
+  width: calc(100% - 10px); /* 减去左右margin */
   background: var(--bg-tertiary);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -676,6 +783,7 @@ const handleRenameGroup = async () => {
   transition: all var(--transition-fast);
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .session-card::before {
@@ -684,7 +792,7 @@ const handleRenameGroup = async () => {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 3px;
+  width: 2px; /* 减小宽度 */
   background: var(--primary-color);
   transform: scaleY(0);
   transition: transform var(--transition-fast);
@@ -693,7 +801,7 @@ const handleRenameGroup = async () => {
 .session-card:hover {
   background: var(--bg-elevated);
   border-color: var(--border-medium);
-  transform: translateX(4px);
+  transform: translateX(2px); /* 减少移动距离 */
   box-shadow: var(--shadow-md);
 }
 
@@ -702,16 +810,16 @@ const handleRenameGroup = async () => {
 }
 
 .session-card:active {
-  transform: translateX(2px);
+  transform: translateX(1px); /* 减少移动距离 */
 }
 
 .session-status {
-  margin-right: 8px;
+  margin-right: 4px; /* 减少间距 */
 }
 
 .status-dot {
-  width: 6px;
-  height: 6px;
+  width: 4px; /* 减小尺寸 */
+  height: 4px; /* 减小尺寸 */
   border-radius: 50%;
   background: var(--text-tertiary);
   transition: all var(--transition-fast);
@@ -723,14 +831,14 @@ const handleRenameGroup = async () => {
 }
 
 .session-icon {
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   background: var(--bg-main);
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 10px;
+  margin-right: 6px;
   color: var(--text-secondary);
   transition: all var(--transition-fast);
   flex-shrink: 0;
@@ -747,8 +855,8 @@ const handleRenameGroup = async () => {
 }
 
 .session-flag-icon {
-  width: 22px;
-  height: 16px;
+  width: 18px; /* 减小尺寸 */
+  height: 13px; /* 减小尺寸 */
   display: flex !important;
   align-items: center;
   justify-content: center;
@@ -769,17 +877,17 @@ const handleRenameGroup = async () => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px; /* 减少间距 */
 }
 
 .session-name-row {
   display: flex;
   align-items: center;
-  margin-bottom: 2px;
+  margin-bottom: 1px; /* 减少间距 */
 }
 
 .session-name {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-primary);
   font-weight: 600;
   white-space: nowrap;
@@ -794,9 +902,9 @@ const handleRenameGroup = async () => {
   flex-direction: column;
   align-items: flex-end;
   align-self: flex-start;
-  gap: 4px;
-  margin-left: 8px;
-  padding-top: 2px;
+  gap: 2px; /* 减少间距 */
+  margin-left: 4px; /* 减少间距 */
+  padding-top: 0; /* 移除顶部padding */
 }
 
 .expiry-info {
@@ -806,17 +914,17 @@ const handleRenameGroup = async () => {
 
 .expiry-tag {
   flex-shrink: 0;
-  font-size: 10px !important;
-  height: 18px;
-  line-height: 18px;
-  padding: 0 6px;
+  font-size: 9px !important;
+  height: 15px; /* 减小高度 */
+  line-height: 15px; /* 减小高度 */
+  padding: 0 4px; /* 减少内边距 */
 }
 
 .session-details {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: 3px; /* 减少间距 */
+  font-size: 10px;
   color: var(--text-tertiary);
   line-height: 1.2;
 }
@@ -824,7 +932,7 @@ const handleRenameGroup = async () => {
 .detail-item {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px; /* 减少间距 */
 }
 
 .detail-separator {
@@ -862,28 +970,22 @@ const handleRenameGroup = async () => {
 
 @media (max-width: 768px) {
   .session-list-header {
-    padding: var(--spacing-md) var(--spacing-sm);
+    padding: 8px 6px; /* 减少padding */
   }
   
   .session-card {
-    padding: 8px 10px;
+    padding: 5px 6px; /* 移动端更紧凑 */
   }
   
   .session-icon {
-    width: 28px;
-    height: 28px;
+    width: 22px;
+    height: 22px;
   }
 }
 
 .session-card {
-  animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+  animation: none;
 }
-
-.session-card:nth-child(1) { animation-delay: 0.05s; }
-.session-card:nth-child(2) { animation-delay: 0.1s; }
-.session-card:nth-child(3) { animation-delay: 0.15s; }
-.session-card:nth-child(4) { animation-delay: 0.2s; }
-.session-card:nth-child(5) { animation-delay: 0.25s; }
 
 @keyframes slideInRight {
   from {

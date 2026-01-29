@@ -26,46 +26,74 @@
         />
       </div>
 
-      <!-- 分类过滤 -->
-      <div class="category-filter">
-        <div 
-          class="category-item"
-          :class="{ active: filterCategory === '' }"
-          @click="filterCategory = ''"
-        >
-          <el-icon><Files /></el-icon>
-          <span>全部</span>
-          <el-tag size="small" round>{{ snippets.length }}</el-tag>
+      <!-- 分类和命令列表 -->
+      <div class="snippet-list">
+        <!-- 全部分类 -->
+        <div class="category-group">
+          <div 
+            class="category-header"
+            :class="{ expanded: expandedCategories.has('__all__') }"
+            @click="toggleCategory('__all__')"
+          >
+            <el-icon class="expand-icon"><CaretRight /></el-icon>
+            <el-icon class="category-icon"><Files /></el-icon>
+            <span class="category-name">全部</span>
+            <span class="category-count">{{ snippets.length }}</span>
+          </div>
+          <div v-show="expandedCategories.has('__all__')" class="category-snippets">
+            <div
+              v-for="snippet in getSnippetsByCategory('')"
+              :key="snippet.id"
+              class="snippet-item"
+              :class="{ active: selectedSnippet?.id === snippet.id }"
+              @click="selectSnippet(snippet)"
+            >
+              <el-icon class="snippet-icon"><Document /></el-icon>
+              <span class="snippet-name">{{ snippet.name }}</span>
+              <el-tag v-if="snippet.shortcut" type="success" size="small" class="shortcut-tag">
+                {{ snippet.shortcut }}
+              </el-tag>
+              <span class="usage-badge">{{ snippet.usageCount }}</span>
+            </div>
+          </div>
         </div>
+
+        <!-- 各个分类 -->
         <div 
           v-for="cat in categories"
           :key="cat"
-          class="category-item"
-          :class="{ active: filterCategory === cat }"
-          @click="filterCategory = cat"
+          class="category-group"
         >
-          <el-icon><Folder /></el-icon>
-          <span>{{ cat }}</span>
-          <el-tag size="small" round>{{ getCategoryCount(cat) }}</el-tag>
-        </div>
-      </div>
-
-      <!-- 命令列表 -->
-      <div class="snippet-list">
-        <div
-          v-for="snippet in filteredSnippets"
-          :key="snippet.id"
-          class="snippet-item"
-          :class="{ active: selectedSnippet?.id === snippet.id }"
-          @click="selectSnippet(snippet)"
-        >
-          <el-icon class="snippet-icon"><Document /></el-icon>
-          <span class="snippet-name">{{ snippet.name }}</span>
-          <span class="usage-badge">{{ snippet.usageCount }}</span>
+          <div 
+            class="category-header"
+            :class="{ expanded: expandedCategories.has(cat) }"
+            @click="toggleCategory(cat)"
+          >
+            <el-icon class="expand-icon"><CaretRight /></el-icon>
+            <el-icon class="category-icon"><Folder /></el-icon>
+            <span class="category-name">{{ cat }}</span>
+            <span class="category-count">{{ getCategoryCount(cat) }}</span>
+          </div>
+          <div v-show="expandedCategories.has(cat)" class="category-snippets">
+            <div
+              v-for="snippet in getSnippetsByCategory(cat)"
+              :key="snippet.id"
+              class="snippet-item"
+              :class="{ active: selectedSnippet?.id === snippet.id }"
+              @click="selectSnippet(snippet)"
+            >
+              <el-icon class="snippet-icon"><Document /></el-icon>
+              <span class="snippet-name">{{ snippet.name }}</span>
+              <el-tag v-if="snippet.shortcut" type="success" size="small" class="shortcut-tag">
+                {{ snippet.shortcut }}
+              </el-tag>
+              <span class="usage-badge">{{ snippet.usageCount }}</span>
+            </div>
+          </div>
         </div>
 
         <!-- 空状态 -->
-        <div v-if="filteredSnippets.length === 0" class="empty-list">
+        <div v-if="snippets.length === 0" class="empty-list">
           <el-icon :size="48"><DocumentCopy /></el-icon>
           <p>暂无片段</p>
         </div>
@@ -115,6 +143,17 @@
         <div v-if="selectedSnippet.description" class="detail-section">
           <h4>描述</h4>
           <p class="description-text">{{ selectedSnippet.description }}</p>
+        </div>
+
+        <!-- 快捷命令 -->
+        <div v-if="selectedSnippet.shortcut" class="detail-section">
+          <h4>快捷命令</h4>
+          <div class="shortcut-display">
+            <el-tag type="success" size="large" effect="dark">
+              🚀 {{ selectedSnippet.shortcut }}
+            </el-tag>
+            <span class="shortcut-hint">在终端输入此快捷命令可快速调用</span>
+          </div>
         </div>
 
         <!-- 命令 -->
@@ -231,6 +270,20 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item label="快捷命令（可选）">
+          <el-input
+            v-model="form.shortcut"
+            placeholder="例如：/d 或 /disk"
+            maxlength="20"
+            show-word-limit
+          >
+            <template #prepend>/</template>
+          </el-input>
+          <div class="form-tip">
+            💡 在终端输入快捷命令（如 /d）可快速调用此片段
+          </div>
+        </el-form-item>
+
         <el-form-item label="标签">
           <el-select
             v-model="form.tags"
@@ -319,7 +372,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
-  Plus, Search, Edit, Delete, DocumentCopy, Document, Folder, Files 
+  Plus, Search, Edit, Delete, DocumentCopy, Document, Folder, Files, CaretRight
 } from '@element-plus/icons-vue'
 
 interface Snippet {
@@ -330,6 +383,7 @@ interface Snippet {
   category: string
   tags: string[]
   variables: string[]
+  shortcut?: string
   usageCount: number
   createdAt: string
   updatedAt: string
@@ -338,7 +392,7 @@ interface Snippet {
 const snippets = ref<Snippet[]>([])
 const selectedSnippet = ref<Snippet | null>(null)
 const searchQuery = ref('')
-const filterCategory = ref('')
+const expandedCategories = ref<Set<string>>(new Set(['__all__'])) // 默认展开"全部"
 const showDialog = ref(false)
 const showUseDialog = ref(false)
 const editingSnippet = ref<Snippet | null>(null)
@@ -352,7 +406,8 @@ const form = ref({
   command: '',
   description: '',
   category: '',
-  tags: [] as string[]
+  tags: [] as string[],
+  shortcut: ''
 })
 
 const rules = {
@@ -397,6 +452,38 @@ const allTags = computed(() => {
   return Array.from(tags)
 })
 
+const toggleCategory = (category: string) => {
+  if (expandedCategories.value.has(category)) {
+    expandedCategories.value.delete(category)
+  } else {
+    expandedCategories.value.add(category)
+  }
+}
+
+const getSnippetsByCategory = (category: string) => {
+  if (category === '') {
+    // "全部" 分类显示所有片段
+    return snippets.value.filter(snippet => {
+      if (!searchQuery.value) return true
+      return snippet.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+        snippet.command.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+        snippet.description?.toLowerCase().includes(searchQuery.value.toLowerCase())
+    })
+  }
+  
+  return snippets.value.filter(snippet => {
+    const matchesCategory = snippet.category === category
+    if (!searchQuery.value) return matchesCategory
+    
+    const matchesSearch = 
+      snippet.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+      snippet.command.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+      snippet.description?.toLowerCase().includes(searchQuery.value.toLowerCase())
+    
+    return matchesCategory && matchesSearch
+  })
+}
+
 const filteredSnippets = computed(() => {
   return snippets.value.filter(snippet => {
     const matchesSearch =
@@ -405,9 +492,7 @@ const filteredSnippets = computed(() => {
       snippet.command.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
       snippet.description?.toLowerCase().includes(searchQuery.value.toLowerCase())
 
-    const matchesCategory = !filterCategory.value || snippet.category === filterCategory.value
-
-    return matchesSearch && matchesCategory
+    return matchesSearch
   })
 })
 
@@ -454,7 +539,8 @@ const editSnippet = (snippet: Snippet) => {
     command: snippet.command,
     description: snippet.description || '',
     category: snippet.category || '',
-    tags: snippet.tags || []
+    tags: snippet.tags || [],
+    shortcut: snippet.shortcut || ''
   }
   showDialog.value = true
 }
@@ -497,13 +583,20 @@ const handleSave = async () => {
         variables.add(match[1])
       }
 
+      // 处理快捷命令：确保以 / 开头
+      let shortcut = form.value.shortcut.trim()
+      if (shortcut && !shortcut.startsWith('/')) {
+        shortcut = '/' + shortcut
+      }
+
       const snippetData = {
         name: form.value.name + '',
         command: form.value.command + '',
         description: form.value.description + '',
         category: form.value.category + '',
         tags: [...form.value.tags],
-        variables: [...variables]
+        variables: [...variables],
+        shortcut: shortcut || undefined
       }
 
       let result
@@ -556,7 +649,8 @@ const resetForm = () => {
     command: '',
     description: '',
     category: '',
-    tags: []
+    tags: [],
+    shortcut: ''
   }
   editingSnippet.value = null
   formRef.value?.resetFields()
@@ -601,43 +695,78 @@ const resetForm = () => {
   border-bottom: 1px solid var(--border-light);
 }
 
-/* 分类过滤 */
-.category-filter {
-  padding: var(--spacing-sm) 0;
-  border-bottom: 1px solid var(--border-light);
-}
-
-.category-item {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  color: var(--text-secondary);
-}
-
-.category-item:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.category-item.active {
-  background: rgba(14, 165, 233, 0.12);
-  color: var(--primary-color);
-  font-weight: 600;
-}
-
-.category-item span {
-  flex: 1;
-  font-size: var(--text-sm);
-}
-
 /* 命令列表 */
 .snippet-list {
   flex: 1;
   overflow-y: auto;
-  padding: var(--spacing-sm);
+  padding: var(--spacing-xs) 0;
+}
+
+/* 分类组 */
+.category-group {
+  margin-bottom: var(--spacing-xs);
+}
+
+.category-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.category-header:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.category-header.expanded {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.expand-icon {
+  font-size: 12px;
+  transition: transform var(--transition-fast);
+  color: var(--text-tertiary);
+}
+
+.category-header.expanded .expand-icon {
+  transform: rotate(90deg);
+  color: var(--primary-color);
+}
+
+.category-icon {
+  font-size: 14px;
+  color: var(--primary-color);
+}
+
+.category-name {
+  flex: 1;
+  font-size: var(--text-sm);
+}
+
+.category-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 10px;
+  min-width: 20px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.category-header.expanded .category-count {
+  background: rgba(14, 165, 233, 0.15);
+  color: var(--primary-color);
+}
+
+.category-snippets {
+  padding-left: 0;
 }
 
 .snippet-item {
@@ -645,7 +774,7 @@ const resetForm = () => {
   align-items: center;
   gap: var(--spacing-sm);
   padding: var(--spacing-sm) var(--spacing-md);
-  margin-bottom: var(--spacing-xs);
+  margin: 2px var(--spacing-sm) 2px 28px;
   background: var(--bg-tertiary);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -656,7 +785,7 @@ const resetForm = () => {
 .snippet-item:hover {
   background: var(--bg-elevated);
   border-color: var(--border-medium);
-  transform: translateX(4px);
+  transform: translateX(2px);
 }
 
 .snippet-item.active {
@@ -667,7 +796,7 @@ const resetForm = () => {
 
 .snippet-icon {
   color: var(--primary-color);
-  font-size: 14px;
+  font-size: 13px;
   flex-shrink: 0;
 }
 
@@ -681,10 +810,23 @@ const resetForm = () => {
   text-overflow: ellipsis;
 }
 
+.shortcut-tag {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 6px;
+  height: 20px;
+  line-height: 16px;
+}
+
 .usage-badge {
   color: var(--text-tertiary);
-  font-size: var(--text-xs);
+  font-size: 11px;
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 8px;
   flex-shrink: 0;
+  min-width: 18px;
+  text-align: center;
 }
 
 .empty-list {
@@ -772,6 +914,17 @@ const resetForm = () => {
   font-size: var(--text-base);
   color: var(--text-secondary);
   line-height: 1.6;
+}
+
+.shortcut-display {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.shortcut-hint {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
 }
 
 .command-block {

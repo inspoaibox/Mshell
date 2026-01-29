@@ -1,12 +1,25 @@
 <template>
   <div id="app">
-    <div class="app-layout">
+    <!-- 锁定屏幕 -->
+    <LockScreen v-if="isLocked" @unlock="handleUnlock" />
+    
+    <div class="app-layout" v-show="!isLocked">
       <Sidebar @menu-select="handleMenuSelect" />
       
       <div class="app-main">
         <div class="app-header">
            <div class="app-title-drag"></div>
            <div class="header-actions">
+              <el-tooltip content="分屏视图" placement="bottom">
+                <el-button 
+                  size="small" 
+                  :icon="Grid" 
+                  @click="toggleSplitView" 
+                  :disabled="appStore.tabs.length < 2"
+                  :type="showSplitView ? 'primary' : ''"
+                  circle 
+                />
+              </el-tooltip>
               <el-button type="primary" size="small" :icon="Plus" @click="appStore.showSessionForm = true" circle />
               <el-button size="small" :icon="Lightning" @click="appStore.showQuickConnect = true" circle />
            </div>
@@ -20,8 +33,89 @@
                 @edit="handleEditSession"
               />
             </div>
-            <div class="terminal-panel">
+            <div class="terminal-panel" :class="{ 'split-mode': showSplitView && sshTerminals.length >= 2 }">
+              <!-- 分屏工具栏 -->
+              <div v-show="showSplitView && sshTerminals.length >= 2" class="split-toolbar">
+                <div class="toolbar-left">
+                  <span class="terminal-count">{{ sshTerminals.length }} 个终端</span>
+                </div>
+                <div class="toolbar-right">
+                  <el-button-group>
+                    <el-tooltip content="自动网格 (自适应)" placement="bottom">
+                      <el-button
+                        :type="layoutMode === 'auto' ? 'primary' : ''"
+                        size="small"
+                        @click="layoutMode = 'auto'"
+                      >
+                        ⊞ 自动
+                      </el-button>
+                    </el-tooltip>
+                    <el-tooltip content="水平分屏 (左右并排)" placement="bottom">
+                      <el-button
+                        :type="layoutMode === 'horizontal' ? 'primary' : ''"
+                        size="small"
+                        @click="layoutMode = 'horizontal'"
+                      >
+                        ⬌ 水平
+                      </el-button>
+                    </el-tooltip>
+                    <el-tooltip content="垂直分屏 (上下堆叠)" placement="bottom">
+                      <el-button
+                        :type="layoutMode === 'vertical' ? 'primary' : ''"
+                        size="small"
+                        @click="layoutMode = 'vertical'"
+                      >
+                        ⬍ 垂直
+                      </el-button>
+                    </el-tooltip>
+                  </el-button-group>
+                  
+                  <div class="divider-vertical"></div>
+
+                  <el-button size="small" @click="showSplitView = false">
+                    退出分屏
+                  </el-button>
+                </div>
+              </div>
+
+              <!-- 分屏内容区域 -->
+              <div 
+                v-if="showSplitView && sshTerminals.length >= 2" 
+                class="split-terminals-container"
+                :style="gridStyle"
+              >
+                <div
+                  v-for="(tab, index) in sshTerminals"
+                  :key="`split-${tab.id}`"
+                  class="split-terminal-pane"
+                  :class="{ active: appStore.activeTab === tab.id }"
+                  @click="appStore.activeTab = tab.id"
+                >
+                  <div class="pane-header">
+                    <span class="pane-title">{{ tab.name }}</span>
+                    <el-button 
+                      type="danger" 
+                      link 
+                      size="small"
+                      @click.stop="handleCloseTab(tab.id)"
+                    >
+                      ✖
+                    </el-button>
+                  </div>
+                  <div class="pane-content">
+                    <TerminalTab
+                      :connection-id="tab.id"
+                      :session="tab.session"
+                      :terminal-options="appStore.terminalOptions"
+                      :hide-close-button="true"
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 标签页视图 -->
               <el-tabs
+                v-if="!showSplitView || sshTerminals.length < 2"
                 v-model="appStore.activeTab"
                 type="card"
                 closable
@@ -29,12 +123,30 @@
                 @tab-remove="appStore.removeTab"
               >
                 <el-tab-pane
-                  v-for="tab in appStore.tabs"
+                  v-for="(tab, index) in appStore.tabs"
                   :key="tab.id"
-                  :label="tab.name"
                   :name="tab.id"
                 >
+                  <template #label>
+                    <DraggableTab
+                      :tab-id="tab.id"
+                      :tab-data="tab"
+                      :index="index"
+                      :is-active="appStore.activeTab === tab.id"
+                      @reorder="handleTabReorder"
+                      @click="appStore.activeTab = tab.id"
+                    >
+                      {{ tab.name }}
+                    </DraggableTab>
+                  </template>
+                  <SplitTerminalTab
+                    v-if="tab.isSplit"
+                    :connection-id="tab.id"
+                    :session="tab.session"
+                    :terminal-options="appStore.terminalOptions"
+                  />
                   <TerminalTab
+                    v-else
                     :connection-id="tab.id"
                     :session="tab.session"
                     :terminal-options="appStore.terminalOptions"
@@ -86,8 +198,24 @@
             <StatisticsPanel />
           </div>
           
+          <div v-show="appStore.activeView === 'tasks'" class="content-panel">
+            <TaskSchedulerPanel />
+          </div>
+          
+          <div v-show="appStore.activeView === 'workflows'" class="content-panel">
+            <WorkflowPanel />
+          </div>
+          
+          <div v-show="appStore.activeView === 'keys'" class="content-panel">
+            <SSHKeyPanel />
+          </div>
+          
           <div v-show="appStore.activeView === 'logs'" class="content-panel">
-            <LogViewer />
+            <LogPanel />
+          </div>
+          
+          <div v-show="appStore.activeView === 'templates'" class="content-panel">
+            <SessionTemplatePanel />
           </div>
           
           <div v-show="appStore.activeView === 'settings'" class="content-panel">
@@ -125,11 +253,13 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, Plus, Lightning } from '@element-plus/icons-vue'
+import { Connection, Plus, Lightning, Grid } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 import { v4 as uuidv4 } from 'uuid'
+import { keyboardShortcutManager } from '@/utils/keyboard-shortcuts'
+import { useLocale } from '@/composables/useLocale'
 
 // 组件导入
 import Sidebar from './components/Common/Sidebar.vue'
@@ -138,18 +268,109 @@ import SessionList from './components/Session/SessionList.vue'
 import SessionForm from './components/Session/SessionForm.vue'
 import QuickConnect from './components/Session/QuickConnect.vue'
 import TerminalTab from './components/Terminal/TerminalTab.vue'
+import SplitTerminalTab from './components/Terminal/SplitTerminalTab.vue'
+import DraggableTab from './components/Terminal/DraggableTab.vue'
 import TerminalSettings from './components/Terminal/TerminalSettings.vue'
 import SettingsPanel from './components/Common/SettingsPanel.vue'
-import LogViewer from './components/Common/LogViewer.vue'
+import LogPanel from './components/Logs/LogPanel.vue'
 import SFTPPanel from './components/SFTP/SFTPPanel.vue'
 import PortForwardPanel from './components/PortForward/PortForwardPanel.vue'
 import SnippetPanel from './components/Snippet/SnippetPanel.vue'
 import StatisticsPanel from './components/Statistics/StatisticsPanel.vue'
+import SSHKeyPanel from './components/Keys/SSHKeyPanel.vue'
+import TaskSchedulerPanel from './components/Tasks/TaskSchedulerPanel.vue'
+import WorkflowPanel from './components/Workflows/WorkflowPanel.vue'
+import SessionTemplatePanel from './components/Session/SessionTemplatePanel.vue'
+import LockScreen from './components/Security/LockScreen.vue'
 
 import type { SessionConfig } from './types/session'
 
+// 国际化
+const { t } = useLocale()
+
 // 使用 store - 集中管理所有状态
 const appStore = useAppStore()
+
+// 锁定状态
+const isLocked = ref(false)
+
+// 搜索框引用
+const searchInputRef = ref<HTMLElement | null>(null)
+
+// 分屏视图状态
+const showSplitView = ref(false)
+const layoutMode = ref<'auto' | 'horizontal' | 'vertical'>('auto')
+
+// 计算 Grid 样式
+const gridStyle = computed(() => {
+  const count = sshTerminals.value.length
+  if (count === 0) return {}
+
+  let cols = 1
+  let rows = 1
+
+  if (layoutMode.value === 'horizontal') {
+    // 强制水平 (1行 N列)
+    cols = count
+    rows = 1
+  } else if (layoutMode.value === 'vertical') {
+    // 强制垂直 (N行 1列)
+    cols = 1
+    rows = count
+  } else {
+    // 自动 (Grid) - 尽可能接近正方形，优先增加列数
+    cols = Math.ceil(Math.sqrt(count))
+    rows = Math.ceil(count / cols)
+  }
+
+  return {
+    display: 'grid',
+    gridTemplateColumns: `repeat(${cols}, 1fr)`,
+    gridTemplateRows: `repeat(${rows}, 1fr)`,
+    gap: '4px',
+    height: '100%',
+    width: '100%'
+  }
+})
+
+// 计算属性：获取所有SSH终端标签（排除分屏标签）
+const sshTerminals = computed(() => {
+  return appStore.tabs
+    .filter(tab => !tab.isSplit)
+    .map(tab => ({
+      id: tab.id,
+      name: tab.name,
+      session: tab.session
+    }))
+})
+
+// 切换分屏视图
+const toggleSplitView = () => {
+  if (sshTerminals.value.length < 2) {
+    ElMessage.warning('至少需要2个打开的SSH会话才能使用分屏视图')
+    return
+  }
+  showSplitView.value = !showSplitView.value
+}
+
+// 在分屏模式下关闭标签
+const handleCloseTab = (tabId: string) => {
+  appStore.removeTab(tabId)
+  
+  // 如果关闭后标签数量少于2个，退出分屏模式
+  if (sshTerminals.value.length < 2) {
+    showSplitView.value = false
+  }
+}
+
+// 处理标签拖拽重新排序
+const handleTabReorder = (fromIndex: number, toIndex: number) => {
+  console.log('[App] Reordering tabs:', fromIndex, '->', toIndex)
+  const tabs = [...appStore.tabs]
+  const [movedTab] = tabs.splice(fromIndex, 1)
+  tabs.splice(toIndex, 0, movedTab)
+  appStore.tabs = tabs
+}
 
 onMounted(async () => {
   // 初始化应用状态
@@ -161,38 +382,169 @@ onMounted(async () => {
   })
 
   // 注册快捷键
-  // @ts-ignore
-  window.electronAPI.onShortcut('new-connection', () => {
-    appStore.showSessionForm = true
+  setupKeyboardShortcuts()
+  
+  // 监听锁定事件（从后端触发）
+  window.electronAPI.sessionLock?.onLocked?.(() => {
+    isLocked.value = true
   })
-
-  // @ts-ignore
-  window.electronAPI.onShortcut('quick-connect', () => {
-    appStore.showQuickConnect = true
+  
+  window.electronAPI.sessionLock?.onUnlocked?.(() => {
+    isLocked.value = false
   })
-
-  // @ts-ignore
-  window.electronAPI.onShortcut('settings', () => {
-    appStore.activeView = 'settings'
+  
+  // 监听自定义锁定事件（从前端触发）
+  window.addEventListener('session-locked', () => {
+    isLocked.value = true
   })
+  
+  // 检查初始锁定状态
+  try {
+    const status = await window.electronAPI.sessionLock?.getStatus?.()
+    if (status?.success && status.data?.isLocked) {
+      isLocked.value = true
+    }
+  } catch (error) {
+    console.error('Failed to check lock status:', error)
+  }
+})
 
-  // @ts-ignore
-  window.electronAPI.onShortcut('close-tab', () => {
-    if (appStore.activeTab) {
-      appStore.removeTab(appStore.activeTab)
+/**
+ * 设置键盘快捷键
+ */
+function setupKeyboardShortcuts() {
+  console.log('[App] Setting up keyboard shortcuts...')
+  
+  // Ctrl+N: 新建会话
+  keyboardShortcutManager.register('new-session', {
+    key: 'n',
+    ctrl: true,
+    description: '新建会话',
+    action: () => {
+      console.log('[Shortcut] New session triggered')
+      appStore.showSessionForm = true
     }
   })
 
-  // @ts-ignore
-  window.electronAPI.onShortcut('next-tab', () => {
-    appStore.nextTab()
+  // Ctrl+T: 快速连接
+  keyboardShortcutManager.register('quick-connect', {
+    key: 't',
+    ctrl: true,
+    description: '快速连接',
+    action: () => {
+      console.log('[Shortcut] Quick connect triggered')
+      appStore.showQuickConnect = true
+    }
   })
 
-  // @ts-ignore
-  window.electronAPI.onShortcut('prev-tab', () => {
-    appStore.prevTab()
+  // Ctrl+W: 关闭当前标签
+  keyboardShortcutManager.register('close-tab', {
+    key: 'w',
+    ctrl: true,
+    description: '关闭当前标签',
+    action: () => {
+      console.log('[Shortcut] Close tab triggered')
+      if (appStore.activeTab) {
+        appStore.removeTab(appStore.activeTab)
+      }
+    }
   })
-})
+
+  // Ctrl+Tab: 下一个标签
+  keyboardShortcutManager.register('next-tab', {
+    key: 'Tab',
+    ctrl: true,
+    description: '下一个标签',
+    action: () => {
+      console.log('[Shortcut] Next tab triggered')
+      appStore.nextTab()
+    }
+  })
+
+  // Ctrl+Shift+Tab: 上一个标签
+  keyboardShortcutManager.register('prev-tab', {
+    key: 'Tab',
+    ctrl: true,
+    shift: true,
+    description: '上一个标签',
+    action: () => {
+      console.log('[Shortcut] Previous tab triggered')
+      appStore.prevTab()
+    }
+  })
+
+  // Ctrl+F: 搜索会话
+  keyboardShortcutManager.register('search-sessions', {
+    key: 'f',
+    ctrl: true,
+    description: '搜索会话',
+    action: () => {
+      console.log('[Shortcut] Search sessions triggered')
+      appStore.activeView = 'sessions'
+      // 聚焦到搜索框
+      setTimeout(() => {
+        const searchInput = document.querySelector('.session-list .el-input__inner') as HTMLInputElement
+        if (searchInput) {
+          searchInput.focus()
+        }
+      }, 100)
+    }
+  })
+
+  // Ctrl+,: 打开设置
+  keyboardShortcutManager.register('open-settings', {
+    key: ',',
+    ctrl: true,
+    description: '打开设置',
+    action: () => {
+      console.log('[Shortcut] Open settings triggered')
+      appStore.activeView = 'settings'
+    }
+  })
+
+  // Ctrl+Alt+L: 锁定会话
+  keyboardShortcutManager.register('lock-session', {
+    key: 'l',
+    ctrl: true,
+    alt: true,
+    description: '锁定会话',
+    action: async () => {
+      console.log('[Shortcut] Lock session triggered')
+      try {
+        const result = await window.electronAPI.sessionLock?.lock?.()
+        if (result?.success) {
+          isLocked.value = true
+        }
+      } catch (error) {
+        console.error('Failed to lock session:', error)
+      }
+    }
+  })
+
+  // Ctrl+1~9: 切换到指定标签
+  for (let i = 1; i <= 9; i++) {
+    keyboardShortcutManager.register(`switch-tab-${i}`, {
+      key: i.toString(),
+      ctrl: true,
+      description: `切换到第 ${i} 个标签`,
+      action: () => {
+        console.log(`[Shortcut] Switch to tab ${i} triggered`)
+        if (appStore.tabs.length >= i) {
+          appStore.activeTab = appStore.tabs[i - 1].id
+        }
+      }
+    })
+  }
+  
+  console.log('[App] Keyboard shortcuts registered:', keyboardShortcutManager.getAll().size)
+}
+
+/**
+ * 处理解锁
+ */
+const handleUnlock = () => {
+  isLocked.value = false
+}
 
 const handleMenuSelect = (index: string) => {
   appStore.activeView = index as any
@@ -203,7 +555,8 @@ const handleConnect = async (session: SessionConfig) => {
   const tab = {
     id: tabId,
     name: session.name || `${session.username}@${session.host}`,
-    session
+    session,
+    isSplit: false
   }
   
   appStore.addTab(tab)
@@ -216,6 +569,19 @@ const handleConnect = async (session: SessionConfig) => {
   } catch (error) {
     console.error('Failed to update session usage stats:', error)
   }
+}
+
+const handleConvertToSplit = (connectionId: string, session: SessionConfig) => {
+  // 直接切换到分屏视图，不需要重新创建标签
+  if (sshTerminals.value.length < 2) {
+    ElMessage.warning('至少需要2个打开的SSH会话才能使用分屏视图')
+    return
+  }
+  
+  
+  showSplitView.value = true
+  
+  ElMessage.success('已切换到分屏模式')
 }
 
 const handleQuickConnectSubmit = (config: {
@@ -350,7 +716,7 @@ body,
 
 /* 会话面板 */
 .sessions-panel {
-  width: 320px;
+  width: 300px;
   border-right: 1px solid var(--border-color);
   background: var(--bg-secondary);
   display: flex;
@@ -610,5 +976,92 @@ body,
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* 分屏模式样式 */
+.terminal-panel.split-mode {
+  display: flex;
+  flex-direction: column;
+}
+
+.split-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.split-toolbar .toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.split-toolbar .terminal-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.split-toolbar .toolbar-right {
+  display: flex;
+  gap: 8px;
+}
+
+.split-terminals-container {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+  background: var(--border-color);
+  overflow: hidden;
+}
+
+
+.divider-vertical {
+  width: 1px;
+  height: 24px;
+  background-color: var(--border-color);
+  margin: 0 8px;
+  align-self: center;
+}
+
+.split-terminal-pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border: 2px solid transparent;
+  transition: border-color 0.2s;
+  overflow: hidden;
+}
+
+.split-terminal-pane.active {
+  border-color: var(--primary-color);
+}
+
+.split-terminal-pane .pane-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.split-terminal-pane .pane-title {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.split-terminal-pane .pane-content {
+  flex: 1;
+  overflow: hidden;
 }
 </style>

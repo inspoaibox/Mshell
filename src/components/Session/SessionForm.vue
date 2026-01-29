@@ -39,12 +39,40 @@
 
       <el-form-item
         v-if="form.authType === 'privateKey'"
-        label="私钥文件"
-        prop="privateKeyPath"
+        label="SSH密钥"
+        prop="privateKeyId"
       >
-        <el-input v-model="form.privateKeyPath" placeholder="私钥文件路径">
+        <el-select 
+          v-model="form.privateKeyId" 
+          placeholder="选择SSH密钥" 
+          filterable
+          style="width: 100%"
+          @focus="loadSSHKeys"
+        >
+          <el-option
+            v-for="key in sshKeys"
+            :key="key.id"
+            :label="`${key.name} (${key.type.toUpperCase()})`"
+            :value="key.id"
+          >
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>{{ key.name }}</span>
+              <el-tag size="small" :type="getKeyTypeColor(key.type)">{{ key.type.toUpperCase() }}</el-tag>
+            </div>
+          </el-option>
+        </el-select>
+        <div style="margin-top: 8px; font-size: 12px; color: var(--text-secondary);">
+          或 <el-button type="primary" link size="small" @click="handleSelectLocalKeyFile">选择本地文件</el-button>
+        </div>
+      </el-form-item>
+
+      <el-form-item
+        v-if="form.authType === 'privateKey' && form.privateKeyPath"
+        label="本地私钥"
+      >
+        <el-input v-model="form.privateKeyPath" readonly>
           <template #append>
-            <el-button @click="handleSelectKeyFile">浏览</el-button>
+            <el-button @click="form.privateKeyPath = ''; form.privateKeyId = ''">清除</el-button>
           </template>
         </el-input>
       </el-form-item>
@@ -157,6 +185,16 @@
           placeholder="其他备注信息"
         />
       </el-form-item>
+
+      <!-- 跳板机配置 -->
+      <el-divider content-position="left">
+        <span style="font-size: 14px; color: var(--text-secondary)">跳板机配置（可选）</span>
+      </el-divider>
+
+      <ProxyJumpConfig
+        :config="form.proxyJump"
+        @update="handleProxyJumpUpdate"
+      />
     </el-form>
 
     <template #footer>
@@ -170,7 +208,8 @@
 import { ref, reactive, watch } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAppStore } from '@/stores/app'
-import type { SessionConfig } from '@/types/session'
+import type { SessionConfig, ProxyJumpConfig as ProxyJumpConfigType } from '@/types/session'
+import ProxyJumpConfig from './ProxyJumpConfig.vue'
 
 interface Props {
   modelValue: boolean
@@ -261,6 +300,7 @@ const defaultForm = {
   username: '',
   authType: 'password' as 'password' | 'privateKey',
   password: '',
+  privateKeyId: '',
   privateKeyPath: '',
   passphrase: '',
   groupId: '',
@@ -272,10 +312,13 @@ const defaultForm = {
   billingCycle: '' as '' | 'monthly' | 'quarterly' | 'semi-annually' | 'annually' | 'biennially' | 'triennially' | 'custom',
   billingAmount: undefined as number | undefined,
   billingCurrency: 'CNY',
-  notes: ''
+  notes: '',
+  // 跳板机配置
+  proxyJump: undefined as ProxyJumpConfigType | undefined
 }
 
 const form = reactive({ ...defaultForm })
+const sshKeys = ref<any[]>([])
 
 const rules: FormRules = {
   name: [{ required: true, message: '请输入会话名称', trigger: 'blur' }],
@@ -297,11 +340,11 @@ const rules: FormRules = {
       trigger: 'blur'
     }
   ],
-  privateKeyPath: [
+  privateKeyId: [
     {
       validator: (_rule, value, callback) => {
-        if (form.authType === 'privateKey' && !value) {
-          callback(new Error('请选择私钥文件'))
+        if (form.authType === 'privateKey' && !value && !form.privateKeyPath) {
+          callback(new Error('请选择SSH密钥或本地私钥文件'))
         } else {
           callback()
         }
@@ -311,11 +354,36 @@ const rules: FormRules = {
   ]
 }
 
+// 加载SSH密钥列表
+const loadSSHKeys = async () => {
+  try {
+    const result = await window.electronAPI.sshKey?.getAll?.()
+    if (result?.success) {
+      sshKeys.value = result.data || []
+    }
+  } catch (error) {
+    console.error('Failed to load SSH keys:', error)
+  }
+}
+
+// 获取密钥类型颜色
+const getKeyTypeColor = (type: string) => {
+  const colors: Record<string, string> = {
+    rsa: 'primary',
+    ed25519: 'success',
+    ecdsa: 'warning'
+  }
+  return colors[type] || 'info'
+}
+
 watch(
   () => props.modelValue,
   (newValue) => {
     visible.value = newValue
     if (newValue) {
+      // 加载SSH密钥列表
+      loadSSHKeys()
+      
       if (props.session) {
         isEdit.value = true
         // 手动赋值以正确处理日期格式
@@ -325,6 +393,7 @@ watch(
         form.username = props.session.username || ''
         form.authType = props.session.authType || 'password'
         form.password = props.session.password || ''
+        form.privateKeyId = (props.session as any).privateKeyId || ''
         form.privateKeyPath = props.session.privateKeyPath || ''
         form.passphrase = props.session.passphrase || ''
         form.groupId = props.session.group || ''
@@ -342,6 +411,8 @@ watch(
         form.billingAmount = props.session.billingAmount
         form.billingCurrency = props.session.billingCurrency || 'CNY'
         form.notes = props.session.notes || ''
+        // 跳板机配置
+        form.proxyJump = props.session.proxyJump
       } else {
         isEdit.value = false
         Object.assign(form, defaultForm)
@@ -363,7 +434,7 @@ watch(visible, (newValue) => {
   }
 })
 
-const handleSelectKeyFile = async () => {
+const handleSelectLocalKeyFile = async () => {
   try {
     const filePath = await window.electronAPI.dialog.openFile({
       title: '选择私钥文件',
@@ -375,10 +446,16 @@ const handleSelectKeyFile = async () => {
     
     if (filePath) {
       form.privateKeyPath = filePath
+      form.privateKeyId = '' // 清除密钥ID选择
     }
   } catch (error) {
     console.error('Failed to select key file:', error)
   }
+}
+
+// 处理跳板机配置更新
+const handleProxyJumpUpdate = (config: ProxyJumpConfigType) => {
+  form.proxyJump = config.enabled ? config : undefined
 }
 
 const handleSave = async () => {
@@ -401,13 +478,20 @@ const handleSave = async () => {
         billingCycle: form.billingCycle || undefined,
         billingAmount: form.billingAmount,
         billingCurrency: form.billingCurrency || 'CNY',
-        notes: form.notes || undefined
+        notes: form.notes || undefined,
+        // 跳板机配置
+        proxyJump: form.proxyJump
       }
 
       if (form.authType === 'password') {
         sessionData.password = form.password
       } else {
-        sessionData.privateKeyPath = form.privateKeyPath
+        // 优先使用SSH密钥ID，其次使用本地文件路径
+        if (form.privateKeyId) {
+          (sessionData as any).privateKeyId = form.privateKeyId
+        } else if (form.privateKeyPath) {
+          sessionData.privateKeyPath = form.privateKeyPath
+        }
         sessionData.passphrase = form.passphrase || undefined
       }
 

@@ -21,6 +21,8 @@ class Logger {
   private currentLogFile: string
   private sessionLogging: Map<string, boolean>
   private sessionLogFiles: Map<string, string>
+  private readonly MAX_LOG_ENTRIES = 10000 // 最大日志条目数
+  private readonly MAX_LOG_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 
   constructor() {
     const userDataPath = app.getPath('userData')
@@ -34,6 +36,9 @@ class Logger {
 
     const date = new Date().toISOString().split('T')[0]
     this.currentLogFile = path.join(this.logDir, `mshell-${date}.log`)
+    
+    // 启动时清理旧日志
+    this.cleanOldLogs()
   }
 
   private sanitize(text: string): string {
@@ -44,6 +49,9 @@ class Logger {
   }
 
   private writeLog(entry: LogEntry): void {
+    // 检查日志轮转
+    this.checkLogRotation()
+    
     const sanitizedEntry = {
       ...entry,
       message: this.sanitize(entry.message),
@@ -142,13 +150,66 @@ class Logger {
           }
 
           logs.push(entry)
+          
+          // 限制返回的日志数量，防止内存溢出
+          if (logs.length >= this.MAX_LOG_ENTRIES) {
+            console.warn(`[Logger] Reached max log entries limit (${this.MAX_LOG_ENTRIES})`)
+            break
+          }
         } catch (e) {
           // Skip invalid lines
         }
       }
+      
+      if (logs.length >= this.MAX_LOG_ENTRIES) break
     }
 
     return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+  }
+
+  /**
+   * 清理旧日志文件（保留最近30天）
+   */
+  private cleanOldLogs(): void {
+    try {
+      const files = fs.readdirSync(this.logDir)
+      const now = Date.now()
+      const maxAge = 30 * 24 * 60 * 60 * 1000 // 30天
+
+      for (const file of files) {
+        if (file.startsWith('mshell-') && file.endsWith('.log')) {
+          const filePath = path.join(this.logDir, file)
+          const stats = fs.statSync(filePath)
+          
+          if (now - stats.mtime.getTime() > maxAge) {
+            fs.unlinkSync(filePath)
+            console.log(`[Logger] Deleted old log file: ${file}`)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[Logger] Error cleaning old logs:', error)
+    }
+  }
+
+  /**
+   * 检查并轮转日志文件
+   */
+  private checkLogRotation(): void {
+    try {
+      if (fs.existsSync(this.currentLogFile)) {
+        const stats = fs.statSync(this.currentLogFile)
+        
+        if (stats.size > this.MAX_LOG_FILE_SIZE) {
+          const timestamp = Date.now()
+          const newName = this.currentLogFile.replace('.log', `-${timestamp}.log`)
+          fs.renameSync(this.currentLogFile, newName)
+          console.log(`[Logger] Rotated log file to: ${newName}`)
+        }
+      }
+    } catch (error) {
+      console.error('[Logger] Error checking log rotation:', error)
+    }
   }
 }
 

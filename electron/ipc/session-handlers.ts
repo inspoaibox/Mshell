@@ -11,6 +11,11 @@ export function registerSessionHandlers() {
     return sessionManager.getAllSessions()
   })
 
+  ipcMain.handle('session:search', async (_event, query: string) => {
+    await sessionManager.initialize()
+    return sessionManager.searchSessions(query)
+  })
+
   ipcMain.handle('session:get', async (_event, id: string) => {
     await sessionManager.initialize()
     return sessionManager.getSession(id)

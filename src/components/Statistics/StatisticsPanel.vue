@@ -3,17 +3,19 @@
     <div class="panel-header">
       <h2>统计分析</h2>
       <div class="header-actions">
-        <el-select v-model="displayCurrency" size="small" style="width: 100px; margin-right: 8px;">
+        <el-segmented v-model="timeRange" :options="timeRangeOptions" size="default" />
+        <el-select v-model="displayCurrency" size="small" style="width: 100px; margin-left: 12px;">
           <el-option label="人民币 ¥" value="CNY" />
           <el-option label="美元 $" value="USD" />
         </el-select>
-        <el-button @click="appStore.loadSessions()" :icon="Refresh" circle title="刷新数据" />
+        <el-button @click="refreshData" :icon="Refresh" circle title="刷新数据" />
+        <el-button @click="showSettingsDialog = true" :icon="Setting" circle title="显示设置" />
       </div>
     </div>
 
     <div class="stats-content">
       <!-- Summary Cards -->
-      <div class="summary-grid">
+      <div v-if="visibleComponents.summaryCards" class="summary-grid">
         <div class="stat-card">
           <div class="stat-icon bg-primary">
             <el-icon><Monitor /></el-icon>
@@ -46,11 +48,24 @@
             <div class="stat-value">{{ totalUsage }}</div>
           </div>
         </div>
+
+        <div class="stat-card">
+          <div class="stat-icon bg-info">
+            <el-icon><Clock /></el-icon>
+          </div>
+          <div class="stat-info">
+            <div class="stat-label">总连接时长</div>
+            <div class="stat-value">{{ formatDuration(totalConnectionTime) }}</div>
+            <div class="stat-sub">
+              平均: {{ formatDuration(averageConnectionTime) }}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="dashboard-grid">
         <!-- Region Distribution -->
-        <div class="dashboard-card region-analysis">
+        <div v-if="visibleComponents.regionDistribution" class="dashboard-card region-analysis">
           <h3>主机地区分布</h3>
           <div class="chart-container" v-if="regionStats.length > 0">
             <div class="simple-bar-chart">
@@ -81,7 +96,7 @@
         </div>
 
         <!-- Provider Statistics -->
-        <div class="dashboard-card provider-analysis">
+        <div v-if="visibleComponents.providerStats" class="dashboard-card provider-analysis">
           <h3>服务商统计</h3>
           <div class="chart-container" v-if="providerStats.length > 0">
             <div class="provider-list">
@@ -112,7 +127,7 @@
         </div>
 
         <!-- Cost Analysis -->
-        <div class="dashboard-card cost-analysis">
+        <div v-if="visibleComponents.costAnalysis" class="dashboard-card cost-analysis">
           <h3>服务商费用占比</h3>
           <div class="chart-container" v-if="providerCosts.length > 0">
             <div class="simple-bar-chart">
@@ -140,7 +155,7 @@
         </div>
 
         <!-- Usage Analysis -->
-        <div class="dashboard-card usage-analysis">
+        <div v-if="visibleComponents.usageAnalysis" class="dashboard-card usage-analysis">
           <h3>最常使用会话</h3>
           <div class="chart-container" v-if="topUsedSessions.length > 0">
              <div class="simple-bar-chart">
@@ -166,10 +181,102 @@
             暂无使用数据
           </div>
         </div>
+
+        <!-- Connection Time Analysis -->
+        <div v-if="visibleComponents.connectionTime" class="dashboard-card time-analysis">
+          <h3>连接时长统计</h3>
+          <div class="chart-container" v-if="topConnectionTime.length > 0">
+            <div class="simple-bar-chart">
+              <div 
+                v-for="item in topConnectionTime" 
+                :key="item.sessionId" 
+                class="bar-item"
+              >
+                <div class="bar-label">
+                  <span class="truncate">{{ item.sessionName }}</span>
+                  <span>{{ formatDuration(item.totalTime) }}</span>
+                </div>
+                <div class="bar-track">
+                  <div 
+                    class="bar-fill" 
+                    :style="{ width: getPercentage(item.totalTime, maxConnectionTime) + '%', backgroundColor: '#4ECDC4' }"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty-chart">
+            暂无连接时长数据
+          </div>
+        </div>
+
+        <!-- Command Statistics -->
+        <div v-if="visibleComponents.commandStats" class="dashboard-card command-analysis">
+          <h3>最常用命令</h3>
+          <div class="chart-container" v-if="topCommands.length > 0">
+            <div class="simple-bar-chart">
+              <div 
+                v-for="item in topCommands" 
+                :key="item.command" 
+                class="bar-item"
+              >
+                <div class="bar-label">
+                  <span class="truncate command-text">{{ item.command }}</span>
+                  <span>{{ item.count }} 次</span>
+                </div>
+                <div class="bar-track">
+                  <div 
+                    class="bar-fill" 
+                    :style="{ width: getPercentage(item.count, maxCommandCount) + '%', backgroundColor: '#FFE66D' }"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty-chart">
+            暂无命令统计数据
+          </div>
+        </div>
+
+        <!-- Traffic Statistics -->
+        <div v-if="visibleComponents.trafficStats" class="dashboard-card traffic-analysis">
+          <h3>流量统计</h3>
+          <div class="chart-container" v-if="trafficStats.totalBytes > 0">
+            <div class="traffic-summary">
+              <div class="traffic-item">
+                <div class="traffic-label">上传流量</div>
+                <div class="traffic-value">{{ formatBytes(trafficStats.totalBytesOut) }}</div>
+              </div>
+              <div class="traffic-item">
+                <div class="traffic-label">下载流量</div>
+                <div class="traffic-value">{{ formatBytes(trafficStats.totalBytesIn) }}</div>
+              </div>
+              <div class="traffic-item">
+                <div class="traffic-label">总流量</div>
+                <div class="traffic-value highlight">{{ formatBytes(trafficStats.totalBytes) }}</div>
+              </div>
+            </div>
+            <div class="traffic-bar">
+              <div 
+                class="traffic-segment upload" 
+                :style="{ width: getPercentage(trafficStats.totalBytesOut, trafficStats.totalBytes) + '%' }"
+                :title="`上传: ${formatBytes(trafficStats.totalBytesOut)}`"
+              ></div>
+              <div 
+                class="traffic-segment download" 
+                :style="{ width: getPercentage(trafficStats.totalBytesIn, trafficStats.totalBytes) + '%' }"
+                :title="`下载: ${formatBytes(trafficStats.totalBytesIn)}`"
+              ></div>
+            </div>
+          </div>
+          <div v-else class="empty-chart">
+            暂无流量数据
+          </div>
+        </div>
       </div>
 
       <!-- Detailed Table -->
-      <div class="dashboard-card detailed-stats">
+      <div v-if="visibleComponents.detailedTable" class="dashboard-card detailed-stats">
         <h3>会话详情</h3>
         <el-table :data="appStore.sessions" style="width: 100%" height="300">
           <el-table-column prop="name" label="名称" min-width="150" />
@@ -202,26 +309,213 @@
         </el-table>
       </div>
     </div>
+
+    <!-- 显示设置对话框 -->
+    <el-dialog
+      v-model="showSettingsDialog"
+      title="统计组件显示设置"
+      width="500px"
+    >
+      <div class="settings-content">
+        <p class="settings-hint">选择要显示的统计组件</p>
+        <el-form label-position="left" label-width="140px">
+          <el-form-item label="概览卡片">
+            <el-switch v-model="visibleComponents.summaryCards" />
+          </el-form-item>
+          <el-form-item label="主机地区分布">
+            <el-switch v-model="visibleComponents.regionDistribution" />
+          </el-form-item>
+          <el-form-item label="服务商统计">
+            <el-switch v-model="visibleComponents.providerStats" />
+          </el-form-item>
+          <el-form-item label="服务商费用占比">
+            <el-switch v-model="visibleComponents.costAnalysis" />
+          </el-form-item>
+          <el-form-item label="最常使用会话">
+            <el-switch v-model="visibleComponents.usageAnalysis" />
+          </el-form-item>
+          <el-form-item label="连接时长统计">
+            <el-switch v-model="visibleComponents.connectionTime" />
+          </el-form-item>
+          <el-form-item label="最常用命令">
+            <el-switch v-model="visibleComponents.commandStats" />
+          </el-form-item>
+          <el-form-item label="流量统计">
+            <el-switch v-model="visibleComponents.trafficStats" />
+          </el-form-item>
+          <el-form-item label="会话详情表格">
+            <el-switch v-model="visibleComponents.detailedTable" />
+          </el-form-item>
+        </el-form>
+      </div>
+      <template #footer>
+        <el-button @click="resetVisibility">全部显示</el-button>
+        <el-button type="primary" @click="saveVisibilitySettings">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { Monitor, Money, Timer, Refresh } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { Monitor, Money, Timer, Refresh, Clock, Setting } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import * as FlagIcons from 'country-flag-icons/string/3x2'
+import type { SessionConfig } from '@/types/session'
 
 // 使用 store - 不需要重复加载数据！
 const appStore = useAppStore()
 
 const displayCurrency = ref<'CNY' | 'USD'>('CNY')
+const timeRange = ref('all')
+const timeRangeOptions = [
+  { label: '今日', value: 'today' },
+  { label: '本周', value: 'week' },
+  { label: '本月', value: 'month' },
+  { label: '全部', value: 'all' }
+]
+
+const connectionStats = ref<any[]>([])
+const commandStats = ref<any[]>([])
+
+// 显示设置
+const showSettingsDialog = ref(false)
+const visibleComponents = ref({
+  summaryCards: true,
+  regionDistribution: true,
+  providerStats: true,
+  costAnalysis: true,
+  usageAnalysis: true,
+  connectionTime: true,
+  commandStats: true,
+  trafficStats: true,
+  detailedTable: true
+})
+
+// 从 localStorage 加载显示设置
+const loadVisibilitySettings = () => {
+  const saved = localStorage.getItem('statistics-visibility')
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved)
+      visibleComponents.value = { ...visibleComponents.value, ...parsed }
+    } catch (e) {
+      console.error('Failed to load visibility settings:', e)
+    }
+  }
+}
+
+// 保存显示设置
+const saveVisibilitySettings = () => {
+  localStorage.setItem('statistics-visibility', JSON.stringify(visibleComponents.value))
+  ElMessage.success('显示设置已保存')
+  showSettingsDialog.value = false
+}
+
+// 重置为全部显示
+const resetVisibility = () => {
+  visibleComponents.value = {
+    summaryCards: true,
+    regionDistribution: true,
+    providerStats: true,
+    costAnalysis: true,
+    usageAnalysis: true,
+    connectionTime: true,
+    commandStats: true,
+    trafficStats: true,
+    detailedTable: true
+  }
+}
+
+// 流量统计 - 从过滤后的连接统计中计算
+const trafficStats = computed(() => {
+  const stats = {
+    totalBytesIn: 0,
+    totalBytesOut: 0,
+    totalBytes: 0
+  }
+  
+  filteredConnectionStats.value.forEach(conn => {
+    stats.totalBytesIn += conn.bytesIn || 0
+    stats.totalBytesOut += conn.bytesOut || 0
+  })
+  
+  stats.totalBytes = stats.totalBytesIn + stats.totalBytesOut
+  return stats
+})
+
+// 根据时间范围过滤数据
+const getTimeRangeFilter = () => {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  
+  switch (timeRange.value) {
+    case 'today':
+      return (date: Date | string) => new Date(date) >= today
+    case 'week':
+      const weekAgo = new Date(today)
+      weekAgo.setDate(weekAgo.getDate() - 7)
+      return (date: Date | string) => new Date(date) >= weekAgo
+    case 'month':
+      const monthAgo = new Date(today)
+      monthAgo.setMonth(monthAgo.getMonth() - 1)
+      return (date: Date | string) => new Date(date) >= monthAgo
+    default:
+      return () => true
+  }
+}
+
+// 过滤后的连接统计
+const filteredConnectionStats = computed(() => {
+  const filter = getTimeRangeFilter()
+  return connectionStats.value.filter(stat => 
+    stat.connectedAt && filter(stat.connectedAt)
+  )
+})
+
+// 过滤后的命令统计
+const filteredCommandStats = computed(() => {
+  const filter = getTimeRangeFilter()
+  return commandStats.value.filter(cmd => 
+    cmd.lastUsed && filter(cmd.lastUsed)
+  )
+})
 
 // 直接从 store 计算统计数据
 const totalSessions = computed(() => appStore.sessions.length)
 
+// 累计连接次数 - 使用过滤后的连接统计数据
 const totalUsage = computed(() => {
-  return appStore.sessions.reduce((acc, curr) => acc + (curr.usageCount || 0), 0)
+  return filteredConnectionStats.value.length
 })
+
+// 总连接时长（秒）- 使用过滤后的数据
+const totalConnectionTime = computed(() => {
+  return filteredConnectionStats.value.reduce((acc, stat) => acc + (stat.duration || 0), 0)
+})
+
+// 平均连接时长
+const averageConnectionTime = computed(() => {
+  const count = filteredConnectionStats.value.length
+  return count > 0 ? totalConnectionTime.value / count : 0
+})
+
+// 格式化时长
+const formatDuration = (seconds: number): string => {
+  if (seconds < 60) return `${Math.round(seconds)}秒`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}分钟`
+  if (seconds < 86400) return `${(seconds / 3600).toFixed(1)}小时`
+  return `${(seconds / 86400).toFixed(1)}天`
+}
+
+// 格式化流量
+const formatBytes = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
 
 const totalMonthlyCost = computed(() => {
   return appStore.sessions.reduce((acc, curr) => acc + getMonthlyCost(curr), 0)
@@ -314,6 +608,76 @@ const topUsedSessions = computed(() => {
     .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0))
     .slice(0, 5)
     .filter(s => (s.usageCount || 0) > 0)
+})
+
+// 连接时长统计 - 使用过滤后的数据
+const topConnectionTime = computed(() => {
+  const sessionTimeMap = new Map<string, { sessionId: string; sessionName: string; totalTime: number }>()
+  
+  filteredConnectionStats.value.forEach(stat => {
+    const existing = sessionTimeMap.get(stat.sessionId)
+    if (existing) {
+      existing.totalTime += stat.duration || 0
+    } else {
+      sessionTimeMap.set(stat.sessionId, {
+        sessionId: stat.sessionId,
+        sessionName: stat.sessionName,
+        totalTime: stat.duration || 0
+      })
+    }
+  })
+  
+  return Array.from(sessionTimeMap.values())
+    .sort((a, b) => b.totalTime - a.totalTime)
+    .slice(0, 5)
+})
+
+const maxConnectionTime = computed(() => {
+  return Math.max(...topConnectionTime.value.map(s => s.totalTime), 1)
+})
+
+// 命令统计 - 使用过滤后的数据
+const topCommands = computed(() => {
+  return filteredCommandStats.value
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+})
+
+const maxCommandCount = computed(() => {
+  return Math.max(...topCommands.value.map(c => c.count), 1)
+})
+
+// 刷新数据
+const refreshData = async () => {
+  await appStore.loadSessions()
+  await loadStatistics()
+}
+
+// 加载统计数据
+const loadStatistics = async () => {
+  try {
+    // 加载命令历史统计
+    const commandResult = await window.electronAPI.commandHistory?.getMostUsed?.(10)
+    if (commandResult?.success && commandResult.data) {
+      commandStats.value = commandResult.data
+    }
+
+    // 加载连接统计
+    const statsResult = await window.electronAPI.connectionStats?.getAll?.()
+    if (statsResult?.success && statsResult.data) {
+      connectionStats.value = statsResult.data
+    }
+    
+    // 加载流量统计 - 不需要单独加载，从连接统计中计算
+    // 流量统计会在 computed 中根据过滤后的连接统计计算
+  } catch (error) {
+    console.error('Failed to load statistics:', error)
+  }
+}
+
+onMounted(() => {
+  loadVisibilitySettings()
+  loadStatistics()
 })
 
 const regionStats = computed(() => {
@@ -446,7 +810,12 @@ const formatDate = (date?: Date | string) => {
 }
 
 // Re-expose loadData to parent if needed (now just calls store method)
-defineExpose({ loadData: () => appStore.loadSessions() })
+defineExpose({ loadData: refreshData })
+
+// 监听时间范围变化
+watch(timeRange, () => {
+  loadStatistics()
+})
 </script>
 
 <style scoped>
@@ -464,12 +833,16 @@ defineExpose({ loadData: () => appStore.loadSessions() })
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
 }
 
 .header-actions {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
+  flex-wrap: wrap;
 }
 
 .stats-content {
@@ -539,13 +912,19 @@ defineExpose({ loadData: () => appStore.loadSessions() })
   margin-top: 2px;
 }
 
-/* Dashboard Grid */
+/* Dashboard Grid - 改进布局 */
 .dashboard-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--spacing-lg);
 }
 
+/* 让某些卡片占据两列 */
+.dashboard-card.detailed-stats {
+  grid-column: 1 / -1;
+}
+
+/* 确保所有卡片有最小高度 */
 .dashboard-card {
   background: var(--bg-secondary);
   border-radius: var(--radius-lg);
@@ -553,16 +932,22 @@ defineExpose({ loadData: () => appStore.loadSessions() })
   border: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
+  min-height: 300px;
 }
 
 .dashboard-card h3 {
   margin-bottom: var(--spacing-lg);
   font-size: var(--text-lg);
   font-weight: 600;
+  flex-shrink: 0;
 }
 
 .chart-container {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .empty-chart {
@@ -572,14 +957,35 @@ defineExpose({ loadData: () => appStore.loadSessions() })
   justify-content: center;
   color: var(--text-tertiary);
   font-style: italic;
-  min-height: 150px;
+  min-height: 200px;
 }
 
-/* Simple Bar Chart */
+/* Simple Bar Chart - 改进滚动 */
 .simple-bar-chart {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-height: 100%;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.simple-bar-chart::-webkit-scrollbar {
+  width: 6px;
+}
+
+.simple-bar-chart::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+}
+
+.simple-bar-chart::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.simple-bar-chart::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
 }
 
 .bar-item {
@@ -616,9 +1022,23 @@ defineExpose({ loadData: () => appStore.loadSessions() })
 }
 
 /* Responsive */
-@media (max-width: 768px) {
+@media (max-width: 1200px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
+  }
+  
+  .summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .header-actions {
+    flex-wrap: wrap;
   }
 }
 
@@ -701,5 +1121,98 @@ defineExpose({ loadData: () => appStore.loadSessions() })
   font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
+
+/* Command Text */
+.command-text {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: var(--text-xs);
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* Traffic Statistics */
+.traffic-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+.traffic-item {
+  text-align: center;
+  padding: var(--spacing-md);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.traffic-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.traffic-value {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.traffic-value.highlight {
+  color: var(--primary-color);
+  font-size: var(--text-xl);
+}
+
+.traffic-bar {
+  height: 40px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  display: flex;
+}
+
+.traffic-segment {
+  height: 100%;
+  transition: width 1s ease-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.traffic-segment.upload {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.traffic-segment.download {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.bg-info {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* 设置对话框样式 */
+.settings-content {
+  padding: var(--spacing-md) 0;
+}
+
+.settings-hint {
+  margin: 0 0 var(--spacing-lg) 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.settings-content :deep(.el-form-item) {
+  margin-bottom: var(--spacing-md);
+}
+
+.settings-content :deep(.el-form-item__label) {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
 
 </style>

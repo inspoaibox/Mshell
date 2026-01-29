@@ -133,4 +133,141 @@ export function registerPortForwardHandlers() {
       }
     }
   )
+
+  // 更新转发配置
+  ipcMain.handle('portForward:update', async (_event, forwardId: string, updates: any) => {
+    try {
+      await portForwardManager.updateForward(forwardId, updates)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 获取流量统计
+  ipcMain.handle('portForward:getTrafficStats', async (_event, forwardId: string) => {
+    try {
+      const stats = portForwardManager.getTrafficStats(forwardId)
+      return { success: true, data: stats }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 获取所有流量统计
+  ipcMain.handle('portForward:getAllTrafficStats', async () => {
+    try {
+      const stats = portForwardManager.getAllTrafficStats()
+      return { success: true, data: stats }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 重置流量统计
+  ipcMain.handle('portForward:resetTrafficStats', async (_event, forwardId: string) => {
+    try {
+      portForwardManager.resetTrafficStats(forwardId)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // ========== 模板管理 ==========
+
+  // 创建模板
+  ipcMain.handle('portForward:createTemplate', async (_event, data: any) => {
+    try {
+      const template = await portForwardManager.createTemplate(data)
+      return { success: true, data: template }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 获取所有模板
+  ipcMain.handle('portForward:getAllTemplates', async () => {
+    try {
+      const templates = portForwardManager.getAllTemplates()
+      return { success: true, data: templates }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 获取模板
+  ipcMain.handle('portForward:getTemplate', async (_event, id: string) => {
+    try {
+      const template = portForwardManager.getTemplate(id)
+      return { success: true, data: template }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 更新模板
+  ipcMain.handle('portForward:updateTemplate', async (_event, id: string, updates: any) => {
+    try {
+      await portForwardManager.updateTemplate(id, updates)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 删除模板
+  ipcMain.handle('portForward:deleteTemplate', async (_event, id: string) => {
+    try {
+      await portForwardManager.deleteTemplate(id)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 按标签获取模板
+  ipcMain.handle('portForward:getTemplatesByTag', async (_event, tag: string) => {
+    try {
+      const templates = portForwardManager.getTemplatesByTag(tag)
+      return { success: true, data: templates }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 搜索模板
+  ipcMain.handle('portForward:searchTemplates', async (_event, query: string) => {
+    try {
+      const templates = portForwardManager.searchTemplates(query)
+      return { success: true, data: templates }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 从模板创建转发
+  ipcMain.handle('portForward:createFromTemplate', async (_event, templateId: string, connectionId: string) => {
+    try {
+      const forward = await portForwardManager.createForwardFromTemplate(templateId, connectionId)
+      return { success: true, data: forward }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 自动启动转发
+  ipcMain.handle('portForward:autoStart', async (_event, connectionId: string) => {
+    try {
+      const connection = sshConnectionManager.getConnection(connectionId)
+      if (!connection) {
+        return { success: false, error: 'Connection not found' }
+      }
+
+      await portForwardManager.autoStartForwards(connectionId, connection.client)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
 }

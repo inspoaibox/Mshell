@@ -67,7 +67,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Connection, FolderOpened, Share, Document, Tickets, Setting, DataAnalysis } from '@element-plus/icons-vue'
+import { Connection, FolderOpened, Share, Document, Tickets, Setting, DataAnalysis, Key, Files, Timer } from '@element-plus/icons-vue'
 import logoImg from '@/assets/logo.png'
 
 const activeMenu = ref('sessions')
@@ -86,14 +86,18 @@ onMounted(async () => {
 
 const mainMenuItems = [
   { index: 'sessions', label: '会话管理', icon: Connection },
+  { index: 'templates', label: '会话模板', icon: Document },
   { index: 'sftp', label: '文件传输', icon: FolderOpened },
   { index: 'port-forward', label: '端口转发', icon: Share },
   { index: 'snippets', label: '命令片段', icon: Document },
-  { index: 'statistics', label: '统计分析', icon: DataAnalysis }
+  { index: 'statistics', label: '统计分析', icon: DataAnalysis },
+  { index: 'tasks', label: '任务调度', icon: Timer },
+  { index: 'workflows', label: '工作流', icon: Files }
 ]
 
 const bottomMenuItems = [
-  { index: 'logs', label: '系统日志', icon: Tickets },
+  { index: 'keys', label: 'SSH密钥', icon: Key },
+  { index: 'logs', label: '日志记录', icon: Tickets },
   { index: 'settings', label: '设置', icon: Setting }
 ]
 
@@ -121,6 +125,26 @@ const handleMenuSelect = (index: string) => {
   z-index: 10;
   box-shadow: var(--shadow-lg);
   flex-shrink: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 隐藏滚动条但保持滚动功能 */
+.sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 2px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
 }
 
 /* Logo区域 */
@@ -131,6 +155,7 @@ const handleMenuSelect = (index: string) => {
   justify-content: center;
   padding: var(--spacing-md);
   border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
 }
 
 .logo-wrapper {
@@ -189,15 +214,17 @@ const handleMenuSelect = (index: string) => {
   flex-direction: column;
   gap: var(--spacing-xs);
   padding: var(--spacing-md) var(--spacing-sm);
+  flex-shrink: 0;
 }
 
 .sidebar-nav-bottom {
   padding-bottom: var(--spacing-sm);
+  flex-shrink: 0;
 }
 
 .nav-item {
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -279,6 +306,7 @@ const handleMenuSelect = (index: string) => {
   display: flex;
   justify-content: center;
   border-top: 1px solid var(--border-light);
+  flex-shrink: 0;
 }
 
 .version-badge {

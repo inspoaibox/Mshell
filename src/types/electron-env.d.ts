@@ -16,9 +16,13 @@ export interface ElectronAPI {
         disconnect: (id: string) => Promise<void>
         write: (id: string, data: string) => Promise<void>
         resize: (id: string, cols: number, rows: number) => Promise<void>
-        onData: (callback: (id: string, data: string) => void) => void
-        onError: (callback: (id: string, error: string) => void) => void
-        onClose: (callback: (id: string) => void) => void
+        // 事件监听器返回取消订阅函数
+        onData: (callback: (id: string, data: string) => void) => () => void
+        onError: (callback: (id: string, error: string) => void) => () => void
+        onClose: (callback: (id: string) => void) => () => void
+        onReconnecting: (callback: (id: string, attempt: number, maxAttempts: number) => void) => () => void
+        onReconnected: (callback: (id: string) => void) => () => void
+        onReconnectFailed: (callback: (id: string, reason: string) => void) => () => void
     }
     sftp: {
         init: (connectionId: string) => Promise<{ success: boolean; error?: string }>
@@ -28,6 +32,28 @@ export interface ElectronAPI {
         renameFile: (connectionId: string, oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>
         uploadFile: (connectionId: string, localPath: string, remotePath: string) => Promise<{ success: boolean; error?: string }>
         downloadFile: (connectionId: string, remotePath: string, localPath: string) => Promise<{ success: boolean; error?: string }>
+        readFile: (connectionId: string, filePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
+        readFileBuffer: (connectionId: string, filePath: string) => Promise<{ success: boolean; data?: ArrayBuffer; error?: string }>
+        writeFile: (connectionId: string, filePath: string, content: string) => Promise<{ success: boolean; error?: string }>
+        createFile: (connectionId: string, filePath: string) => Promise<{ success: boolean; error?: string }>
+        copyFile: (connectionId: string, sourcePath: string, targetPath: string) => Promise<{ success: boolean; error?: string }>
+        chmod: (connectionId: string, path: string, mode: number) => Promise<{ success: boolean; error?: string }>
+        getAllTasks: () => Promise<{ success: boolean; tasks?: any[]; error?: string }>
+        cancelTask: (taskId: string) => Promise<{ success: boolean; error?: string }>
+        pauseTransfer: (taskId: string) => Promise<{ success: boolean; error?: string }>
+        resumeTransfer: (connectionId: string, taskId: string) => Promise<{ success: boolean; error?: string }>
+        getIncompleteTransfers: (connectionId?: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getTransferRecord: (taskId: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        getAllTransferRecords: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        deleteTransferRecord: (taskId: string) => Promise<{ success: boolean; error?: string }>
+        cleanupCompletedRecords: () => Promise<{ success: boolean; error?: string }>
+        uploadFiles: (connectionId: string, files: Array<{ localPath: string; remotePath: string }>) => Promise<{ success: boolean; results?: any[]; error?: string }>
+        downloadFiles: (connectionId: string, files: Array<{ remotePath: string; localPath: string }>) => Promise<{ success: boolean; results?: any[]; error?: string }>
+        deleteFiles: (connectionId: string, filePaths: string[]) => Promise<{ success: boolean; results?: any[]; error?: string }>
+        deleteDirectories: (connectionId: string, dirPaths: string[]) => Promise<{ success: boolean; results?: any[]; error?: string }>
+        onProgress: (callback: (taskId: string, progress: any) => void) => void
+        onComplete: (callback: (taskId: string) => void) => void
+        onError: (callback: (taskId: string, error: string) => void) => void
         connect: (config: any) => Promise<{ success: boolean; error?: string }>
         list: (path: string) => Promise<any[]>
         getHomeDir: () => Promise<string>
@@ -57,9 +83,19 @@ export interface ElectronAPI {
         selectDirectory: () => Promise<any>
     }
     snippet: {
-        getAll: () => Promise<{ success: boolean; snippets: any[] }>
-        create: (data: any) => Promise<{ success: boolean; snippet?: any; error?: string }>
-        incrementUsage: (id: string) => Promise<void>
+        getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        get: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        create: (data: any) => Promise<{ success: boolean; data?: any; error?: string }>
+        update: (id: string, data: any) => Promise<{ success: boolean; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        incrementUsage: (id: string) => Promise<{ success: boolean; error?: string }>
+        search: (query: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        searchByShortcut: (prefix: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getByShortcut: (shortcut: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        getAllWithShortcut: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        replaceVariables: (command: string, values: Record<string, string>) => Promise<{ success: boolean; data?: string; error?: string }>
+        extractVariables: (command: string) => Promise<{ success: boolean; data?: string[]; error?: string }>
+        getPredefinedVariables: () => Promise<{ success: boolean; data?: any[]; error?: string }>
     }
     dialog: {
         showContextMenu: (items: any[]) => Promise<string>
@@ -76,6 +112,81 @@ export interface ElectronAPI {
     onShortcut: (name: string, callback: () => void) => void
     app: {
         getVersion: () => Promise<string>
+    }
+    serverMonitor?: {
+        start: (sessionId: string, config?: any) => Promise<{ success: boolean; error?: string }>
+        stop: (sessionId: string) => Promise<{ success: boolean; error?: string }>
+        getMetrics: (sessionId: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        getMonitoredSessions: () => Promise<{ success: boolean; data?: string[]; error?: string }>
+        updateConfig: (sessionId: string, config: any) => Promise<{ success: boolean; error?: string }>
+        onMetrics: (callback: (sessionId: string, metrics: any) => void) => void
+        onError: (callback: (sessionId: string, error: any) => void) => void
+    }
+    sshKey?: {
+        getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        get: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        generate: (options: any) => Promise<{ success: boolean; data?: any; error?: string }>
+        import: (name: string, privateKeyPath: string, passphrase?: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        export: (id: string, exportPath: string) => Promise<{ success: boolean; error?: string }>
+        update: (id: string, updates: any) => Promise<{ success: boolean; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        readPrivateKey: (id: string) => Promise<{ success: boolean; data?: string; error?: string }>
+        getStatistics: () => Promise<{ success: boolean; data?: any; error?: string }>
+        selectPrivateKeyFile: () => Promise<{ success: boolean; data?: string; canceled?: boolean; error?: string }>
+        selectExportPath: (defaultName: string) => Promise<{ success: boolean; data?: string; canceled?: boolean; error?: string }>
+    }
+    auditLog?: {
+        getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        get: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        filter: (filter: any) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getByTimeRange: (startDate: string, endDate: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getByLevel: (level: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getByAction: (action: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getBySession: (sessionId: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getBySuccess: (success: boolean) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getStatistics: (startDate?: string, endDate?: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        getToday: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getWeek: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getMonth: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        export: (filter?: any) => Promise<{ success: boolean; data?: string; error?: string }>
+        exportToCSV: (filter?: any) => Promise<{ success: boolean; data?: string; error?: string }>
+        clearAll: () => Promise<{ success: boolean; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+    }
+    sessionLock?: {
+        getConfig: () => Promise<{ success: boolean; data?: any; error?: string }>
+        updateConfig: (updates: any) => Promise<{ success: boolean; error?: string }>
+        setPassword: (password: string) => Promise<{ success: boolean; error?: string }>
+        verifyPassword: (password: string) => Promise<{ success: boolean; data?: boolean; error?: string }>
+        hasPassword: () => Promise<{ success: boolean; data?: boolean; error?: string }>
+        removePassword: () => Promise<{ success: boolean; error?: string }>
+        lock: () => Promise<{ success: boolean; error?: string }>
+        unlock: (password?: string) => Promise<{ success: boolean; error?: string }>
+        isLocked: () => Promise<{ success: boolean; data?: boolean; error?: string }>
+        updateActivity: () => Promise<{ success: boolean; error?: string }>
+        getStatus: () => Promise<{ success: boolean; data?: any; error?: string }>
+        onLocked: (callback: () => void) => void
+        onUnlocked: (callback: () => void) => void
+    }
+    taskScheduler?: {
+        getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        get: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        create: (data: any) => Promise<{ success: boolean; data?: any; error?: string }>
+        update: (id: string, updates: any) => Promise<{ success: boolean; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        enable: (id: string) => Promise<{ success: boolean; error?: string }>
+        disable: (id: string) => Promise<{ success: boolean; error?: string }>
+        execute: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        getExecutions: (taskId: string, limit?: number) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getAllExecutions: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        clearExecutions: (taskId: string) => Promise<{ success: boolean; error?: string }>
+        search: (query: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getByTag: (tag: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getStatistics: () => Promise<{ success: boolean; data?: any; error?: string }>
+        onTaskStarted: (callback: (data: any) => void) => void
+        onTaskCompleted: (callback: (data: any) => void) => void
+        onTaskFailed: (callback: (data: any) => void) => void
+        onTaskNotify: (callback: (data: any) => void) => void
     }
 }
 

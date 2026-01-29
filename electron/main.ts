@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
 import { registerSSHHandlers } from './ipc/ssh-handlers'
 import { registerSessionHandlers } from './ipc/session-handlers'
@@ -9,12 +9,25 @@ import { registerDialogHandlers } from './ipc/dialog-handlers'
 import { registerFsHandlers } from './ipc/fs-handlers'
 import { registerPortForwardHandlers } from './ipc/port-forward-handlers'
 import { registerSnippetHandlers } from './ipc/snippet-handlers'
+import { registerCommandHistoryHandlers } from './ipc/command-history-handlers'
+import { registerConnectionStatsHandlers } from './ipc/connection-stats-handlers'
+import { registerSessionTemplateHandlers } from './ipc/session-template-handlers'
 import { registerBackupHandlers } from './ipc/backup-handlers'
+import { registerServerMonitorHandlers } from './ipc/server-monitor-handlers'
+import { registerSSHKeyHandlers } from './ipc/ssh-key-handlers'
+import { registerAuditLogHandlers } from './ipc/audit-log-handlers'
+import { registerSessionLockHandlers } from './ipc/session-lock-handlers'
+import { registerTaskSchedulerHandlers } from './ipc/task-scheduler-handlers'
+import { registerWorkflowHandlers } from './ipc/workflow-handlers'
 import { crashRecoveryManager } from './utils/crash-recovery'
 import { logger } from './utils/logger'
 import { backupManager } from './managers/BackupManager'
+import { appSettingsManager } from './utils/app-settings'
+import { sessionLockManager } from './managers/SessionLockManager'
 
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+let isQuitting = false
 
 // Register IPC handlers
 registerSSHHandlers()
@@ -28,7 +41,16 @@ ipcMain.handle('app:getVersion', () => app.getVersion())
 registerFsHandlers()
 registerPortForwardHandlers()
 registerSnippetHandlers()
+registerCommandHistoryHandlers()
+registerConnectionStatsHandlers()
+registerSessionTemplateHandlers()
 registerBackupHandlers()
+registerServerMonitorHandlers()
+registerSSHKeyHandlers()
+registerAuditLogHandlers()
+registerSessionLockHandlers()
+registerTaskSchedulerHandlers()
+registerWorkflowHandlers()
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -160,6 +182,41 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+
+  // 处理窗口关闭事件
+  mainWindow.on('close', async (event) => {
+    const settings = appSettingsManager.getSettings()
+    
+    // 如果启用了最小化到托盘且不是真正退出
+    if (settings.general.minimizeToTray && !isQuitting) {
+      event.preventDefault()
+      mainWindow?.hide()
+      
+      // 创建托盘图标（如果还没有）
+      if (!tray) {
+        createTray()
+      }
+      
+      return false
+    }
+  })
+
+  // 处理窗口最小化事件
+  mainWindow.on('minimize', () => {
+    try {
+      // 获取锁定配置
+      const lockConfig = sessionLockManager.getConfig()
+      
+      // 如果启用了"最小化时锁定"且已设置密码
+      if (lockConfig.enabled && lockConfig.lockOnMinimize && sessionLockManager.hasPassword()) {
+        // 锁定会话
+        sessionLockManager.lock()
+        console.log('[Main] Session locked on minimize')
+      }
+    } catch (error) {
+      console.error('[Main] Error locking on minimize:', error)
+    }
+  })
 }
 
 app.whenReady().then(async () => {
@@ -172,6 +229,12 @@ app.whenReady().then(async () => {
 
   // 初始化备份管理器
   await backupManager.initialize()
+
+  // 应用启动时打开设置
+  const settings = appSettingsManager.getSettings()
+  app.setLoginItemSettings({
+    openAtLogin: settings.general.startWithSystem
+  })
 
   createWindow()
 
@@ -189,8 +252,76 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  isQuitting = true
   crashRecoveryManager.stop()
   backupManager.cleanup()
 })
+
+// 创建托盘图标
+function createTray() {
+  if (tray) return
+
+  // 使用应用图标作为托盘图标
+  // 开发环境和生产环境的路径不同
+  let iconPath: string
+  
+  if (app.isPackaged) {
+    // 生产环境：打包后的路径
+    iconPath = process.platform === 'win32'
+      ? join(process.resourcesPath, 'build', 'icon.ico')
+      : join(process.resourcesPath, 'build', 'icon.png')
+  } else {
+    // 开发环境：项目根目录
+    iconPath = process.platform === 'win32'
+      ? join(__dirname, '../build/icon.ico')
+      : join(__dirname, '../build/icon.png')
+  }
+  
+  const icon = nativeImage.createFromPath(iconPath)
+  
+  // 检查图标是否加载成功
+  if (icon.isEmpty()) {
+    console.error('Failed to load tray icon from:', iconPath)
+    return
+  }
+  
+  // Windows 托盘图标不需要 resize，使用原始大小
+  tray = process.platform === 'win32' 
+    ? new Tray(icon)
+    : new Tray(icon.resize({ width: 16, height: 16 }))
+  
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: '显示窗口',
+      click: () => {
+        mainWindow?.show()
+      }
+    },
+    {
+      label: '退出',
+      click: () => {
+        isQuitting = true
+        app.quit()
+      }
+    }
+  ])
+  
+  tray.setToolTip('MShell - SSH Client')
+  tray.setContextMenu(contextMenu)
+  
+  // 单击托盘图标显示窗口（Windows 习惯）
+  tray.on('click', () => {
+    if (mainWindow?.isVisible()) {
+      mainWindow.hide()
+    } else {
+      mainWindow?.show()
+    }
+  })
+  
+  // 双击托盘图标显示窗口
+  tray.on('double-click', () => {
+    mainWindow?.show()
+  })
+}
 
 

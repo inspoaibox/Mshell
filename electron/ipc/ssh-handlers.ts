@@ -80,6 +80,17 @@ export function registerSSHHandlers() {
     }
   })
 
+  // 执行命令并获取输出
+  ipcMain.handle('ssh:executeCommand', async (_event, id: string, command: string, timeout?: number) => {
+    try {
+      const output = await sshConnectionManager.executeCommand(id, command, timeout)
+      return { success: true, data: output }
+    } catch (error: any) {
+      logger.logError('connection', `Failed to execute command on session ${id}: ${command}`, error)
+      return { success: false, error: error.message }
+    }
+  })
+
   // 获取连接状态
   ipcMain.handle('ssh:getConnection', async (_event, id: string) => {
     const connection = sshConnectionManager.getConnection(id)
@@ -173,5 +184,47 @@ export function registerSSHHandlers() {
     windows.forEach(win => {
       win.webContents.send('ssh:close', id)
     })
+  })
+
+  // 重连事件
+  sshConnectionManager.on('reconnecting', (id: string, attempt: number, maxAttempts: number) => {
+    const windows = BrowserWindow.getAllWindows()
+    windows.forEach(win => {
+      win.webContents.send('ssh:reconnecting', id, attempt, maxAttempts)
+    })
+  })
+
+  sshConnectionManager.on('reconnected', (id: string) => {
+    const windows = BrowserWindow.getAllWindows()
+    windows.forEach(win => {
+      win.webContents.send('ssh:reconnected', id)
+    })
+  })
+
+  sshConnectionManager.on('reconnect-failed', (id: string, reason: string) => {
+    const windows = BrowserWindow.getAllWindows()
+    windows.forEach(win => {
+      win.webContents.send('ssh:reconnect-failed', id, reason)
+    })
+  })
+
+  // 取消重连
+  ipcMain.handle('ssh:cancelReconnect', async (_event, id: string) => {
+    try {
+      sshConnectionManager.cancelReconnect(id)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 设置重连配置
+  ipcMain.handle('ssh:setReconnectConfig', async (_event, id: string, maxAttempts: number, interval: number) => {
+    try {
+      sshConnectionManager.setReconnectConfig(id, maxAttempts, interval)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
   })
 }

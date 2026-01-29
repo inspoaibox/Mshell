@@ -5,6 +5,12 @@ import { createCipheriv, createDecipheriv, randomBytes, scrypt } from 'crypto'
 import { promisify } from 'util'
 import { sessionManager } from './SessionManager'
 import { snippetManager } from './SnippetManager'
+import { commandHistoryManager } from './CommandHistoryManager'
+import { sshKeyManager } from './SSHKeyManager'
+import { portForwardManager } from './PortForwardManager'
+import { sessionTemplateManager } from './SessionTemplateManager'
+import { taskSchedulerManager } from './TaskSchedulerManager'
+import { workflowManager } from './WorkflowManager'
 import { logger } from '../utils/logger'
 
 const scryptAsync = promisify(scrypt)
@@ -16,7 +22,15 @@ export interface BackupData {
   version: string
   timestamp: string
   sessions: any[]
+  sessionGroups: any[]
   snippets: any[]
+  commandHistory: any[]
+  sshKeys: any[]
+  portForwards: any[]
+  portForwardTemplates: any[]
+  sessionTemplates: any[]
+  scheduledTasks: any[]
+  workflows: any[]
   settings: any
 }
 
@@ -191,11 +205,19 @@ export class BackupManager {
     try {
       // 收集所有数据
       const backupData: BackupData = {
-        version: '1.0.0',
+        version: '2.0.0', // 升级版本号以支持新的数据结构
         timestamp: new Date().toISOString(),
         sessions: sessionManager.getAllSessions(),
+        sessionGroups: sessionManager.getAllGroups(),
         snippets: snippetManager.getAll(),
-        settings: {} // 可以添加设置数据
+        commandHistory: commandHistoryManager.getAll(),
+        sshKeys: await this.collectSSHKeysWithPrivateKeys(),
+        portForwards: portForwardManager.getAllForwards(),
+        portForwardTemplates: portForwardManager.getAllTemplates(),
+        sessionTemplates: sessionTemplateManager.getAll(),
+        scheduledTasks: taskSchedulerManager.getAll(),
+        workflows: workflowManager.getAll(),
+        settings: await this.getAppSettings()
       }
 
       // 序列化数据
@@ -229,6 +251,63 @@ export class BackupManager {
     } catch (error) {
       logger.logError('system', 'Failed to create backup', error as Error)
       throw error
+    }
+  }
+
+  /**
+   * 收集SSH密钥（包含私钥内容）
+   */
+  private async collectSSHKeysWithPrivateKeys(): Promise<any[]> {
+    try {
+      const keys = sshKeyManager.getAllKeys()
+      const keysWithContent = []
+
+      for (const key of keys) {
+        try {
+          // 读取私钥文件内容
+          const privateKeyContent = await fs.readFile(key.privateKeyPath, 'utf-8')
+          
+          // 尝试读取公钥文件内容
+          let publicKeyContent = key.publicKey
+          const publicKeyPath = `${key.privateKeyPath}.pub`
+          try {
+            const pubKeyFromFile = await fs.readFile(publicKeyPath, 'utf-8')
+            if (pubKeyFromFile) {
+              publicKeyContent = pubKeyFromFile
+            }
+          } catch (error) {
+            // 公钥文件不存在，使用元数据中的公钥
+          }
+
+          keysWithContent.push({
+            ...key,
+            privateKeyContent, // 添加私钥内容
+            publicKeyContent   // 添加公钥内容
+          })
+        } catch (error) {
+          logger.logError('system', `Failed to read SSH key file: ${key.name}`, error as Error)
+          // 如果读取失败，仍然保存元数据
+          keysWithContent.push(key)
+        }
+      }
+
+      return keysWithContent
+    } catch (error) {
+      logger.logError('system', 'Failed to collect SSH keys', error as Error)
+      return []
+    }
+  }
+
+  /**
+   * 获取应用设置
+   */
+  private async getAppSettings(): Promise<any> {
+    try {
+      const { appSettingsManager } = await import('../utils/app-settings')
+      return appSettingsManager.getSettings()
+    } catch (error) {
+      logger.logError('system', 'Failed to get app settings', error as Error)
+      return {}
     }
   }
 
@@ -277,6 +356,12 @@ export class BackupManager {
     restoreSessions: boolean
     restoreSnippets: boolean
     restoreSettings: boolean
+    restoreCommandHistory?: boolean
+    restoreSSHKeys?: boolean
+    restorePortForwards?: boolean
+    restoreSessionTemplates?: boolean
+    restoreScheduledTasks?: boolean
+    restoreWorkflows?: boolean
   }): Promise<void> {
     try {
       // 恢复会话
@@ -302,6 +387,23 @@ export class BackupManager {
             logger.logError('system', `Failed to restore session: ${session.name}`, error as Error)
           }
         }
+
+        // 恢复会话分组
+        if (backupData.sessionGroups) {
+          const currentGroups = sessionManager.getAllGroups()
+          for (const group of backupData.sessionGroups) {
+            try {
+              const existing = currentGroups.find(g => g.id === group.id || g.name === group.name)
+              if (!existing) {
+                await sessionManager.createGroup(group.name)
+              } else if (existing.name !== group.name) {
+                await sessionManager.renameGroup(existing.id, group.name)
+              }
+            } catch (error) {
+              logger.logError('system', `Failed to restore group: ${group.name}`, error as Error)
+            }
+          }
+        }
       }
 
       // 恢复命令片段
@@ -322,6 +424,134 @@ export class BackupManager {
             }
           } catch (error) {
             logger.logError('system', `Failed to restore snippet: ${snippet.name}`, error as Error)
+          }
+        }
+      }
+
+      // 恢复命令历史
+      if (options.restoreCommandHistory && backupData.commandHistory) {
+        for (const history of backupData.commandHistory) {
+          try {
+            await commandHistoryManager.create(history)
+          } catch (error) {
+            logger.logError('system', `Failed to restore command history`, error as Error)
+          }
+        }
+      }
+
+      // 恢复SSH密钥
+      if (options.restoreSSHKeys && backupData.sshKeys) {
+        for (const key of backupData.sshKeys) {
+          try {
+            const existing = sshKeyManager.getAllKeys().find(k => k.id === key.id || k.name === key.name)
+            
+            // 如果备份中包含私钥内容，恢复完整的密钥
+            if (key.privateKeyContent) {
+              if (existing) {
+                // 更新现有密钥
+                logger.logInfo('system', `Updating SSH key: ${key.name}`)
+                // 删除旧密钥
+                sshKeyManager.deleteKey(existing.id)
+              }
+              
+              // 使用 addKey 方法恢复密钥（会创建新的密钥文件）
+              sshKeyManager.addKey({
+                name: key.name,
+                privateKey: key.privateKeyContent,
+                publicKey: key.publicKeyContent || key.publicKey,
+                passphrase: key.protected ? undefined : undefined, // 如果有密码保护，用户需要重新输入
+                comment: key.comment
+              })
+              
+              logger.logInfo('system', `SSH key "${key.name}" restored successfully with private key`)
+            } else {
+              // 如果没有私钥内容（旧版本备份），只恢复元数据
+              if (!existing) {
+                logger.logInfo('system', `SSH key "${key.name}" metadata restored, but key file needs manual import`)
+              }
+            }
+          } catch (error) {
+            logger.logError('system', `Failed to restore SSH key: ${key.name}`, error as Error)
+          }
+        }
+      }
+
+      // 恢复端口转发配置
+      if (options.restorePortForwards && backupData.portForwards) {
+        for (const forward of backupData.portForwards) {
+          try {
+            const existing = portForwardManager.getAllForwards().find(f => f.id === forward.id)
+            if (existing) {
+              await portForwardManager.updateForward(existing.id, forward)
+            } else {
+              await portForwardManager.addForward(forward)
+            }
+          } catch (error) {
+            logger.logError('system', `Failed to restore port forward`, error as Error)
+          }
+        }
+
+        // 恢复端口转发模板
+        if (backupData.portForwardTemplates) {
+          for (const template of backupData.portForwardTemplates) {
+            try {
+              const existing = portForwardManager.getAllTemplates().find(t => t.id === template.id || t.name === template.name)
+              if (existing) {
+                await portForwardManager.updateTemplate(existing.id, template)
+              } else {
+                await portForwardManager.createTemplate(template)
+              }
+            } catch (error) {
+              logger.logError('system', `Failed to restore port forward template: ${template.name}`, error as Error)
+            }
+          }
+        }
+      }
+
+      // 恢复会话模板
+      if (options.restoreSessionTemplates && backupData.sessionTemplates) {
+        for (const template of backupData.sessionTemplates) {
+          try {
+            const existing = sessionTemplateManager.getAll().find(t => t.id === template.id || t.name === template.name)
+            if (existing) {
+              await sessionTemplateManager.updateTemplate(existing.id, template)
+            } else {
+              await sessionTemplateManager.createTemplate(template)
+            }
+          } catch (error) {
+            logger.logError('system', `Failed to restore session template: ${template.name}`, error as Error)
+          }
+        }
+      }
+
+      // 恢复任务调度
+      if (options.restoreScheduledTasks && backupData.scheduledTasks) {
+        for (const task of backupData.scheduledTasks) {
+          try {
+            const existing = taskSchedulerManager.getAll().find(t => t.id === task.id || t.name === task.name)
+            if (existing) {
+              taskSchedulerManager.update(existing.id, task)
+            } else {
+              taskSchedulerManager.create(task)
+            }
+          } catch (error) {
+            logger.logError('system', `Failed to restore scheduled task: ${task.name}`, error as Error)
+          }
+        }
+      }
+
+      // 恢复工作流
+      if (options.restoreWorkflows && backupData.workflows) {
+        for (const workflow of backupData.workflows) {
+          try {
+            const existing = workflowManager.getAll().find(w => w.id === workflow.id || w.name === workflow.name)
+            if (existing) {
+              workflowManager.update(existing.id, workflow)
+            } else {
+              workflowManager.create(workflow)
+            }
+          } catch (error) {
+            logger.logError('system', `Failed to restore workflow: ${workflow.name}`, error as Error)
           }
         }
       }

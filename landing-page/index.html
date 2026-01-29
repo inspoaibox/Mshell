@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="MShell - 专业的 Windows SSH 客户端，为开发者和运维人员打造的现代化终端工具">
+    <meta name="keywords" content="SSH客户端,终端,Windows,开发工具,运维工具,MShell">
+    <title>MShell - 专业的 Windows SSH 客户端</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/png" href="favicon.png">
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <img src="logo.png" alt="MShell Logo" class="logo">
+                <span class="brand-name">MShell</span>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="#features">功能特性</a></li>
+                <li><a href="#screenshots">产品截图</a></li>
+                <li><a href="#download">立即下载</a></li>
+                <li><a href="#docs">文档</a></li>
+            </ul>
+            <button class="mobile-menu-toggle" aria-label="Toggle menu">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- 英雄区域 -->
+    <section class="hero">
+        <div class="hero-background">
+            <div class="hero-grid"></div>
+        </div>
+        <div class="container">
+            <div class="hero-content">
+                <h1 class="hero-title">
+                    <span class="gradient-text glow-effect">MShell</span>
+                    <br>
+                    <span class="subtitle-text">专业的 SSH 终端客户端</span>
+                </h1>
+                <p class="hero-subtitle">
+                    为开发者和运维人员打造的现代化终端工具<br>
+                    强大、高效、优雅
+                </p>
+                <div class="hero-actions">
+                    <a href="#download" class="btn btn-primary btn-large">
+                        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                        </svg>
+                        立即下载
+                    </a>
+                    <a href="#features" class="btn btn-secondary btn-large">
+                        了解更多
+                    </a>
+                </div>
+                <div class="hero-stats">
+                    <div class="stat-item">
+                        <div class="stat-value">v0.1.5</div>
+                        <div class="stat-label">最新版本</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">免费</div>
+                        <div class="stat-label">个人使用</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">Windows</div>
+                        <div class="stat-label">支持平台</div>
+                    </div>
+                </div>
+            </div>
+            <div class="hero-image">
+                <div class="terminal-window">
+                    <div class="terminal-header">
+                        <div class="terminal-buttons">
+                            <span class="btn-close"></span>
+                            <span class="btn-minimize"></span>
+                            <span class="btn-maximize"></span>
+                        </div>
+                        <div class="terminal-title">root@server ~ </div>
+                    </div>
+                    <div class="terminal-body">
+                        <div class="terminal-line">
+                            <span class="prompt">$</span>
+                            <span class="command">ssh user@server.com</span>
+                        </div>
+                        <div class="terminal-line">
+                            <span class="output">Connected to server.com</span>
+                        </div>
+                        <div class="terminal-line">
+                            <span class="prompt">$</span>
+                            <span class="command typing">ls -la</span>
+                            <span class="cursor"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 功能特性 -->
+    <section id="features" class="features">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">强大的功能特性</h2>
+                <p class="section-subtitle">一切为了更好的终端体验</p>
+            </div>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                            <path d="M9 9l6 6M15 9l-6 6"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">多会话管理</h3>
+                    <p class="feature-description">支持同时管理多个 SSH 会话，智能分组，快速切换，提升工作效率</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">快捷命令</h3>
+                    <p class="feature-description">自定义快捷命令，一键执行常用操作，支持变量替换和命令片段</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 6v6l4 2"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">智能补全</h3>
+                    <p class="feature-description">命令自动补全、路径补全、历史命令补全，让输入更快更准确</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">SFTP 文件传输</h3>
+                    <p class="feature-description">内置 SFTP 客户端，支持文件上传下载，拖拽操作，传输队列管理</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">安全可靠</h3>
+                    <p class="feature-description">支持密码、密钥认证，会话锁定，密码加密存储，保护您的数据安全</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <rect x="2" y="7" width="20" height="14" rx="2"/>
+                            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">端口转发</h3>
+                    <p class="feature-description">支持本地和远程端口转发，轻松访问内网服务，满足各种网络需求</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+                            <line x1="4" y1="22" x2="4" y2="15"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">服务器监控</h3>
+                    <p class="feature-description">实时监控服务器状态，CPU、内存、磁盘使用情况一目了然</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">主题定制</h3>
+                    <p class="feature-description">多种精美主题，支持自定义配色，打造专属终端风格</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">命令历史</h3>
+                    <p class="feature-description">完整的命令历史记录，支持搜索过滤，快速找到历史命令</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">会话模板</h3>
+                    <p class="feature-description">创建会话模板，快速部署相似配置，批量管理服务器</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">审计日志</h3>
+                    <p class="feature-description">详细的操作日志记录，支持导出，满足合规审计需求</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 产品截图 -->
+    <section id="screenshots" class="screenshots">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">产品截图</h2>
+                <p class="section-subtitle">直观感受 MShell 的强大与优雅</p>
+            </div>
+            <div class="screenshots-grid">
+                <div class="screenshot-item">
+                    <img src="screenshots/main.png" alt="软件首页" loading="lazy">
+                    <div class="screenshot-caption">软件首页 - 简洁高效</div>
+                </div>
+                <div class="screenshot-item">
+                    <img src="screenshots/terminal.png" alt="终端连接界面" loading="lazy">
+                    <div class="screenshot-caption">终端连接 - 专业体验</div>
+                </div>
+                <div class="screenshot-item">
+                    <img src="screenshots/sftp.png" alt="SFTP文件传输" loading="lazy">
+                    <div class="screenshot-caption">SFTP 文件传输 - 在线预览编辑</div>
+                </div>
+                <div class="screenshot-item">
+                    <img src="screenshots/monitor.png" alt="系统监控" loading="lazy">
+                    <div class="screenshot-caption">系统监控 - 实时状态</div>
+                </div>
+                <div class="screenshot-item">
+                    <img src="screenshots/autocomplete.png" alt="智能补全" loading="lazy">
+                    <div class="screenshot-caption">智能补全 - 历史命令</div>
+                </div>
+                <div class="screenshot-item">
+                    <img src="screenshots/snippets.png" alt="命令片段" loading="lazy">
+                    <div class="screenshot-caption">命令片段 - 快捷命令</div>
+                </div>
+                <div class="screenshot-item">
+                    <img src="screenshots/split-vertical.png" alt="垂直分屏" loading="lazy">
+                    <div class="screenshot-caption">垂直分屏 - 多屏操作</div>
+                </div>
+                <div class="screenshot-item">
+                    <img src="screenshots/split-quad.png" alt="四宫格分屏" loading="lazy">
+                    <div class="screenshot-caption">四宫格分屏 - 高效管理</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 下载区域 -->
+    <section id="download" class="download">
+        <div class="container">
+            <div class="download-content">
+                <h2 class="download-title">立即下载 MShell</h2>
+                <p class="download-subtitle">开始您的高效终端之旅</p>
+                <div class="download-cards">
+                    <div class="download-card featured">
+                        <div class="download-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <rect x="4" y="2" width="16" height="20" rx="2"/>
+                                <line x1="8" y1="6" x2="16" y2="6"/>
+                                <line x1="8" y1="10" x2="16" y2="10"/>
+                                <line x1="8" y1="14" x2="12" y2="14"/>
+                            </svg>
+                        </div>
+                        <h3>Windows 版本</h3>
+                        <p class="version">v0.1.5</p>
+                        <p class="size">约 80 MB</p>
+                        <a href="https://github.com/inspoaibox/Mshell/releases" class="btn btn-primary" target="_blank">
+                            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                            </svg>
+                            下载安装包
+                        </a>
+                    </div>
+                </div>
+                <div class="system-requirements">
+                    <h4>系统要求</h4>
+                    <ul>
+                        <li>操作系统：Windows 10 或更高版本</li>
+                        <li>内存：至少 4GB RAM</li>
+                        <li>磁盘空间：至少 200MB 可用空间</li>
+                        <li>网络：需要互联网连接以使用 SSH 功能</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 文档区域 -->
+    <section id="docs" class="docs">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">快速开始</h2>
+                <p class="section-subtitle">几分钟内掌握 MShell 的使用</p>
+            </div>
+            <div class="docs-grid">
+                <div class="doc-card">
+                    <div class="doc-number">01</div>
+                    <h3>安装软件</h3>
+                    <p>下载安装包并运行，按照向导完成安装过程</p>
+                </div>
+                <div class="doc-card">
+                    <div class="doc-number">02</div>
+                    <h3>创建会话</h3>
+                    <p>点击"新建会话"，填写服务器信息和认证方式</p>
+                </div>
+                <div class="doc-card">
+                    <div class="doc-number">03</div>
+                    <h3>连接服务器</h3>
+                    <p>双击会话或点击连接按钮，开始使用终端</p>
+                </div>
+                <div class="doc-card">
+                    <div class="doc-number">04</div>
+                    <h3>探索功能</h3>
+                    <p>尝试快捷命令、文件传输等强大功能</p>
+                </div>
+            </div>
+            <div class="docs-links">
+                <a href="https://github.com/inspoaibox/Mshell/releases" class="btn btn-outline" target="_blank">下载中心</a>
+                <a href="https://github.com/inspoaibox/Mshell/issues" class="btn btn-outline" target="_blank">问题反馈</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- 页脚 -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>关于 MShell</h4>
+                    <p>MShell 是一款专为开发者和运维人员打造的现代化 SSH 客户端，致力于提供最佳的终端体验。</p>
+                </div>
+                <div class="footer-section">
+                    <h4>产品</h4>
+                    <ul>
+                        <li><a href="#features">功能特性</a></li>
+                        <li><a href="#screenshots">产品截图</a></li>
+                        <li><a href="#download">下载</a></li>
+                        <li><a href="https://github.com/inspoaibox/Mshell/releases" target="_blank">更新日志</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>资源</h4>
+                    <ul>
+                        <li><a href="https://github.com/inspoaibox/Mshell/releases" target="_blank">下载中心</a></li>
+                        <li><a href="https://github.com/inspoaibox/Mshell/issues" target="_blank">问题反馈</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>联系我们</h4>
+                    <ul>
+                        <li><a href="https://github.com/inspoaibox/Mshell/issues" target="_blank">GitHub Issues</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 MShell Team. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -43,14 +43,37 @@ export const useAppStore = defineStore('app', () => {
   }
   
   // 移除标签页
-  function removeTab(tabId: string) {
+  async function removeTab(tabId: string) {
     const index = tabs.value.findIndex(t => t.id === tabId)
     if (index !== -1) {
+      console.log(`[Store] Removing tab ${tabId}`)
+      
+      // 先断开连接，清理资源
+      try {
+        await window.electronAPI.ssh.disconnect(tabId)
+        console.log(`[Store] Disconnected ${tabId}`)
+      } catch (error) {
+        console.error(`[Store] Error disconnecting ${tabId}:`, error)
+      }
+      
+      // 移除标签
       tabs.value.splice(index, 1)
       
       // 如果关闭的是当前标签，切换到相邻标签
-      if (activeTab.value === tabId && tabs.value.length > 0) {
-        activeTab.value = tabs.value[Math.max(0, index - 1)].id
+      if (activeTab.value === tabId) {
+        if (tabs.value.length > 0) {
+          activeTab.value = tabs.value[Math.max(0, index - 1)].id
+        } else {
+          activeTab.value = ''
+        }
+      }
+      
+      // 触发垃圾回收提示（仅在开发模式）
+      if (import.meta.env.DEV && typeof global !== 'undefined' && global.gc) {
+        setTimeout(() => {
+          global.gc?.()
+          console.log('[Store] Garbage collection triggered')
+        }, 100)
       }
     }
   }
@@ -75,6 +98,21 @@ export const useAppStore = defineStore('app', () => {
   const sessions = ref<SessionConfig[]>([])
   const groups = ref<SessionGroup[]>([])
   const isLoadingSessions = ref(false)
+  const searchQuery = ref('')
+  const filteredSessions = computed(() => {
+    if (!searchQuery.value.trim()) {
+      return sessions.value
+    }
+    const query = searchQuery.value.toLowerCase().trim()
+    return sessions.value.filter(session => {
+      return session.name.toLowerCase().includes(query) ||
+             session.host.toLowerCase().includes(query) ||
+             session.username.toLowerCase().includes(query) ||
+             (session.provider && session.provider.toLowerCase().includes(query)) ||
+             (session.region && session.region.toLowerCase().includes(query)) ||
+             (session.notes && session.notes.toLowerCase().includes(query))
+    })
+  })
   
   // 加载会话数据
   async function loadSessions() {
@@ -250,6 +288,8 @@ export const useAppStore = defineStore('app', () => {
     sessions,
     groups,
     isLoadingSessions,
+    searchQuery,
+    filteredSessions,
     loadSessions,
     createSession,
     updateSession,

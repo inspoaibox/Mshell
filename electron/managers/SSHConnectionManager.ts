@@ -2,6 +2,9 @@ import { Client, ClientChannel } from 'ssh2'
 import { EventEmitter } from 'node:events'
 import * as net from 'net'
 import { appSettingsManager } from '../utils/app-settings'
+import { ErrorHandler, AppError } from '../utils/error-handler'
+import { ProxyJumpHelper } from '../utils/proxy-jump'
+import type { ProxyJumpConfig } from '../../src/types/session'
 
 export interface SSHConnectionOptions {
   host: string
@@ -14,17 +17,22 @@ export interface SSHConnectionOptions {
   keepaliveCountMax?: number
   readyTimeout?: number
   sessionName?: string
+  proxyJump?: ProxyJumpConfig
 }
 
 export interface SSHConnection {
   id: string
   options: SSHConnectionOptions
-  status: 'connecting' | 'connected' | 'disconnected' | 'error'
+  status: 'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting'
   client: Client
   socket?: net.Socket
   stream?: ClientChannel
   lastActivity: Date
   monitorTimer?: NodeJS.Timeout
+  reconnectAttempts?: number
+  reconnectTimer?: NodeJS.Timeout
+  maxReconnectAttempts?: number
+  reconnectInterval?: number
 }
 
 /**
@@ -32,6 +40,8 @@ export interface SSHConnection {
  */
 export class SSHConnectionManager extends EventEmitter {
   private connections: Map<string, SSHConnection>
+  private readonly DEFAULT_MAX_RECONNECT_ATTEMPTS = 3
+  private readonly DEFAULT_RECONNECT_INTERVAL = 5000 // 5秒
 
   constructor() {
     super()
@@ -42,12 +52,42 @@ export class SSHConnectionManager extends EventEmitter {
    * 建立 SSH 连接
    */
   async connect(id: string, options: SSHConnectionOptions): Promise<void> {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const client = new Client()
       const settings = appSettingsManager.getSettings()
 
       // Explicitly create socket to enable TCP_NODELAY for lower latency
-      const socket = new net.Socket()
+      let socket: net.Socket
+
+      // 如果配置了跳板机，通过跳板机建立连接
+      if (options.proxyJump && options.proxyJump.enabled) {
+        try {
+          // 验证跳板机配置
+          const validation = ProxyJumpHelper.validateProxyConfig(options.proxyJump)
+          if (!validation.valid) {
+            throw new Error(validation.error)
+          }
+
+          // 通过跳板机建立连接
+          socket = await ProxyJumpHelper.connectThroughProxy(
+            options.proxyJump,
+            options.host,
+            options.port
+          )
+          
+          // 发送跳板机连接成功事件
+          const chainDesc = ProxyJumpHelper.getProxyChainDescription(options.proxyJump)
+          this.emit('proxy-connected', id, chainDesc)
+        } catch (err: any) {
+          const appError = ErrorHandler.handle(err, `ProxyJump ${id}`)
+          reject(appError)
+          return
+        }
+      } else {
+        // 直接连接
+        socket = new net.Socket()
+      }
+
       socket.setNoDelay(true)
 
       const connection: SSHConnection = {
@@ -56,17 +96,21 @@ export class SSHConnectionManager extends EventEmitter {
         status: 'connecting',
         client,
         socket,
-        lastActivity: new Date()
+        lastActivity: new Date(),
+        reconnectAttempts: 0,
+        maxReconnectAttempts: this.DEFAULT_MAX_RECONNECT_ATTEMPTS,
+        reconnectInterval: this.DEFAULT_RECONNECT_INTERVAL
       }
 
       this.connections.set(id, connection)
 
       // Handle socket errors
       socket.on('error', (err) => {
+        const appError = ErrorHandler.handle(err, `SSH Connection ${id}`)
         if (connection.status === 'connecting') {
-          reject(err)
+          reject(appError)
         }
-        this.emit('error', id, `Socket error: ${err.message}`)
+        this.emit('error', id, appError.userMessage)
       })
 
       // Setup SSH Client events
@@ -102,8 +146,9 @@ export class SSHConnectionManager extends EventEmitter {
         client.shell(window as any, shellOptions, (err, stream) => {
           if (err) {
             connection.status = 'error'
-            this.emit('error', id, err.message)
-            reject(err)
+            const appError = ErrorHandler.handle(err, `SSH Shell ${id}`)
+            this.emit('error', id, appError.userMessage)
+            reject(appError)
             return
           }
 
@@ -122,7 +167,8 @@ export class SSHConnectionManager extends EventEmitter {
           })
 
           stream.stderr.on('data', (data: Buffer) => {
-            this.emit('error', id, data.toString())
+            const appError = ErrorHandler.createConnectionError(data.toString())
+            this.emit('error', id, appError.userMessage)
           })
 
           // 启动会话监控（超时检测）
@@ -134,9 +180,10 @@ export class SSHConnectionManager extends EventEmitter {
 
       client.on('error', (err) => {
         connection.status = 'error'
-        this.emit('error', id, err.message)
+        const appError = ErrorHandler.handle(err, `SSH Client ${id}`)
+        this.emit('error', id, appError.userMessage)
         if (connection.status === 'connecting') {
-          reject(err)
+          reject(appError)
         }
       })
 
@@ -144,6 +191,9 @@ export class SSHConnectionManager extends EventEmitter {
         connection.status = 'disconnected'
         this.stopSessionMonitor(id)
         this.emit('close', id)
+        
+        // 尝试自动重连
+        this.attemptReconnect(id)
       })
 
       // 使用全局设置作为默认值
@@ -189,12 +239,13 @@ export class SSHConnectionManager extends EventEmitter {
   async disconnect(id: string): Promise<void> {
     const connection = this.connections.get(id)
     if (!connection) {
-      // 这里的Error可能会导致前端收到多余的错误提示，改为静默返回或warning
-      // throw new Error(`Connection not found: ${id}`)
       console.warn(`Attempted to disconnect non-existent session: ${id}`)
       return
     }
 
+    // 取消重连
+    this.cancelReconnect(id)
+    
     this.stopSessionMonitor(id)
 
     if (connection.stream) {
@@ -203,7 +254,7 @@ export class SSHConnectionManager extends EventEmitter {
 
     connection.client.end()
     if (connection.socket) {
-      connection.socket.destroy() // Ensure socket is destroyed
+      connection.socket.destroy()
     }
     this.connections.delete(id)
   }
@@ -227,6 +278,59 @@ export class SSHConnectionManager extends EventEmitter {
     }
 
     connection.lastActivity = new Date()
+  }
+
+  /**
+   * 执行命令并获取输出（用于自动补全等功能）
+   */
+  async executeCommand(id: string, command: string, timeout: number = 5000): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const connection = this.connections.get(id)
+      if (!connection || !connection.client) {
+        reject(new Error(`Connection not found: ${id}`))
+        return
+      }
+
+      let output = ''
+      let errorOutput = ''
+      let timeoutHandle: NodeJS.Timeout
+
+      connection.client.exec(command, (err, stream) => {
+        if (err) {
+          reject(err)
+          return
+        }
+
+        // 设置超时
+        timeoutHandle = setTimeout(() => {
+          stream.close()
+          reject(new Error(`Command execution timeout: ${command}`))
+        }, timeout)
+
+        stream.on('data', (data: Buffer) => {
+          output += data.toString('utf8')
+        })
+
+        stream.stderr.on('data', (data: Buffer) => {
+          errorOutput += data.toString('utf8')
+        })
+
+        stream.on('close', (code: number) => {
+          clearTimeout(timeoutHandle)
+          
+          if (code === 0) {
+            resolve(output)
+          } else {
+            reject(new Error(`Command failed with code ${code}: ${errorOutput || output}`))
+          }
+        })
+
+        stream.on('error', (err: Error) => {
+          clearTimeout(timeoutHandle)
+          reject(err)
+        })
+      })
+    })
   }
 
   /**
@@ -271,13 +375,17 @@ export class SSHConnectionManager extends EventEmitter {
           const timeoutMs = timeoutMinutes * 60 * 1000
 
           if (idleTime > timeoutMs) {
-            console.log(`Session ${id} timed out after ${timeoutMinutes} minutes of inactivity`)
-            this.emit('error', id, `会话已超时 (闲置超过 ${timeoutMinutes} 分钟)`)
-            this.disconnect(id).catch(console.error)
+            const appError = ErrorHandler.createConnectionError(
+              `会话已超时 (闲置超过 ${timeoutMinutes} 分钟)`
+            )
+            this.emit('error', id, appError.userMessage)
+            this.disconnect(id).catch(err => {
+              ErrorHandler.handle(err, `Disconnect timeout session ${id}`)
+            })
           }
         }
       } catch (error) {
-        console.error(`Session monitor error for ${id}:`, error)
+        ErrorHandler.handle(error as Error, `Session monitor ${id}`)
       }
     }, checkInterval)
   }
@@ -298,6 +406,96 @@ export class SSHConnectionManager extends EventEmitter {
    */
   getAllConnections(): SSHConnection[] {
     return Array.from(this.connections.values())
+  }
+
+  /**
+   * 尝试重连
+   */
+  private attemptReconnect(id: string): void {
+    const connection = this.connections.get(id)
+    if (!connection) return
+
+    // 如果是用户主动断开，不重连
+    if (connection.status === 'disconnected' && !connection.reconnectAttempts) {
+      return
+    }
+
+    // 检查是否超过最大重连次数
+    if (connection.reconnectAttempts! >= connection.maxReconnectAttempts!) {
+      console.log(`Max reconnect attempts reached for session ${id}`)
+      this.emit('reconnect-failed', id, '已达到最大重连次数')
+      return
+    }
+
+    // 清理旧的重连定时器
+    if (connection.reconnectTimer) {
+      clearTimeout(connection.reconnectTimer)
+    }
+
+    connection.status = 'reconnecting'
+    connection.reconnectAttempts = (connection.reconnectAttempts || 0) + 1
+
+    console.log(`Attempting to reconnect session ${id} (attempt ${connection.reconnectAttempts}/${connection.maxReconnectAttempts})`)
+    this.emit('reconnecting', id, connection.reconnectAttempts, connection.maxReconnectAttempts)
+
+    // 延迟重连
+    connection.reconnectTimer = setTimeout(async () => {
+      try {
+        // 先清理旧连接
+        if (connection.stream) {
+          connection.stream.removeAllListeners()
+          connection.stream.end()
+        }
+        if (connection.client) {
+          connection.client.removeAllListeners()
+          connection.client.end()
+        }
+        if (connection.socket) {
+          connection.socket.removeAllListeners()
+          connection.socket.destroy()
+        }
+
+        // 尝试重新连接
+        await this.connect(id, connection.options)
+        
+        // 重连成功，重置计数器
+        connection.reconnectAttempts = 0
+        console.log(`Successfully reconnected session ${id}`)
+        this.emit('reconnected', id)
+      } catch (error) {
+        console.error(`Reconnect attempt ${connection.reconnectAttempts} failed for session ${id}:`, error)
+        
+        // 继续尝试重连
+        this.attemptReconnect(id)
+      }
+    }, connection.reconnectInterval)
+  }
+
+  /**
+   * 取消重连
+   */
+  cancelReconnect(id: string): void {
+    const connection = this.connections.get(id)
+    if (!connection) return
+
+    if (connection.reconnectTimer) {
+      clearTimeout(connection.reconnectTimer)
+      connection.reconnectTimer = undefined
+    }
+
+    connection.reconnectAttempts = 0
+    console.log(`Reconnect cancelled for session ${id}`)
+  }
+
+  /**
+   * 设置重连配置
+   */
+  setReconnectConfig(id: string, maxAttempts: number, interval: number): void {
+    const connection = this.connections.get(id)
+    if (!connection) return
+
+    connection.maxReconnectAttempts = maxAttempts
+    connection.reconnectInterval = interval
   }
 }
 

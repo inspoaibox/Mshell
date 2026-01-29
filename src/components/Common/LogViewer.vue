@@ -57,36 +57,33 @@
 
     <!-- 日志表格 -->
     <div class="log-table-container">
-      <el-table :data="logs" height="100%" stripe>
-        <el-table-column prop="timestamp" label="时间" width="180">
-          <template #default="{ row }">
-            {{ formatDate(row.timestamp) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="level" label="级别" width="100">
-          <template #default="{ row }">
-            <el-tag 
-              :type="getLevelType(row.level)" 
-              size="small"
-            >
-              {{ row.level.toUpperCase() }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="host" label="主机" width="150" />
-        <el-table-column prop="message" label="消息" min-width="300" />
-        <el-table-column label="操作" width="100">
-          <template #default="{ row }">
-            <el-button 
-              size="small" 
-              text
-              @click="showDetails(row)"
-            >
-              详情
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <VirtualTable
+        :data="logs"
+        :columns="logColumns"
+        :row-height="48"
+        :buffer="10"
+      >
+        <template #timestamp="{ row }">
+          {{ formatDate(row.timestamp) }}
+        </template>
+        <template #level="{ row }">
+          <el-tag 
+            :type="getLevelType(row.level)" 
+            size="small"
+          >
+            {{ row.level.toUpperCase() }}
+          </el-tag>
+        </template>
+        <template #actions="{ row }">
+          <el-button 
+            size="small" 
+            text
+            @click="showDetails(row)"
+          >
+            详情
+          </el-button>
+        </template>
+      </VirtualTable>
     </div>
 
     <!-- 详情对话框 -->
@@ -126,6 +123,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { Refresh, Delete } from '@element-plus/icons-vue'
+import VirtualTable from './VirtualTable.vue'
+import type { Column } from './VirtualTable.vue'
 
 interface LogEntry {
   timestamp: string
@@ -144,6 +143,14 @@ const filter = ref({
 })
 const detailsVisible = ref(false)
 const selectedLog = ref<LogEntry | null>(null)
+
+const logColumns: Column[] = [
+  { key: 'timestamp', label: '时间', width: '180px', sortable: true, slot: 'timestamp' },
+  { key: 'level', label: '级别', width: '100px', sortable: true, slot: 'level' },
+  { key: 'host', label: '主机', width: '150px', sortable: true },
+  { key: 'message', label: '消息', minWidth: '300px' },
+  { key: 'actions', label: '操作', width: '100px', slot: 'actions' }
+]
 
 onMounted(() => {
   loadLogs()
