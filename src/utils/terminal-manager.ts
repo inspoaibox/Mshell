@@ -100,7 +100,11 @@ class TerminalManager {
         if (!event.repeat) {
           navigator.clipboard.readText().then(text => {
             if (text) {
-              window.electronAPI.ssh.write(connectionId, text)
+              // 使用 bracketed paste mode 包裹粘贴内容
+              // 这样 vim/nano 等编辑器能正确识别粘贴的文本
+              // 开始序列: \x1b[200~  结束序列: \x1b[201~
+              const bracketedText = `\x1b[200~${text}\x1b[201~`
+              window.electronAPI.ssh.write(connectionId, bracketedText)
               
               // 记录粘贴的命令到历史
               recordPastedCommands(connectionId, text)

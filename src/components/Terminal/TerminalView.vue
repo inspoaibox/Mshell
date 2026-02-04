@@ -309,7 +309,10 @@ onMounted(() => {
       } else if (result === 'paste') {
         const text = await navigator.clipboard.readText()
         if (text) {
-          window.electronAPI.ssh.write(props.connectionId, text)
+          // 使用 bracketed paste mode 包裹粘贴内容
+          // 这样 vim/nano 等编辑器能正确识别粘贴的文本
+          const bracketedText = `\x1b[200~${text}\x1b[201~`
+          window.electronAPI.ssh.write(props.connectionId, bracketedText)
           recordPastedCommands(text)
         }
       } else if (result === 'selectAll') {
