@@ -300,7 +300,8 @@ const countryOptions = [
   { label: '尼日利亚 (Nigeria)', value: 'NG' }
 ]
 
-const defaultForm = {
+// 获取默认表单值的函数（每次调用返回新对象，避免引用问题）
+const getDefaultForm = () => ({
   name: '',
   host: '',
   port: 22,
@@ -324,9 +325,17 @@ const defaultForm = {
   proxyJump: undefined as ProxyJumpConfigType | undefined,
   // 代理配置
   proxy: undefined as ProxyConfigType | undefined
-}
+})
 
-const form = reactive({ ...defaultForm })
+const form = reactive(getDefaultForm())
+
+// 重置表单到默认值
+const resetForm = () => {
+  const defaults = getDefaultForm()
+  Object.keys(defaults).forEach(key => {
+    (form as any)[key] = (defaults as any)[key]
+  })
+}
 const sshKeys = ref<any[]>([])
 
 const rules: FormRules = {
@@ -425,8 +434,9 @@ watch(
         // 代理配置
         form.proxy = props.session.proxy
       } else {
+        // 新建会话时，重置表单到默认值
         isEdit.value = false
-        Object.assign(form, defaultForm)
+        resetForm()
       }
     }
   }
@@ -438,7 +448,7 @@ watch(visible, (newValue) => {
   if (!newValue) {
     // 延迟重置，等待动画完成
     setTimeout(() => {
-      Object.assign(form, defaultForm)
+      resetForm()
       formRef.value?.clearValidate()
       isEdit.value = false
     }, 300)

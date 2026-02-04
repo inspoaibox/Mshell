@@ -118,7 +118,7 @@ const positionStyle = computed(() => {
   
   const POPUP_WIDTH = 450
   const POPUP_HEIGHT = 350
-  const CURSOR_OFFSET = 10
+  const CURSOR_OFFSET = 30  // 增加偏移量，避免遮挡光标输入区域
   const MARGIN = 10
   
   let left = x
