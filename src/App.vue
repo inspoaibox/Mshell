@@ -198,6 +198,12 @@
                     :session="tab.session"
                     :terminal-options="appStore.terminalOptions"
                   />
+                  <VNCTab
+                    v-else-if="tab.session.type === 'vnc'"
+                    :connection-id="tab.id"
+                    :session="tab.session"
+                    @close="handleCloseTab"
+                  />
                   <TerminalTab
                     v-else
                     :connection-id="tab.id"
@@ -331,6 +337,7 @@ import QuickConnect from './components/Session/QuickConnect.vue'
 import BatchImport from './components/Session/BatchImport.vue'
 import TerminalTab from './components/Terminal/TerminalTab.vue'
 import SplitTerminalTab from './components/Terminal/SplitTerminalTab.vue'
+import VNCTab from './components/VNC/VNCTab.vue'
 import DraggableTab from './components/Terminal/DraggableTab.vue'
 import TerminalSettings from './components/Terminal/TerminalSettings.vue'
 import SettingsPanel from './components/Common/SettingsPanel.vue'

@@ -37,9 +37,17 @@ export default defineConfig({
       '@electron': resolve(__dirname, 'electron')
     }
   },
+  build: {
+    target: 'esnext' // 支持 top-level await
+  },
   server: {
     host: '127.0.0.1', // 明确使用IPv4地址
     port: 5173,
     strictPort: true // 如果端口被占用则失败，而不是尝试其他端口
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      target: 'esnext'
+    }
   }
 })

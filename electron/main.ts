@@ -20,6 +20,8 @@ import { registerSessionLockHandlers } from './ipc/session-lock-handlers'
 import { registerTaskSchedulerHandlers } from './ipc/task-scheduler-handlers'
 import { registerWorkflowHandlers } from './ipc/workflow-handlers'
 import { registerAIHandlers } from './ipc/ai-handlers'
+import { registerRDPHandlers } from './ipc/rdp-handlers'
+import { registerVNCHandlers } from './ipc/vnc-handlers'
 import { crashRecoveryManager } from './utils/crash-recovery'
 import { logger } from './utils/logger'
 import { backupManager } from './managers/BackupManager'
@@ -54,6 +56,8 @@ registerSessionLockHandlers()
 registerTaskSchedulerHandlers()
 registerWorkflowHandlers()
 registerAIHandlers(ipcMain, aiManager)
+registerRDPHandlers()
+registerVNCHandlers()
 
 function createWindow() {
   mainWindow = new BrowserWindow({

@@ -505,6 +505,40 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getTerminalChatHistory: (connectionId: string) => ipcRenderer.invoke('ai:getTerminalChatHistory', connectionId),
     saveTerminalChatHistory: (connectionId: string, messages: any[]) => ipcRenderer.invoke('ai:saveTerminalChatHistory', connectionId, messages),
     clearTerminalChatHistory: (connectionId: string) => ipcRenderer.invoke('ai:clearTerminalChatHistory', connectionId)
+  },
+
+  // RDP operations
+  rdp: {
+    connect: (config: any) => ipcRenderer.invoke('rdp:connect', config),
+    disconnect: (connectionId: string) => ipcRenderer.invoke('rdp:disconnect', connectionId),
+    getStatus: (connectionId: string) => ipcRenderer.invoke('rdp:getStatus', connectionId),
+    getAllConnections: () => ipcRenderer.invoke('rdp:getAllConnections'),
+    onConnected: (callback: (connectionId: string) => void) => {
+      ipcRenderer.on('rdp:connected', (_event, connectionId) => callback(connectionId))
+    },
+    onDisconnected: (callback: (connectionId: string, code: number | null) => void) => {
+      ipcRenderer.on('rdp:disconnected', (_event, connectionId, code) => callback(connectionId, code))
+    },
+    onError: (callback: (connectionId: string, error: string) => void) => {
+      ipcRenderer.on('rdp:error', (_event, connectionId, error) => callback(connectionId, error))
+    }
+  },
+
+  // VNC operations
+  vnc: {
+    connect: (config: any) => ipcRenderer.invoke('vnc:connect', config),
+    disconnect: (connectionId: string) => ipcRenderer.invoke('vnc:disconnect', connectionId),
+    getStatus: (connectionId: string) => ipcRenderer.invoke('vnc:getStatus', connectionId),
+    getAllConnections: () => ipcRenderer.invoke('vnc:getAllConnections'),
+    onConnected: (callback: (connectionId: string) => void) => {
+      ipcRenderer.on('vnc:connected', (_event, connectionId) => callback(connectionId))
+    },
+    onDisconnected: (callback: (connectionId: string) => void) => {
+      ipcRenderer.on('vnc:disconnected', (_event, connectionId) => callback(connectionId))
+    },
+    onError: (callback: (connectionId: string, error: string) => void) => {
+      ipcRenderer.on('vnc:error', (_event, connectionId, error) => callback(connectionId, error))
+    }
   }
 })
 

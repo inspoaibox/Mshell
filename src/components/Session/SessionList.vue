@@ -90,17 +90,31 @@
                       
                       <div class="session-content">
                         <div class="session-name-row">
+                          <el-tag 
+                            v-if="session.type === 'rdp'" 
+                            size="small" 
+                            type="warning"
+                            effect="plain"
+                            class="session-type-tag"
+                          >RDP</el-tag>
+                          <el-tag 
+                            v-else-if="session.type === 'vnc'" 
+                            size="small" 
+                            type="success"
+                            effect="plain"
+                            class="session-type-tag"
+                          >VNC</el-tag>
                           <span class="session-name">{{ session.name }}</span>
                         </div>
                         <div class="session-details">
                           <span class="detail-item">
                             <el-icon :size="12"><User /></el-icon>
-                            {{ session.username }}
+                            {{ session.username || '-' }}
                           </span>
                           <span class="detail-separator">•</span>
                           <span class="detail-item">
                             <el-icon :size="12"><Monitor /></el-icon>
-                            {{ session.host }}
+                            {{ session.host }}:{{ session.port }}
                           </span>
                         </div>
                       </div>
@@ -178,17 +192,31 @@
                     
                     <div class="session-content">
                       <div class="session-name-row">
+                        <el-tag 
+                          v-if="session.type === 'rdp'" 
+                          size="small" 
+                          type="warning"
+                          effect="plain"
+                          class="session-type-tag"
+                        >RDP</el-tag>
+                        <el-tag 
+                          v-else-if="session.type === 'vnc'" 
+                          size="small" 
+                          type="success"
+                          effect="plain"
+                          class="session-type-tag"
+                        >VNC</el-tag>
                         <span class="session-name">{{ session.name }}</span>
                       </div>
                       <div class="session-details">
                         <span class="detail-item">
                           <el-icon :size="12"><User /></el-icon>
-                          {{ session.username }}
+                          {{ session.username || '-' }}
                         </span>
                         <span class="detail-separator">•</span>
                         <span class="detail-item">
                           <el-icon :size="12"><Monitor /></el-icon>
-                          {{ session.host }}
+                          {{ session.host }}:{{ session.port }}
                         </span>
                       </div>
                     </div>
@@ -374,7 +402,48 @@ const getGroupSessions = (groupId: string) => {
 }
 
 const handleSessionClick = (session: SessionConfig) => {
-  emit('connect', session)
+  // 根据会话类型选择不同的连接方式
+  if (session.type === 'rdp') {
+    // RDP 连接 - 调用外部 mstsc
+    connectRDP(session)
+  } else if (session.type === 'vnc') {
+    // VNC 连接 - 内嵌 noVNC
+    emit('connect', session)
+  } else {
+    // SSH 连接（默认）
+    emit('connect', session)
+  }
+}
+
+// RDP 连接
+const connectRDP = async (session: SessionConfig) => {
+  try {
+    ElMessage.info(`正在启动 RDP 连接到 ${session.host}...`)
+    
+    const rdpConfig = {
+      id: session.id,
+      host: session.host,
+      port: session.port || 3389,
+      username: session.username,
+      password: session.password,
+      ...(session.rdpOptions || {})
+    }
+    
+    const result = await window.electronAPI.rdp.connect(rdpConfig)
+    
+    if (result.success) {
+      ElMessage.success('RDP 连接已启动')
+      // 更新使用次数和最后连接时间
+      await appStore.updateSession(session.id, {
+        usageCount: (session.usageCount || 0) + 1,
+        lastConnected: new Date()
+      })
+    } else {
+      ElMessage.error(`RDP 连接失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    ElMessage.error(`RDP 连接失败: ${error.message}`)
+  }
 }
 
 const handleDelete = async (session: SessionConfig) => {
@@ -884,6 +953,15 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
   display: flex;
   align-items: center;
   margin-bottom: 1px; /* 减少间距 */
+  gap: 4px;
+}
+
+.session-type-tag {
+  flex-shrink: 0;
+  font-size: 9px !important;
+  height: 14px;
+  line-height: 14px;
+  padding: 0 4px;
 }
 
 .session-name {
