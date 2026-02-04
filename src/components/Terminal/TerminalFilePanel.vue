@@ -102,7 +102,7 @@
         <el-icon><EditPen /></el-icon>
         <span>编辑</span>
       </div>
-      <div class="menu-item" @click="handleDownload">
+      <div v-if="contextMenuFile?.type === 'file'" class="menu-item" @click="handleDownload">
         <el-icon><Download /></el-icon>
         <span>下载</span>
       </div>
@@ -114,6 +114,20 @@
         <el-icon><Lock /></el-icon>
         <span>权限</span>
       </div>
+      <div class="menu-divider"></div>
+      <div class="menu-item" @click="handleCompress">
+        <el-icon><Box /></el-icon>
+        <span>压缩</span>
+      </div>
+      <div 
+        v-if="isCompressedFile(contextMenuFile)" 
+        class="menu-item" 
+        @click="handleExtract"
+      >
+        <el-icon><FolderOpened /></el-icon>
+        <span>解压</span>
+      </div>
+      <div class="menu-divider"></div>
       <div class="menu-item danger" @click="handleDelete">
         <el-icon><Delete /></el-icon>
         <span>删除</span>
@@ -219,6 +233,54 @@
         <el-button type="primary" @click="confirmPermissions">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 压缩对话框 -->
+    <el-dialog v-model="showCompressDialog" title="压缩文件" width="400px" append-to-body>
+      <el-form label-width="80px">
+        <el-form-item label="源文件">
+          <el-input :value="contextMenuFile?.name" disabled />
+        </el-form-item>
+        <el-form-item label="压缩格式">
+          <el-select v-model="compressFormat" style="width: 100%">
+            <el-option label="tar.gz (推荐)" value="tar.gz" />
+            <el-option label="zip" value="zip" />
+            <el-option label="tar" value="tar" />
+            <el-option label="tar.bz2" value="tar.bz2" />
+            <el-option label="tar.xz" value="tar.xz" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="输出文件">
+          <el-input v-model="compressOutputName" placeholder="输出文件名" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showCompressDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmCompress" :loading="compressing">压缩</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 解压对话框 -->
+    <el-dialog v-model="showExtractDialog" title="解压文件" width="400px" append-to-body>
+      <el-form label-width="80px">
+        <el-form-item label="压缩文件">
+          <el-input :value="contextMenuFile?.name" disabled />
+        </el-form-item>
+        <el-form-item label="解压到">
+          <el-radio-group v-model="extractTarget">
+            <el-radio value="current">当前目录</el-radio>
+            <el-radio value="subfolder">同名子文件夹</el-radio>
+            <el-radio value="custom">自定义目录</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="extractTarget === 'custom'" label="目标目录">
+          <el-input v-model="extractCustomPath" placeholder="输入目标目录路径" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showExtractDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmExtract" :loading="extracting">解压</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -228,7 +290,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Close, Back, HomeFilled, FolderOpened, Refresh, Plus, FolderAdd,
   Document, Upload, Download, Folder, Link, Edit, Delete, Lock, View,
-  ZoomIn, EditPen, Loading, Position
+  ZoomIn, EditPen, Loading, Position, Box
 } from '@element-plus/icons-vue'
 
 interface FileInfo {
@@ -303,6 +365,38 @@ const permissionBits = ref({
   groupRead: false, groupWrite: false, groupExecute: false,
   otherRead: false, otherWrite: false, otherExecute: false
 })
+
+// 压缩和解压
+const showCompressDialog = ref(false)
+const showExtractDialog = ref(false)
+const compressFormat = ref('tar.gz')
+const compressOutputName = ref('')
+const compressing = ref(false)
+const extractTarget = ref<'current' | 'subfolder' | 'custom'>('current')
+const extractCustomPath = ref('')
+const extracting = ref(false)
+
+// 支持的压缩文件扩展名
+const compressedExtensions = ['.tar.gz', '.tgz', '.tar', '.zip', '.gz', '.bz2', '.xz', '.tar.bz2', '.tar.xz', '.rar', '.7z']
+
+// 判断是否为压缩文件
+const isCompressedFile = (file: FileInfo | null): boolean => {
+  if (!file || file.type !== 'file') return false
+  const name = file.name.toLowerCase()
+  return compressedExtensions.some(ext => name.endsWith(ext))
+}
+
+// 获取不带扩展名的文件名（用于解压目录名）
+const getBaseName = (filename: string): string => {
+  let name = filename
+  // 移除常见的压缩扩展名
+  for (const ext of ['.tar.gz', '.tar.bz2', '.tar.xz', '.tgz', '.tar', '.zip', '.gz', '.bz2', '.xz', '.rar', '.7z']) {
+    if (name.toLowerCase().endsWith(ext)) {
+      return name.slice(0, -ext.length)
+    }
+  }
+  return name
+}
 
 const canGoBack = computed(() => pathHistory.value.length > 0)
 
@@ -438,8 +532,40 @@ const handleDoubleClick = (file: FileInfo) => {
 const showContextMenu = (event: MouseEvent, file: FileInfo) => {
   selectedFile.value = file
   contextMenuFile.value = file
-  contextMenuX.value = Math.min(event.clientX, window.innerWidth - 150)
-  contextMenuY.value = Math.min(event.clientY, window.innerHeight - 200)
+  
+  // 计算菜单高度
+  // 文件：预览、编辑、下载、重命名、权限、压缩 = 6项 + 可能的解压
+  // 文件夹：重命名、权限、压缩 = 3项
+  // 每个菜单项约 36px，分隔线约 9px
+  let menuItemCount = 3  // 基础：重命名、权限、压缩
+  if (file.type === 'file') {
+    menuItemCount += 3  // 文件额外：预览、编辑、下载
+    if (isCompressedFile(file)) {
+      menuItemCount += 1  // 压缩文件额外：解压
+    }
+  }
+  menuItemCount += 1  // 删除
+  const dividerCount = 2
+  const estimatedHeight = menuItemCount * 36 + dividerCount * 9 + 16  // 16px padding
+  const menuWidth = 150
+  
+  // 确保菜单不超出窗口边界
+  let x = event.clientX
+  let y = event.clientY
+  
+  // 右边界检查
+  if (x + menuWidth > window.innerWidth) {
+    x = window.innerWidth - menuWidth - 10
+  }
+  
+  // 底部边界检查：如果菜单会超出底部，则向上显示
+  if (y + estimatedHeight > window.innerHeight) {
+    y = window.innerHeight - estimatedHeight - 10
+  }
+  
+  // 确保不会出现负值
+  contextMenuX.value = Math.max(10, x)
+  contextMenuY.value = Math.max(10, y)
   contextMenuVisible.value = true
 }
 
@@ -670,6 +796,155 @@ const handleDelete = async () => {
   }
 }
 
+// 压缩文件/文件夹
+const handleCompress = () => {
+  if (!contextMenuFile.value) return
+  hideContextMenu()
+  
+  const file = contextMenuFile.value
+  // 设置默认输出文件名
+  compressOutputName.value = `${file.name}.tar.gz`
+  compressFormat.value = 'tar.gz'
+  showCompressDialog.value = true
+}
+
+// 确认压缩
+const confirmCompress = async () => {
+  if (!contextMenuFile.value || !compressOutputName.value.trim()) {
+    ElMessage.warning('请输入输出文件名')
+    return
+  }
+  
+  compressing.value = true
+  const file = contextMenuFile.value
+  const outputPath = currentPath.value === '/'
+    ? '/' + compressOutputName.value
+    : currentPath.value + '/' + compressOutputName.value
+  
+  try {
+    // 根据格式构建压缩命令
+    let command = ''
+    const sourceName = file.name
+    
+    switch (compressFormat.value) {
+      case 'tar.gz':
+        command = `cd "${currentPath.value}" && tar -czvf "${compressOutputName.value}" "${sourceName}"`
+        break
+      case 'tar':
+        command = `cd "${currentPath.value}" && tar -cvf "${compressOutputName.value}" "${sourceName}"`
+        break
+      case 'tar.bz2':
+        command = `cd "${currentPath.value}" && tar -cjvf "${compressOutputName.value}" "${sourceName}"`
+        break
+      case 'tar.xz':
+        command = `cd "${currentPath.value}" && tar -cJvf "${compressOutputName.value}" "${sourceName}"`
+        break
+      case 'zip':
+        command = `cd "${currentPath.value}" && zip -r "${compressOutputName.value}" "${sourceName}"`
+        break
+      default:
+        command = `cd "${currentPath.value}" && tar -czvf "${compressOutputName.value}" "${sourceName}"`
+    }
+    
+    ElMessage.info(`正在压缩 ${file.name}...`)
+    
+    // 通过 SSH 执行压缩命令
+    const result = await window.electronAPI.ssh.executeCommand(props.connectionId, command, 60000)
+    
+    if (result.success) {
+      ElMessage.success('压缩完成')
+      showCompressDialog.value = false
+      refreshDirectory()
+    } else {
+      ElMessage.error('压缩失败: ' + (result.error || '未知错误'))
+    }
+  } catch (error: any) {
+    ElMessage.error('压缩失败: ' + error.message)
+  } finally {
+    compressing.value = false
+  }
+}
+
+// 解压文件
+const handleExtract = () => {
+  if (!contextMenuFile.value || !isCompressedFile(contextMenuFile.value)) return
+  hideContextMenu()
+  
+  extractTarget.value = 'current'
+  extractCustomPath.value = currentPath.value
+  showExtractDialog.value = true
+}
+
+// 确认解压
+const confirmExtract = async () => {
+  if (!contextMenuFile.value) return
+  
+  extracting.value = true
+  const file = contextMenuFile.value
+  const fileName = file.name.toLowerCase()
+  
+  try {
+    // 确定解压目标目录
+    let targetDir = currentPath.value
+    if (extractTarget.value === 'subfolder') {
+      const baseName = getBaseName(file.name)
+      targetDir = currentPath.value === '/' ? '/' + baseName : currentPath.value + '/' + baseName
+      // 先创建目录
+      await window.electronAPI.ssh.executeCommand(props.connectionId, `mkdir -p "${targetDir}"`, 10000)
+    } else if (extractTarget.value === 'custom') {
+      targetDir = extractCustomPath.value || currentPath.value
+      // 确保目录存在
+      await window.electronAPI.ssh.executeCommand(props.connectionId, `mkdir -p "${targetDir}"`, 10000)
+    }
+    
+    // 根据文件类型构建解压命令（默认覆盖同名文件）
+    let command = ''
+    
+    if (fileName.endsWith('.tar.gz') || fileName.endsWith('.tgz')) {
+      command = `tar -xzvf "${file.path}" -C "${targetDir}"`
+    } else if (fileName.endsWith('.tar.bz2')) {
+      command = `tar -xjvf "${file.path}" -C "${targetDir}"`
+    } else if (fileName.endsWith('.tar.xz')) {
+      command = `tar -xJvf "${file.path}" -C "${targetDir}"`
+    } else if (fileName.endsWith('.tar')) {
+      command = `tar -xvf "${file.path}" -C "${targetDir}"`
+    } else if (fileName.endsWith('.zip')) {
+      command = `unzip -o "${file.path}" -d "${targetDir}"`
+    } else if (fileName.endsWith('.gz') && !fileName.endsWith('.tar.gz')) {
+      command = `gunzip -c "${file.path}" > "${targetDir}/${getBaseName(file.name)}"`
+    } else if (fileName.endsWith('.bz2') && !fileName.endsWith('.tar.bz2')) {
+      command = `bunzip2 -c "${file.path}" > "${targetDir}/${getBaseName(file.name)}"`
+    } else if (fileName.endsWith('.xz') && !fileName.endsWith('.tar.xz')) {
+      command = `unxz -c "${file.path}" > "${targetDir}/${getBaseName(file.name)}"`
+    } else if (fileName.endsWith('.rar')) {
+      command = `unrar x -o+ "${file.path}" "${targetDir}/"`
+    } else if (fileName.endsWith('.7z')) {
+      command = `7z x -aoa "${file.path}" -o"${targetDir}"`
+    } else {
+      ElMessage.error('不支持的压缩格式')
+      extracting.value = false
+      return
+    }
+    
+    ElMessage.info(`正在解压 ${file.name}...`)
+    
+    // 通过 SSH 执行解压命令
+    const result = await window.electronAPI.ssh.executeCommand(props.connectionId, command, 120000)
+    
+    if (result.success) {
+      ElMessage.success('解压完成')
+      showExtractDialog.value = false
+      refreshDirectory()
+    } else {
+      ElMessage.error('解压失败: ' + (result.error || '未知错误'))
+    }
+  } catch (error: any) {
+    ElMessage.error('解压失败: ' + error.message)
+  } finally {
+    extracting.value = false
+  }
+}
+
 // 预览文件
 const handlePreview = async () => {
   if (!contextMenuFile.value || contextMenuFile.value.type !== 'file') return
@@ -700,6 +975,21 @@ const handleEdit = async () => {
   hideContextMenu()
   
   const file = contextMenuFile.value
+  
+  // 检查文件大小，超过 5MB 不建议在线编辑
+  if (file.size > 5 * 1024 * 1024) {
+    ElMessage.warning('文件过大（超过5MB），建议下载后使用本地编辑器编辑')
+    return
+  }
+  
+  // 检查是否为二进制文件（通过扩展名判断）
+  const binaryExtensions = ['.exe', '.dll', '.so', '.bin', '.img', '.iso', '.zip', '.tar', '.gz', '.bz2', '.xz', '.rar', '.7z', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.mp3', '.mp4', '.avi', '.mkv', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
+  const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'))
+  if (binaryExtensions.includes(ext)) {
+    ElMessage.warning('二进制文件不支持在线编辑')
+    return
+  }
+  
   editLoading.value = true
   editContent.value = ''
   editingFilePath.value = file.path
@@ -933,13 +1223,21 @@ watch(() => props.currentDir, (newDir) => {
 /* 右键菜单 */
 .context-menu {
   position: fixed;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
+  background-color: #ffffff;
+  border: 1px solid #e0e0e0;
   border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
   padding: 4px;
   z-index: 9999;
   min-width: 140px;
+  backdrop-filter: none;
+}
+
+/* 暗色主题下的右键菜单 */
+:root[data-theme="dark"] .context-menu,
+.dark .context-menu {
+  background-color: #2d2d2d;
+  border-color: #404040;
 }
 
 .menu-item {
@@ -963,6 +1261,12 @@ watch(() => props.currentDir, (newDir) => {
 
 .menu-item.danger:hover {
   background: rgba(245, 108, 108, 0.1);
+}
+
+.menu-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 8px;
 }
 
 /* 权限编辑器 */
