@@ -116,6 +116,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('sftp:copyFile', connectionId, sourcePath, targetPath),
     chmod: (connectionId: string, path: string, mode: number) =>
       ipcRenderer.invoke('sftp:chmod', connectionId, path, mode),
+    startDrag: (connectionId: string, remotePath: string, fileName: string) =>
+      ipcRenderer.invoke('sftp:startDrag', connectionId, remotePath, fileName),
     onProgress: (callback: (taskId: string, progress: any) => void) => {
       ipcRenderer.on('sftp:progress', (_event, taskId, progress) => callback(taskId, progress))
     },

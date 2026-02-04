@@ -57,10 +57,24 @@
     </div>
     
     <!-- 文件列表 -->
-    <div class="file-list" v-loading="loading">
-      <div v-if="displayFiles.length === 0 && !loading" class="empty-state">
+    <div 
+      class="file-list" 
+      v-loading="loading"
+      @dragover.prevent="onDragOver"
+      @dragleave="onDragLeave"
+      @drop.prevent="onDrop"
+      :class="{ 'drag-over': isDragOver }"
+    >
+      <!-- 拖曳上传提示 -->
+      <div v-if="isDragOver" class="drag-overlay">
+        <el-icon :size="48"><Upload /></el-icon>
+        <p>释放以上传文件</p>
+      </div>
+      
+      <div v-if="displayFiles.length === 0 && !loading && !isDragOver" class="empty-state">
         <el-icon :size="48"><FolderOpened /></el-icon>
         <p>文件夹为空</p>
+        <p class="drag-hint">拖曳文件到此处上传</p>
       </div>
       
       <div
@@ -68,9 +82,12 @@
         :key="file.path"
         class="file-item"
         :class="{ selected: selectedFile?.path === file.path }"
+        :draggable="file.type === 'file'"
         @click="selectFile(file)"
         @dblclick="handleDoubleClick(file)"
         @contextmenu.prevent="showContextMenu($event, file)"
+        @dragstart="onFileDragStart($event, file)"
+        @dragend="onFileDragEnd($event, file)"
       >
         <el-icon :size="20" class="file-icon">
           <Folder v-if="file.type === 'directory'" />
@@ -140,6 +157,9 @@
         <div v-if="previewLoading" class="preview-loading">
           <el-icon class="is-loading" :size="32"><Loading /></el-icon>
           <span>加载中...</span>
+        </div>
+        <div v-else-if="previewType === 'image'" class="preview-image-container">
+          <img :src="previewImageSrc" class="preview-image" alt="预览图片" />
         </div>
         <pre v-else class="preview-text">{{ previewContent }}</pre>
       </div>
@@ -321,6 +341,10 @@ const selectedFile = ref<FileInfo | null>(null)
 const pathHistory = ref<string[]>([])
 const showHiddenFiles = ref(false)
 
+// 拖曳状态
+const isDragOver = ref(false)
+const isDraggingFile = ref(false)
+
 // 过滤后的文件列表（根据是否显示隐藏文件）
 const displayFiles = computed(() => {
   if (showHiddenFiles.value) {
@@ -354,6 +378,8 @@ const renameValue = ref('')
 // 预览和编辑
 const previewContent = ref('')
 const previewLoading = ref(false)
+const previewType = ref<'text' | 'image'>('text')
+const previewImageSrc = ref('')
 const editContent = ref('')
 const editLoading = ref(false)
 const editSaving = ref(false)
@@ -665,6 +691,152 @@ const handleUpload = async () => {
   }
 }
 
+// 拖曳上传 - dragover 事件
+const onDragOver = (event: DragEvent) => {
+  // 只有从外部拖入文件时才显示上传提示
+  // 检查是否是内部拖曳（通过自定义类型判断）
+  const isInternalDrag = event.dataTransfer?.types.includes('application/x-mshell-file') || isDraggingFile.value
+  
+  if (event.dataTransfer?.types.includes('Files') && !isInternalDrag) {
+    event.dataTransfer.dropEffect = 'copy'
+    isDragOver.value = true
+  }
+}
+
+// 拖曳上传 - dragleave 事件
+const onDragLeave = (event: DragEvent) => {
+  // 检查是否真的离开了容器（而不是进入子元素）
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const x = event.clientX
+  const y = event.clientY
+  
+  if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
+    isDragOver.value = false
+  }
+}
+
+// 拖曳上传 - drop 事件
+const onDrop = async (event: DragEvent) => {
+  isDragOver.value = false
+  
+  // 如果是内部拖曳，不处理
+  if (isDraggingFile.value || event.dataTransfer?.types.includes('application/x-mshell-file')) {
+    return
+  }
+  
+  const files = event.dataTransfer?.files
+  if (!files || files.length === 0) return
+  
+  // 获取文件路径（Electron 环境下可以获取完整路径）
+  const filePaths: string[] = []
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i] as any
+    // Electron 中 File 对象有 path 属性
+    if (file.path) {
+      filePaths.push(file.path)
+    }
+  }
+  
+  if (filePaths.length === 0) {
+    ElMessage.warning('无法获取文件路径')
+    return
+  }
+  
+  // 上传文件
+  for (const localPath of filePaths) {
+    const fileName = localPath.split(/[/\\]/).pop()
+    const remotePath = currentPath.value === '/' 
+      ? '/' + fileName 
+      : currentPath.value + '/' + fileName
+    
+    ElMessage.info(`正在上传 ${fileName}...`)
+    
+    try {
+      const uploadResult = await window.electronAPI.sftp.uploadFile(props.connectionId, localPath, remotePath)
+      if (uploadResult.success) {
+        ElMessage.success(`${fileName} 上传成功`)
+      } else {
+        ElMessage.error(`${fileName} 上传失败: ${uploadResult.error}`)
+      }
+    } catch (error: any) {
+      ElMessage.error(`${fileName} 上传失败: ${error.message}`)
+    }
+  }
+  
+  refreshDirectory()
+}
+
+// 文件拖曳开始 - 用于下载
+const onFileDragStart = (event: DragEvent, file: FileInfo) => {
+  if (file.type !== 'file') {
+    event.preventDefault()
+    return
+  }
+  
+  isDraggingFile.value = true
+  
+  // 设置拖曳数据
+  if (event.dataTransfer) {
+    event.dataTransfer.setData('text/plain', file.name)
+    event.dataTransfer.setData('application/x-mshell-file', JSON.stringify({
+      connectionId: props.connectionId,
+      remotePath: file.path,
+      fileName: file.name
+    }))
+    event.dataTransfer.effectAllowed = 'copyMove'
+    
+    // 设置拖曳图像（使用文件名作为提示）
+    const dragImage = document.createElement('div')
+    dragImage.textContent = file.name
+    dragImage.style.cssText = 'position: absolute; top: -1000px; padding: 8px 12px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);'
+    document.body.appendChild(dragImage)
+    event.dataTransfer.setDragImage(dragImage, 0, 0)
+    
+    // 延迟移除拖曳图像元素
+    setTimeout(() => {
+      document.body.removeChild(dragImage)
+    }, 0)
+  }
+}
+
+// 文件拖曳结束 - 检查是否拖到了外部
+const onFileDragEnd = async (event: DragEvent, file: FileInfo) => {
+  isDraggingFile.value = false
+  
+  // 检查拖曳是否成功（dropEffect 不为 none 表示被接受）
+  // 如果拖到了窗口外部，提示用户使用右键下载
+  if (event.dataTransfer?.dropEffect === 'none') {
+    // 检查鼠标是否在窗口外
+    const windowWidth = window.innerWidth
+    const windowHeight = window.innerHeight
+    
+    // 如果拖曳结束时鼠标在窗口外，说明用户想要下载到本地
+    if (event.clientX <= 0 || event.clientX >= windowWidth || 
+        event.clientY <= 0 || event.clientY >= windowHeight) {
+      // 弹出保存对话框
+      try {
+        const saveDir = await window.electronAPI.dialog.openDirectory({
+          properties: ['openDirectory', 'createDirectory']
+        })
+        
+        if (saveDir) {
+          const localPath = `${saveDir}/${file.name}`
+          ElMessage.info(`正在下载 ${file.name}...`)
+          
+          const result = await window.electronAPI.sftp.downloadFile(props.connectionId, file.path, localPath)
+          if (result.success) {
+            ElMessage.success(`${file.name} 下载成功`)
+          } else {
+            ElMessage.error(`下载失败: ${result.error}`)
+          }
+        }
+      } catch (error: any) {
+        console.error('[TerminalFilePanel] Download error:', error)
+      }
+    }
+  }
+}
+
 // 下载文件
 const handleDownload = async () => {
   if (!contextMenuFile.value) return
@@ -945,6 +1117,32 @@ const confirmExtract = async () => {
   }
 }
 
+// 判断是否为图片文件
+const isImageFile = (filename: string): boolean => {
+  const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico']
+  const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'))
+  return imageExtensions.includes(ext)
+}
+
+// 获取图片 MIME 类型
+const getImageMimeType = (filename: string): string => {
+  const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'))
+  const mimeTypes: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.bmp': 'image/bmp',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon'
+  }
+  return mimeTypes[ext] || 'image/png'
+}
+
+// 图片预览大小限制（10MB）
+const IMAGE_PREVIEW_SIZE_LIMIT = 10 * 1024 * 1024
+
 // 预览文件
 const handlePreview = async () => {
   if (!contextMenuFile.value || contextMenuFile.value.type !== 'file') return
@@ -953,16 +1151,43 @@ const handlePreview = async () => {
   const file = contextMenuFile.value
   previewLoading.value = true
   previewContent.value = ''
+  previewImageSrc.value = ''
   showPreviewDialog.value = true
   
   try {
-    const result = await window.electronAPI.sftp.readFile(props.connectionId, file.path)
-    if (result.success) {
-      previewContent.value = result.data || ''
+    // 判断是否为图片文件
+    if (isImageFile(file.name)) {
+      // 检查图片大小，超过限制则提示下载
+      if (file.size > IMAGE_PREVIEW_SIZE_LIMIT) {
+        previewType.value = 'text'
+        previewContent.value = `图片文件过大（${formatSize(file.size)}），超过预览限制（10MB）。\n请右键下载后使用本地图片查看器打开。`
+        previewLoading.value = false
+        return
+      }
+      
+      previewType.value = 'image'
+      // 使用 readFileBuffer 读取二进制数据
+      const result = await window.electronAPI.sftp.readFileBuffer(props.connectionId, file.path)
+      if (result.success && result.data) {
+        // 将 Buffer 转换为 base64
+        const base64 = result.data
+        const mimeType = getImageMimeType(file.name)
+        previewImageSrc.value = `data:${mimeType};base64,${base64}`
+      } else {
+        previewType.value = 'text'
+        previewContent.value = `读取失败: ${result.error}`
+      }
     } else {
-      previewContent.value = `读取失败: ${result.error}`
+      previewType.value = 'text'
+      const result = await window.electronAPI.sftp.readFile(props.connectionId, file.path)
+      if (result.success) {
+        previewContent.value = result.data || ''
+      } else {
+        previewContent.value = `读取失败: ${result.error}`
+      }
     }
   } catch (error: any) {
+    previewType.value = 'text'
     previewContent.value = `读取失败: ${error.message}`
   } finally {
     previewLoading.value = false
@@ -1158,6 +1383,35 @@ watch(() => props.currentDir, (newDir) => {
   flex: 1;
   overflow-y: auto;
   padding: 8px;
+  position: relative;
+}
+
+.file-list.drag-over {
+  background: rgba(14, 165, 233, 0.05);
+  border: 2px dashed var(--primary-color);
+  border-radius: 8px;
+}
+
+.drag-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(14, 165, 233, 0.1);
+  border-radius: 8px;
+  z-index: 10;
+  color: var(--primary-color);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.drag-overlay .el-icon {
+  margin-bottom: 8px;
 }
 
 .empty-state {
@@ -1174,6 +1428,12 @@ watch(() => props.currentDir, (newDir) => {
   font-size: 13px;
 }
 
+.empty-state .drag-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
 .file-item {
   display: flex;
   align-items: center;
@@ -1184,12 +1444,20 @@ watch(() => props.currentDir, (newDir) => {
   transition: background 0.2s;
 }
 
+.file-item[draggable="true"] {
+  cursor: grab;
+}
+
+.file-item[draggable="true"]:active {
+  cursor: grabbing;
+}
+
 .file-item:hover {
   background: var(--bg-hover);
 }
 
 .file-item.selected {
-  background: var(--primary-color-light);
+  background: rgba(14, 165, 233, 0.15);
 }
 
 .file-icon {
@@ -1331,6 +1599,24 @@ watch(() => props.currentDir, (newDir) => {
   word-break: break-all;
   max-height: 450px;
   overflow: auto;
+}
+
+.preview-image-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  max-height: 500px;
+  overflow: auto;
+}
+
+.preview-image {
+  max-width: 100%;
+  max-height: 450px;
+  object-fit: contain;
+  border-radius: 4px;
 }
 
 .edit-content {

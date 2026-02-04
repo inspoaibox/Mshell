@@ -348,7 +348,8 @@ export function registerSFTPHandlers() {
   ipcMain.handle('sftp:readFileBuffer', async (_event, connectionId: string, filePath: string) => {
     try {
       const buffer = await sftpManager.readFileBuffer(connectionId, filePath)
-      return { success: true, data: buffer }
+      // 将 Buffer 转换为 base64 字符串，便于通过 IPC 传输
+      return { success: true, data: buffer.toString('base64') }
     } catch (error: any) {
       return { success: false, error: error.message }
     }
@@ -389,6 +390,39 @@ export function registerSFTPHandlers() {
     try {
       await sftpManager.changePermissions(connectionId, path, mode)
       return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 拖曳下载 - 先下载到临时目录，然后启动系统拖曳
+  ipcMain.handle('sftp:startDrag', async (event, connectionId: string, remotePath: string, fileName: string) => {
+    try {
+      const { app, nativeImage } = await import('electron')
+      const path = await import('path')
+      const fs = await import('fs')
+      
+      // 创建临时目录
+      const tempDir = path.join(app.getPath('temp'), 'mshell-drag')
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true })
+      }
+      
+      const localPath = path.join(tempDir, fileName)
+      
+      // 下载文件到临时目录
+      await sftpManager.downloadFile(connectionId, remotePath, localPath)
+      
+      // 创建一个简单的拖曳图标（使用空图标，让系统使用默认图标）
+      const icon = nativeImage.createEmpty()
+      
+      // 启动系统拖曳
+      event.sender.startDrag({
+        file: localPath,
+        icon: icon
+      })
+      
+      return { success: true, localPath }
     } catch (error: any) {
       return { success: false, error: error.message }
     }

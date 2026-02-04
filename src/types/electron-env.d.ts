@@ -51,7 +51,7 @@ export interface ElectronAPI {
         uploadFile: (connectionId: string, localPath: string, remotePath: string) => Promise<{ success: boolean; error?: string }>
         downloadFile: (connectionId: string, remotePath: string, localPath: string) => Promise<{ success: boolean; error?: string }>
         readFile: (connectionId: string, filePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
-        readFileBuffer: (connectionId: string, filePath: string) => Promise<{ success: boolean; data?: ArrayBuffer; error?: string }>
+        readFileBuffer: (connectionId: string, filePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
         writeFile: (connectionId: string, filePath: string, content: string) => Promise<{ success: boolean; error?: string }>
         createFile: (connectionId: string, filePath: string) => Promise<{ success: boolean; error?: string }>
         copyFile: (connectionId: string, sourcePath: string, targetPath: string) => Promise<{ success: boolean; error?: string }>
