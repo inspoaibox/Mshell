@@ -335,22 +335,40 @@ onMounted(() => {
     })
   }
 
-  // Setup resize observer
+  // Setup resize observer with debounce to prevent flickering during sidebar animations
+  let resizeTimeout: ReturnType<typeof setTimeout> | null = null
+  let lastWidth = 0
+  let lastHeight = 0
+  
   resizeObserver = new ResizeObserver((entries) => {
     if (!fitAddon || !terminal || !terminalContainer.value) return
     
     for (const entry of entries) {
         const { width, height } = entry.contentRect
         if (width <= 0 || height <= 0) return
+        
+        // Skip if size hasn't changed significantly (avoid micro-adjustments during animation)
+        if (Math.abs(width - lastWidth) < 5 && Math.abs(height - lastHeight) < 5) return
+        
+        lastWidth = width
+        lastHeight = height
     }
 
-    requestAnimationFrame(() => {
+    // Clear previous timeout to debounce rapid resize events
+    if (resizeTimeout) {
+      clearTimeout(resizeTimeout)
+    }
+    
+    // Debounce fit() call - wait for sidebar animation to complete (300ms transition + buffer)
+    resizeTimeout = setTimeout(() => {
+      requestAnimationFrame(() => {
         try {
             fitAddon?.fit()
         } catch (e) {
             console.error('Fit error:', e)
         }
-    })
+      })
+    }, 150) // Wait for animation to settle
   })
   
   if (terminalContainer.value) {

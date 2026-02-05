@@ -44,13 +44,29 @@
 
         <div class="app-content">
           <div v-show="appStore.activeView === 'sessions'" class="content-panel">
-            <div class="sessions-panel glass-panel">
-              <SessionList
-                @connect="handleConnect"
-                @edit="handleEditSession"
-              />
+            <!-- 会话列表折叠按钮 -->
+            <div 
+              class="session-panel-toggle"
+              :class="{ collapsed: !showSessionList }"
+              @click="toggleSessionList"
+            >
+              <el-icon :size="14">
+                <ArrowLeft v-if="showSessionList" />
+                <ArrowRight v-else />
+              </el-icon>
             </div>
-            <div class="terminal-panel" :class="{ 'split-mode': showSplitView && sshTerminals.length >= 2 }">
+            
+            <!-- 会话列表面板 -->
+            <transition name="slide-session-panel">
+              <div v-show="showSessionList" class="sessions-panel glass-panel">
+                <SessionList
+                  @connect="handleConnect"
+                  @edit="handleEditSession"
+                />
+              </div>
+            </transition>
+            
+            <div class="terminal-panel" :class="{ 'split-mode': showSplitView && sshTerminals.length >= 2, 'expanded': !showSessionList }">
               <!-- 分屏工具栏 -->
               <div v-show="showSplitView && sshTerminals.length >= 2" class="split-toolbar">
                 <div class="toolbar-left">
@@ -320,7 +336,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, Plus, Lightning, Grid, ChatDotRound, Upload } from '@element-plus/icons-vue'
+import { Connection, Plus, Lightning, Grid, ChatDotRound, Upload, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 import { useAIStore } from '@/stores/ai'
 import { v4 as uuidv4 } from 'uuid'
@@ -370,6 +386,7 @@ const searchInputRef = ref<HTMLElement | null>(null)
 
 // 分屏视图状态
 const showSplitView = ref(false)
+const showSessionList = ref(true) // 会话列表显示状态
 const layoutMode = ref<'auto' | 'horizontal' | 'vertical'>('auto')
 const broadcastMode = ref(false)
 const showBatchImport = ref(false)
@@ -435,6 +452,11 @@ const toggleSplitView = () => {
     broadcastMode.value = false
     maximizedPaneId.value = null
   }
+}
+
+// 切换会话列表显示
+const toggleSessionList = () => {
+  showSessionList.value = !showSessionList.value
 }
 
 // 切换广播模式
@@ -825,6 +847,17 @@ function setupKeyboardShortcuts() {
     }
   })
   
+  // Ctrl+\\: 切换会话列表显示
+  keyboardShortcutManager.register('toggle-session-list', {
+    key: '\\',
+    ctrl: true,
+    description: '切换会话列表',
+    action: () => {
+      console.log('[Shortcut] Toggle session list triggered')
+      toggleSessionList()
+    }
+  })
+  
   // Ctrl+B: 切换广播模式
   keyboardShortcutManager.register('toggle-broadcast', {
     key: 'b',
@@ -1100,17 +1133,71 @@ body,
   height: 100%;
   display: flex;
   overflow: hidden;
+  position: relative;
+}
+
+/* 会话列表折叠按钮 */
+.session-panel-toggle {
+  position: absolute;
+  left: 300px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 48px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  transition: all 0.3s ease;
+  color: var(--text-secondary);
+}
+
+.session-panel-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--primary-color);
+  width: 20px;
+}
+
+.session-panel-toggle.collapsed {
+  left: 0;
+  border-left: 1px solid var(--border-color);
+  border-radius: 0 6px 6px 0;
+}
+
+/* 会话面板过渡动画 */
+.slide-session-panel-enter-active,
+.slide-session-panel-leave-active {
+  transition: all 0.3s ease;
+}
+
+.slide-session-panel-enter-from,
+.slide-session-panel-leave-to {
+  width: 0 !important;
+  opacity: 0;
+  transform: translateX(-100%);
 }
 
 /* 会话面板 */
 .sessions-panel {
   width: 300px;
+  min-width: 300px;
   border-right: 1px solid var(--border-color);
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-md);
   z-index: 5;
+  overflow: hidden;
+}
+
+/* 终端面板展开状态 */
+.terminal-panel.expanded {
+  margin-left: 20px;
 }
 
 /* 终端面板 */
@@ -1389,13 +1476,13 @@ body,
 }
 
 .split-toolbar .terminal-count {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   font-weight: 500;
 }
 
 .split-toolbar .shortcut-hint {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   background: var(--bg-tertiary);
   padding: 2px 6px;
@@ -1487,14 +1574,14 @@ body,
   height: 18px;
   background: var(--primary-color);
   color: white;
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-weight: 600;
   border-radius: 4px;
   flex-shrink: 0;
 }
 
 .split-terminal-pane .pane-title {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-primary);
   font-weight: 500;
   overflow: hidden;
@@ -1503,7 +1590,7 @@ body,
 }
 
 .split-terminal-pane .pane-name {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1519,7 +1606,7 @@ body,
 
 .split-terminal-pane .pane-actions .el-button {
   padding: 2px 4px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .split-terminal-pane .pane-content {

@@ -25,7 +25,7 @@
             @click="sendCtrlAltDel"
             class="action-btn"
           >
-            <span style="font-size: 10px;">CAD</span>
+            <span style="font-size: var(--text-xs);">CAD</span>
           </el-button>
         </el-tooltip>
         <el-tooltip content="剪贴板" placement="bottom">
@@ -375,12 +375,12 @@ onUnmounted(() => {
 
 .host-name {
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--text-primary);
 }
 
 .status-text {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
@@ -443,7 +443,7 @@ onUnmounted(() => {
 
 .loading-text,
 .error-text {
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--text-secondary);
 }
 
@@ -479,7 +479,7 @@ onUnmounted(() => {
 
 .panel-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
 }
 

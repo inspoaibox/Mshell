@@ -16,7 +16,7 @@
               link
               class="action-btn font-btn"
             >
-              <span style="font-size: 12px; font-weight: 500;">A</span>
+              <span style="font-size: var(--text-sm); font-weight: 500;">A</span>
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
@@ -227,11 +227,9 @@
       </div>
       
       <!-- 命令历史面板 -->
-      <transition name="slide-right">
-        <div v-if="showCommandHistory" class="history-sidebar">
-          <CommandHistoryPanel @select="handleCommandSelect" />
-        </div>
-      </transition>
+      <div v-if="showCommandHistory" class="history-sidebar">
+        <CommandHistoryPanel @select="handleCommandSelect" />
+      </div>
       
       <!-- 服务器监控面板 -->
       <transition name="slide-left">
@@ -260,6 +258,7 @@
           <TerminalFilePanel
             :connection-id="connectionId"
             :session-name="session?.name"
+            :username="session?.username"
             :current-dir="currentWorkingDir"
             @close="showFilePanel = false"
             @request-current-dir="updateCurrentWorkingDir"
@@ -1737,13 +1736,13 @@ defineExpose({
 }
 
 .host-name {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text-primary);
 }
 
 .status-text {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   text-transform: capitalize;
 }
@@ -1919,7 +1918,7 @@ defineExpose({
 }
 
 .loading-text {
-  font-size: 14px;
+  font-size: var(--text-base);
   letter-spacing: 0.5px;
 }
 
@@ -1945,7 +1944,7 @@ defineExpose({
 
 .sidebar-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -1975,7 +1974,7 @@ defineExpose({
 }
 
 .section-title {
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -1996,7 +1995,7 @@ defineExpose({
   cursor: pointer;
   transition: all 0.2s;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .category-item:hover {
@@ -2072,7 +2071,7 @@ defineExpose({
 .snippet-name {
   font-weight: 600;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2080,14 +2079,14 @@ defineExpose({
 }
 
 .usage-count {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   flex-shrink: 0;
 }
 
 .snippet-command {
   font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: #2563eb;
   background: var(--bg-secondary);
   padding: 4px 6px;
@@ -2113,7 +2112,7 @@ defineExpose({
   background: var(--bg-secondary);
   padding: 1px 5px;
   border-radius: 3px;
-  font-size: 9px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
 }
@@ -2130,7 +2129,7 @@ defineExpose({
 
 .empty-snippets p {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .command-preview {
@@ -2142,7 +2141,7 @@ defineExpose({
 }
 
 .preview-label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   margin-bottom: 8px;
   text-transform: uppercase;
@@ -2151,7 +2150,7 @@ defineExpose({
 .command-preview pre {
   margin: 0;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--success-color);
   white-space: pre-wrap;
   word-break: break-all;
@@ -2195,7 +2194,7 @@ defineExpose({
 }
 
 .disconnected-icon {
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 
 .reconnect-content {
@@ -2203,12 +2202,12 @@ defineExpose({
   align-items: center;
   gap: 12px;
   color: white;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 
 .reconnect-icon {
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 
 .reconnect-icon.spinning {

@@ -581,11 +581,11 @@ const getStatusText = (status: string) => {
 
 .panel-header h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--text-2xl);
 }
 
 .guide-btn {
-  font-size: 13px;
+  font-size: var(--text-sm);
   padding: 4px 8px;
 }
 
@@ -610,7 +610,7 @@ const getStatusText = (status: string) => {
 }
 
 .stat-value {
-  font-size: 20px;
+  font-size: var(--text-2xl);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -619,7 +619,7 @@ const getStatusText = (status: string) => {
 .stat-value.danger { color: var(--error-color); }
 
 .stat-label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
@@ -631,17 +631,17 @@ const getStatusText = (status: string) => {
 }
 
 .time-text {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
 .no-data {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .exec-stats {
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .exec-stats .success { color: var(--success-color); }
@@ -689,7 +689,7 @@ const getStatusText = (status: string) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
@@ -705,13 +705,13 @@ const getStatusText = (status: string) => {
 .unit-text {
   margin-left: 8px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .delay-hint {
   margin-left: 16px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .add-step-btn {
@@ -737,7 +737,7 @@ const getStatusText = (status: string) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   cursor: help;
 }
@@ -779,7 +779,7 @@ const getStatusText = (status: string) => {
 
 .guide-content h3 {
   margin: 24px 0 12px 0;
-  font-size: 16px;
+  font-size: var(--text-lg);
   color: var(--text-primary);
 }
 
@@ -789,7 +789,7 @@ const getStatusText = (status: string) => {
 
 .guide-content p {
   margin: 0 0 12px 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.7;
   color: var(--text-secondary);
 }
@@ -797,7 +797,7 @@ const getStatusText = (status: string) => {
 .guide-content ul {
   margin: 0 0 16px 0;
   padding-left: 24px;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.8;
   color: var(--text-secondary);
 }
@@ -807,7 +807,7 @@ const getStatusText = (status: string) => {
   padding: 2px 6px;
   border-radius: 4px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--primary-color);
 }
 
@@ -827,7 +827,7 @@ const getStatusText = (status: string) => {
 }
 
 .type-icon {
-  font-size: 24px;
+  font-size: var(--text-2xl);
 }
 
 .type-info strong {
@@ -838,7 +838,7 @@ const getStatusText = (status: string) => {
 
 .type-info p {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .case-study {
@@ -850,7 +850,7 @@ const getStatusText = (status: string) => {
 
 .case-study h4 {
   margin: 0 0 12px 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--primary-color);
 }
 
@@ -875,7 +875,7 @@ const getStatusText = (status: string) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   flex-shrink: 0;
 }
@@ -884,11 +884,11 @@ const getStatusText = (status: string) => {
   display: block;
   margin-bottom: 4px;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .case-step code {
   display: block;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 </style>

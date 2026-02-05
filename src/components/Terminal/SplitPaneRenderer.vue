@@ -102,7 +102,7 @@ const isActive = computed(() => props.node.id === props.activePaneId)
 }
 
 .pane-title {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   font-weight: 500;
 }
@@ -111,7 +111,7 @@ const isActive = computed(() => props.node.id === props.activePaneId)
   background: transparent;
   border: none;
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 3px;

@@ -329,11 +329,11 @@ defineExpose({
 }
 
 .ai-icon {
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 
 .ai-label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--primary-color);
 }
@@ -361,7 +361,7 @@ defineExpose({
   gap: 6px;
   margin-bottom: 10px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .query-icon {
@@ -379,7 +379,7 @@ defineExpose({
 
 .command-preview code {
   font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--success-color);
   word-break: break-all;
 }
@@ -390,7 +390,7 @@ defineExpose({
   padding: 16px;
   text-align: center;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .loading-state {
@@ -413,7 +413,7 @@ defineExpose({
 }
 
 .error-icon {
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .risk-warning {
@@ -425,7 +425,7 @@ defineExpose({
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 4px;
   margin-top: 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: #ef4444;
 }
 
@@ -437,7 +437,7 @@ defineExpose({
 }
 
 .action-hint {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
 }
 
@@ -447,7 +447,7 @@ defineExpose({
   border-radius: 3px;
   padding: 1px 5px;
   font-family: inherit;
-  font-size: 10px;
+  font-size: var(--text-xs);
   margin: 0 2px;
 }
 

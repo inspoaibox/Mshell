@@ -692,7 +692,7 @@ defineExpose({
 }
 
 .hint-text {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
 }
 
@@ -721,7 +721,7 @@ defineExpose({
 }
 
 .suggestion-icon {
-  font-size: 14px;
+  font-size: var(--text-base);
   flex-shrink: 0;
 }
 
@@ -732,7 +732,7 @@ defineExpose({
 
 .suggestion-text {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -749,7 +749,7 @@ defineExpose({
 
 
 .suggestion-description {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   margin-top: 1px;
   overflow: hidden;
@@ -773,7 +773,7 @@ defineExpose({
   color: white;
   padding: 1px 6px;
   border-radius: 8px;
-  font-size: 10px;
+  font-size: var(--text-xs);
   flex-shrink: 0;
 }
 

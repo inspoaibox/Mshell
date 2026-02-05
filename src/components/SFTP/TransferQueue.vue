@@ -551,7 +551,7 @@ onUnmounted(() => {
 
 .queue-header h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
@@ -595,7 +595,7 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.2);
   padding: 2px 6px;
   border-radius: 10px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .tab.active .badge {
@@ -618,7 +618,7 @@ onUnmounted(() => {
 }
 
 .empty-icon {
-  font-size: 48px;
+  font-size: var(--text-3xl);
   opacity: 0.5;
   margin-bottom: 16px;
 }
@@ -647,7 +647,7 @@ onUnmounted(() => {
 }
 
 .transfer-icon {
-  font-size: 24px;
+  font-size: var(--text-2xl);
   flex-shrink: 0;
 }
 
@@ -665,7 +665,7 @@ onUnmounted(() => {
 }
 
 .transfer-path {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -694,13 +694,13 @@ onUnmounted(() => {
 .progress-info {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
 .transfer-status {
   margin-top: 8px;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .transfer-status.error {
@@ -719,7 +719,7 @@ onUnmounted(() => {
   border-radius: 4px;
   padding: 4px 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--text-base);
   transition: all 0.2s;
 }
 

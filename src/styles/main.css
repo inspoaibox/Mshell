@@ -24,13 +24,39 @@ body,
 
 body {
   font-family: var(--font-sans);
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
   line-height: 1.5;
   background-color: var(--bg-main);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+/* 全局字体大小统一规则 */
+h1 { font-size: var(--text-2xl); }
+h2 { font-size: var(--text-xl); }
+h3 { font-size: var(--text-lg); }
+h4 { font-size: var(--text-base); }
+h5, h6 { font-size: var(--text-sm); }
+
+/* 面板标题统一 */
+.panel-header h3,
+.sidebar-header h3 {
+  font-size: var(--text-base) !important;
+}
+
+/* 表单标签统一 */
+.el-form-item__label {
+  font-size: var(--text-sm) !important;
+}
+
+/* 辅助文字/提示统一 */
+.form-hint,
+.help-text,
+.meta-text {
+  font-size: var(--text-xs) !important;
+  color: var(--text-tertiary);
 }
 
 /* 专业级滚动条 */

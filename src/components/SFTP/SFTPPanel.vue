@@ -2368,7 +2368,7 @@ const formatSpeed = (speed: number) => {
 
 .browser-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -2432,7 +2432,7 @@ const formatSpeed = (speed: number) => {
 
 .path-text {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--success-color);
   font-weight: 500;
   white-space: nowrap;
@@ -2448,7 +2448,7 @@ const formatSpeed = (speed: number) => {
 
 .connected-icon {
   color: var(--success-color);
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 
 .session-option {
@@ -2458,7 +2458,7 @@ const formatSpeed = (speed: number) => {
 }
 
 .session-host {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
 
@@ -2497,7 +2497,7 @@ const formatSpeed = (speed: number) => {
   --el-table-text-color: var(--text-secondary);
   --el-table-header-text-color: var(--text-secondary);
   background-color: transparent;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .file-list :deep(.el-table tr) {
@@ -2508,7 +2508,7 @@ const formatSpeed = (speed: number) => {
   border-bottom: 1px solid var(--border-color);
   font-weight: 600;
   text-transform: uppercase;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .file-list :deep(.el-table td.el-table__cell) {
@@ -2568,7 +2568,7 @@ const formatSpeed = (speed: number) => {
 }
 
 .queue-tabs :deep(.el-tabs__item) {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
   color: var(--text-tertiary);
@@ -2598,7 +2598,7 @@ const formatSpeed = (speed: number) => {
   padding: 8px 16px;
   border-bottom: 1px solid var(--border-light);
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .transfer-item:last-child {
@@ -2638,13 +2638,13 @@ const formatSpeed = (speed: number) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .transfer-meta {
   display: flex;
   gap: 16px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
 
@@ -2721,7 +2721,7 @@ const formatSpeed = (speed: number) => {
 
 .permission-group h4 {
   margin: 0 0 12px 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -2739,12 +2739,12 @@ const formatSpeed = (speed: number) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .octal-value {
   font-family: var(--font-mono);
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--primary-color);
 }

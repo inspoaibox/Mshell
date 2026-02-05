@@ -53,7 +53,7 @@ const overlayStyle = computed(() => ({
 .ghost-hint {
   background: rgba(14, 165, 233, 0.2);
   color: rgba(14, 165, 233, 0.7);
-  font-size: 9px;
+  font-size: var(--text-xs);
   padding: 1px 4px;
   border-radius: 3px;
   font-family: system-ui, sans-serif;

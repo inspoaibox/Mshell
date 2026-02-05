@@ -666,11 +666,11 @@ const describeCron = (cron: string): string => {
 
 .panel-header h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--text-2xl);
 }
 
 .guide-btn {
-  font-size: 13px;
+  font-size: var(--text-sm);
   padding: 4px 8px;
 }
 

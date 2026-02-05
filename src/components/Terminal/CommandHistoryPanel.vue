@@ -396,7 +396,7 @@ onMounted(() => {
 
 .panel-header h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -430,12 +430,12 @@ onMounted(() => {
 }
 
 .stat-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
 }
 
 .stat-value {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--primary-color);
 }
@@ -474,7 +474,7 @@ onMounted(() => {
 .item-command {
   flex: 1;
   font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
   word-break: break-all;
   line-height: 1.4;
@@ -489,7 +489,7 @@ onMounted(() => {
 .item-meta {
   display: flex;
   gap: 12px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   flex-wrap: wrap;
 }
@@ -517,7 +517,7 @@ onMounted(() => {
 
 .empty-state p {
   margin-top: 16px;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .most-used-section {
@@ -531,7 +531,7 @@ onMounted(() => {
 
 .most-used-section h4 {
   margin: 0 0 10px 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -568,7 +568,7 @@ onMounted(() => {
   background: var(--primary-color);
   color: white;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   flex-shrink: 0;
 }
@@ -576,7 +576,7 @@ onMounted(() => {
 .most-used-item .command {
   flex: 1;
   font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;

@@ -213,7 +213,7 @@ defineExpose({
   border: 1px solid var(--border-color);
   border-radius: 4px;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -259,7 +259,7 @@ defineExpose({
   justify-content: space-between;
   align-items: center;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -272,7 +272,7 @@ defineExpose({
   border: none;
   color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1;
 }
 

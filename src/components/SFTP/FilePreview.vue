@@ -278,7 +278,7 @@ watch(visible, (newVisible) => {
 .code-viewer pre {
   margin: 0;
   font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--text-primary);
 }
@@ -293,7 +293,7 @@ watch(visible, (newVisible) => {
 
 .code-editor :deep(.el-textarea__inner) {
   font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 

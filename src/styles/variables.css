@@ -100,6 +100,14 @@
   --el-fill-color: var(--bg-tertiary);
   --el-border-radius-base: var(--radius-md);
   --el-border-radius-small: var(--radius-sm);
+  
+  /* Element Plus 字体大小统一 */
+  --el-font-size-extra-large: var(--text-xl);
+  --el-font-size-large: var(--text-lg);
+  --el-font-size-medium: var(--text-base);
+  --el-font-size-base: var(--text-sm);
+  --el-font-size-small: var(--text-xs);
+  --el-font-size-extra-small: 10px;
 }
 
 /* 暗色主题优化 */
@@ -169,4 +177,12 @@
   --el-border-color-lighter: var(--border-medium);
   --el-fill-color-blank: var(--bg-secondary);
   --el-fill-color: var(--bg-tertiary);
+  
+  /* Element Plus 字体大小统一 */
+  --el-font-size-extra-large: var(--text-xl);
+  --el-font-size-large: var(--text-lg);
+  --el-font-size-medium: var(--text-base);
+  --el-font-size-base: var(--text-sm);
+  --el-font-size-small: var(--text-xs);
+  --el-font-size-extra-small: 10px;
 }

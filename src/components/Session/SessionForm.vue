@@ -79,7 +79,7 @@
               </div>
             </el-option>
           </el-select>
-          <div style="margin-top: 8px; font-size: 12px; color: var(--text-secondary);">
+          <div style="margin-top: 8px; font-size: var(--text-sm); color: var(--text-secondary);">
             或 <el-button type="primary" link size="small" @click="handleSelectLocalKeyFile">选择本地文件</el-button>
           </div>
         </el-form-item>
@@ -160,7 +160,7 @@
       <!-- RDP 选项 -->
       <template v-if="form.type === 'rdp'">
         <el-divider content-position="left">
-          <span style="font-size: 14px; color: var(--text-secondary)">RDP 选项</span>
+          <span style="font-size: var(--text-base); color: var(--text-secondary)">RDP 选项</span>
         </el-divider>
 
         <el-form-item label="显示模式">
@@ -169,7 +169,7 @@
             <el-radio value="fullscreen">全屏（单显示器）</el-radio>
             <el-radio value="multimon">全屏（多显示器）</el-radio>
           </el-radio-group>
-          <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 4px;">
+          <div style="font-size: var(--text-sm); color: var(--text-tertiary); margin-top: 4px;">
             <template v-if="form.rdpDisplayMode === 'window'">使用指定分辨率在窗口中显示</template>
             <template v-else-if="form.rdpDisplayMode === 'fullscreen'">占满本地一个显示器</template>
             <template v-else>跨越本地所有显示器</template>
@@ -199,7 +199,7 @@
 
         <el-form-item label="连接模式">
           <el-checkbox v-model="form.rdpAdmin">管理员模式 (/admin)</el-checkbox>
-          <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 2px;">
+          <div style="font-size: var(--text-sm); color: var(--text-tertiary); margin-top: 2px;">
             直接连接到控制台会话，绕过其他用户会话
           </div>
         </el-form-item>
@@ -222,12 +222,12 @@
       <!-- VNC 选项 -->
       <template v-if="form.type === 'vnc'">
         <el-divider content-position="left">
-          <span style="font-size: 14px; color: var(--text-secondary)">VNC 选项</span>
+          <span style="font-size: var(--text-base); color: var(--text-secondary)">VNC 选项</span>
         </el-divider>
 
         <el-form-item label="连接模式">
           <el-checkbox v-model="form.vncViewOnly">只读模式</el-checkbox>
-          <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 2px;">
+          <div style="font-size: var(--text-sm); color: var(--text-tertiary); margin-top: 2px;">
             只能查看，不能操作远程桌面
           </div>
         </el-form-item>
@@ -265,7 +265,7 @@
 
       <!-- 服务器管理信息（可折叠） -->
       <el-divider content-position="left">
-        <span style="font-size: 14px; color: var(--text-secondary)">服务器管理信息（可选）</span>
+        <span style="font-size: var(--text-base); color: var(--text-secondary)">服务器管理信息（可选）</span>
       </el-divider>
 
       <el-form-item label="提供商">
@@ -288,7 +288,7 @@
             :value="item.value"
           >
             <span style="float: left">{{ item.label }}</span>
-            <span style="float: right; color: var(--el-text-color-secondary); font-size: 13px">
+            <span style="float: right; color: var(--el-text-color-secondary); font-size: var(--text-sm)">
               {{ item.value }}
             </span>
           </el-option>
@@ -342,7 +342,7 @@
       <!-- 跳板机配置（仅 SSH） -->
       <template v-if="form.type === 'ssh'">
         <el-divider content-position="left">
-          <span style="font-size: 14px; color: var(--text-secondary)">高级连接选项（可选）</span>
+          <span style="font-size: var(--text-base); color: var(--text-secondary)">高级连接选项（可选）</span>
         </el-divider>
 
         <ProxyJumpConfig

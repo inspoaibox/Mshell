@@ -277,11 +277,11 @@ defineExpose({
 }
 
 .explain-icon {
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 
 .explain-title {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--primary-color);
   flex: 1;
@@ -310,12 +310,12 @@ defineExpose({
 
 .command-display code {
   font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--success-color);
 }
 
 .explanation-summary {
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--text-primary);
   margin-bottom: 12px;
   line-height: 1.5;
@@ -328,7 +328,7 @@ defineExpose({
 }
 
 .parts-title {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   margin-bottom: 8px;
 }
@@ -347,7 +347,7 @@ defineExpose({
 
 .part-code {
   font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--primary-color);
   background: var(--bg-secondary);
   padding: 2px 6px;
@@ -356,20 +356,20 @@ defineExpose({
 }
 
 .part-desc {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
   line-height: 1.4;
 }
 
 .ai-explanation {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
   line-height: 1.6;
 }
 
 .ai-explanation :deep(code) {
   font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   background: var(--bg-tertiary);
   padding: 1px 4px;
   border-radius: 3px;
@@ -385,7 +385,7 @@ defineExpose({
   padding: 20px;
   text-align: center;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .loading-text {
@@ -401,7 +401,7 @@ defineExpose({
   padding: 20px;
   text-align: center;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -419,7 +419,7 @@ defineExpose({
 }
 
 .action-hint {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
 }
 
@@ -429,7 +429,7 @@ defineExpose({
   border-radius: 3px;
   padding: 1px 5px;
   font-family: inherit;
-  font-size: 10px;
+  font-size: var(--text-xs);
   margin: 0 2px;
 }
 

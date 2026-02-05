@@ -295,7 +295,7 @@
           <el-table-column label="费用 (月)" width="150">
             <template #default="{ row }">
               <div>{{ formatAnyCost(row) }}</div>
-              <div v-if="row.billingCycle !== 'monthly'" style="font-size: 10px; color: var(--text-tertiary)">
+              <div v-if="row.billingCycle !== 'monthly'" style="font-size: var(--text-xs); color: var(--text-tertiary)">
                 折合: {{ formatCurrency(getMonthlyCost(row)) }}/月
               </div>
             </template>

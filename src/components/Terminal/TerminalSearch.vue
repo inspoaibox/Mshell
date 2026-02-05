@@ -128,7 +128,7 @@ defineExpose({
 }
 
 .match-count {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   white-space: nowrap;
   padding: 0 4px;
@@ -143,7 +143,7 @@ defineExpose({
 
 .terminal-search :deep(.el-checkbox__label) {
   padding-left: 4px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: monospace;
   font-weight: 600;
 }

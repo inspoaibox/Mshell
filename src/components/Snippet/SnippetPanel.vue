@@ -729,7 +729,7 @@ const resetForm = () => {
 }
 
 .expand-icon {
-  font-size: 12px;
+  font-size: var(--text-sm);
   transition: transform var(--transition-fast);
   color: var(--text-tertiary);
 }
@@ -740,7 +740,7 @@ const resetForm = () => {
 }
 
 .category-icon {
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--primary-color);
 }
 
@@ -750,7 +750,7 @@ const resetForm = () => {
 }
 
 .category-count {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   background: var(--bg-tertiary);
   padding: 2px 6px;
@@ -796,7 +796,7 @@ const resetForm = () => {
 
 .snippet-icon {
   color: var(--primary-color);
-  font-size: 13px;
+  font-size: var(--text-sm);
   flex-shrink: 0;
 }
 
@@ -812,7 +812,7 @@ const resetForm = () => {
 
 .shortcut-tag {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 2px 6px;
   height: 20px;
   line-height: 16px;
@@ -820,7 +820,7 @@ const resetForm = () => {
 
 .usage-badge {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   background: var(--bg-secondary);
   padding: 2px 6px;
   border-radius: 8px;

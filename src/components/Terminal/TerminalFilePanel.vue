@@ -60,6 +60,7 @@
     <div 
       class="file-list" 
       v-loading="loading"
+      element-loading-background="var(--bg-secondary)"
       @dragover.prevent="onDragOver"
       @dragleave="onDragLeave"
       @drop.prevent="onDrop"
@@ -325,6 +326,7 @@ interface FileInfo {
 const props = defineProps<{
   connectionId: string
   sessionName?: string
+  username?: string
   currentDir?: string
 }>()
 
@@ -496,10 +498,14 @@ const goBack = () => {
   }
 }
 
-// 返回主目录
+// 返回主目录（用户的 home 目录）
 const goHome = () => {
   pathHistory.value.push(currentPath.value)
-  loadDirectory('/')
+  // 根据用户名判断 home 目录
+  const homeDir = props.username && props.username !== 'root' 
+    ? `/home/${props.username}` 
+    : '/root'
+  loadDirectory(homeDir)
 }
 
 // 刷新目录
@@ -1265,14 +1271,20 @@ const saveEditedFile = async () => {
 // SFTP 初始化状态
 const sftpInitialized = ref(false)
 
-// 获取初始目录（优先使用终端当前目录）
+// 获取初始目录（优先使用终端当前目录，否则根据用户名判断）
 const getInitialPath = () => {
   if (props.currentDir && props.currentDir.trim()) {
     // 处理 ~ 开头的路径
     if (props.currentDir.startsWith('~')) {
-      return props.currentDir.replace('~', '/root')
+      // 根据用户名确定 home 目录
+      const homeDir = props.username === 'root' ? '/root' : `/home/${props.username || 'root'}`
+      return props.currentDir.replace('~', homeDir)
     }
     return props.currentDir
+  }
+  // 根据用户名判断默认目录：root 用户打开 /root，其他用户打开 /home/用户名
+  if (props.username && props.username !== 'root') {
+    return `/home/${props.username}`
   }
   return '/root'
 }
@@ -1356,7 +1368,7 @@ watch(() => props.currentDir, (newDir) => {
 
 .panel-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
 }
 
@@ -1406,7 +1418,7 @@ watch(() => props.currentDir, (newDir) => {
   border-radius: 8px;
   z-index: 10;
   color: var(--primary-color);
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 500;
 }
 
@@ -1425,12 +1437,12 @@ watch(() => props.currentDir, (newDir) => {
 
 .empty-state p {
   margin-top: 12px;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .empty-state .drag-hint {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-tertiary);
 }
 
@@ -1475,7 +1487,7 @@ watch(() => props.currentDir, (newDir) => {
 }
 
 .file-name {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -1483,7 +1495,7 @@ watch(() => props.currentDir, (newDir) => {
 }
 
 .file-meta {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   margin-top: 2px;
 }
@@ -1515,7 +1527,7 @@ watch(() => props.currentDir, (newDir) => {
   padding: 8px 12px;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-sm);
   transition: background 0.2s;
 }
 
@@ -1548,7 +1560,7 @@ watch(() => props.currentDir, (newDir) => {
 
 .permission-group h4 {
   margin: 0 0 8px 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
@@ -1565,7 +1577,7 @@ watch(() => props.currentDir, (newDir) => {
 
 .octal-value {
   font-family: monospace;
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--primary-color);
   margin-left: 8px;
@@ -1593,7 +1605,7 @@ watch(() => props.currentDir, (newDir) => {
   background: var(--bg-secondary);
   border-radius: 6px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
@@ -1625,7 +1637,7 @@ watch(() => props.currentDir, (newDir) => {
 
 .edit-textarea :deep(.el-textarea__inner) {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   resize: none;
 }

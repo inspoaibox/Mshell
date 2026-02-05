@@ -176,7 +176,7 @@ const handleDrop = (event: DragEvent) => {
 }
 
 .drop-icon {
-  font-size: 64px;
+  font-size: var(--text-6xl);
   margin-bottom: 16px;
   animation: bounce 1s ease-in-out infinite;
 }
@@ -191,14 +191,14 @@ const handleDrop = (event: DragEvent) => {
 }
 
 .drop-title {
-  font-size: 24px;
+  font-size: var(--text-2xl);
   font-weight: 600;
   color: var(--primary-color);
   margin-bottom: 8px;
 }
 
 .drop-subtitle {
-  font-size: 14px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 </style>
