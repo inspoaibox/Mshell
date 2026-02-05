@@ -23,31 +23,49 @@ export function registerSessionHandlers() {
   })
 
   ipcMain.handle('session:create', async (_event, config: any) => {
-    await sessionManager.initialize()
-    const session = sessionManager.createSession(config)
-    
-    // 记录审计日志
-    auditLogManager.log(AuditAction.SESSION_CREATE, {
-      sessionId: session.id,
-      resource: config.name || config.host,
-      details: { name: config.name, host: config.host, port: config.port, username: config.username },
-      success: true
-    })
-    
-    return session
+    try {
+      await sessionManager.initialize()
+      
+      // 清理配置，确保可序列化
+      const cleanConfig = JSON.parse(JSON.stringify(config))
+      const session = await sessionManager.createSession(cleanConfig)
+      
+      // 记录审计日志
+      auditLogManager.log(AuditAction.SESSION_CREATE, {
+        sessionId: session.id,
+        resource: config.name || config.host,
+        details: { name: config.name, host: config.host, port: config.port, username: config.username },
+        success: true
+      })
+      
+      return { success: true, data: session }
+    } catch (error: any) {
+      console.error('Failed to create session:', error)
+      return { success: false, error: error.message }
+    }
   })
 
   ipcMain.handle('session:update', async (_event, id: string, updates: any) => {
-    await sessionManager.initialize()
-    sessionManager.updateSession(id, updates)
-    
-    // 记录审计日志
-    auditLogManager.log(AuditAction.SESSION_UPDATE, {
-      sessionId: id,
-      resource: updates.name || id,
-      details: { updates },
-      success: true
-    })
+    try {
+      await sessionManager.initialize()
+      
+      // 清理更新数据，确保可序列化
+      const cleanUpdates = JSON.parse(JSON.stringify(updates))
+      await sessionManager.updateSession(id, cleanUpdates)
+      
+      // 记录审计日志
+      auditLogManager.log(AuditAction.SESSION_UPDATE, {
+        sessionId: id,
+        resource: updates.name || id,
+        details: { name: updates.name, host: updates.host },
+        success: true
+      })
+      
+      return { success: true }
+    } catch (error: any) {
+      console.error('Failed to update session:', error)
+      return { success: false, error: error.message }
+    }
   })
 
   ipcMain.handle('session:delete', async (_event, id: string) => {

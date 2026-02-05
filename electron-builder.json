@@ -16,6 +16,12 @@
       "filter": ["**/*"]
     }
   ],
+  "publish": {
+    "provider": "github",
+    "owner": "inspoaibox",
+    "repo": "Mshell",
+    "releaseType": "release"
+  },
   "win": {
     "target": [
       {

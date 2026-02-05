@@ -347,12 +347,16 @@
 
         <ProxyJumpConfig
           :config="form.proxyJump"
+          :target-host="form.host"
+          :target-port="form.port"
           @update="handleProxyJumpUpdate"
         />
 
         <!-- 代理配置 -->
         <ProxyConfig
           :config="form.proxy"
+          :target-host="form.host"
+          :target-port="form.port"
           @update="handleProxyUpdate"
         />
       </template>
@@ -762,7 +766,7 @@ const handleSave = async () => {
         // 服务器管理字段
         provider: form.provider || undefined,
         region: form.region || undefined,
-        expiryDate: form.expiryDate ? new Date(form.expiryDate) : undefined,
+        expiryDate: form.expiryDate || undefined, // 保持字符串格式
         billingCycle: form.billingCycle || undefined,
         billingAmount: form.billingAmount,
         billingCurrency: form.billingCurrency || 'CNY',
@@ -782,10 +786,14 @@ const handleSave = async () => {
           }
           sessionData.passphrase = form.passphrase || undefined
         }
-        // 跳板机配置
-        sessionData.proxyJump = form.proxyJump
-        // 代理配置
-        sessionData.proxy = form.proxy
+        // 跳板机配置 - 转换为普通对象以便 IPC 传输
+        if (form.proxyJump) {
+          sessionData.proxyJump = JSON.parse(JSON.stringify(form.proxyJump))
+        }
+        // 代理配置 - 转换为普通对象以便 IPC 传输
+        if (form.proxy) {
+          sessionData.proxy = JSON.parse(JSON.stringify(form.proxy))
+        }
       } else if (form.type === 'rdp') {
         // RDP 特有配置
         sessionData.password = form.password || undefined

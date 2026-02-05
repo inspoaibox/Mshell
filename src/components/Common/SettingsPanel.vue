@@ -531,7 +531,103 @@
           <div class="settings-section">
             <h3>版本更新</h3>
             <el-form label-position="left">
-              <el-form-item label="查看最新版本">
+              <el-form-item label="当前版本">
+                <span class="version-text">{{ appVersion }}</span>
+              </el-form-item>
+              
+              <el-form-item label="启动时自动检查更新">
+                <el-switch v-model="settings.updates.autoCheck" @change="saveSettings" />
+              </el-form-item>
+              
+              <el-form-item label="检查更新">
+                <el-button 
+                  type="primary" 
+                  :loading="updateState.checking"
+                  @click="checkForUpdates"
+                >
+                  {{ updateState.checking ? '检查中...' : '检查更新' }}
+                </el-button>
+              </el-form-item>
+              
+              <!-- 更新状态显示 -->
+              <div v-if="updateState.status" class="update-status">
+                <!-- 有新版本 -->
+                <template v-if="updateState.status === 'available'">
+                  <el-alert 
+                    type="success" 
+                    :closable="false"
+                    show-icon
+                  >
+                    <template #title>
+                      发现新版本 {{ updateState.newVersion }}
+                    </template>
+                    <template #default>
+                      <div v-if="updateState.releaseNotes" class="release-notes">
+                        <div v-html="updateState.releaseNotes"></div>
+                      </div>
+                      <div class="update-actions">
+                        <el-button 
+                          type="primary" 
+                          size="small"
+                          :loading="updateState.downloading"
+                          @click="downloadUpdate"
+                        >
+                          {{ updateState.downloading ? '下载中...' : '下载更新' }}
+                        </el-button>
+                      </div>
+                    </template>
+                  </el-alert>
+                </template>
+                
+                <!-- 下载进度 -->
+                <template v-if="updateState.status === 'downloading'">
+                  <el-alert type="info" :closable="false" show-icon>
+                    <template #title>正在下载更新...</template>
+                    <template #default>
+                      <el-progress 
+                        :percentage="updateState.progress" 
+                        :format="formatProgress"
+                      />
+                      <div class="download-info">
+                        {{ formatBytes(updateState.transferred) }} / {{ formatBytes(updateState.total) }}
+                        ({{ formatBytes(updateState.bytesPerSecond) }}/s)
+                      </div>
+                    </template>
+                  </el-alert>
+                </template>
+                
+                <!-- 下载完成 -->
+                <template v-if="updateState.status === 'downloaded'">
+                  <el-alert type="success" :closable="false" show-icon>
+                    <template #title>更新已下载完成</template>
+                    <template #default>
+                      <p>新版本 {{ updateState.newVersion }} 已准备就绪</p>
+                      <el-button type="primary" size="small" @click="installUpdate">
+                        立即安装并重启
+                      </el-button>
+                    </template>
+                  </el-alert>
+                </template>
+                
+                <!-- 已是最新版本 -->
+                <template v-if="updateState.status === 'up-to-date'">
+                  <el-alert type="info" :closable="false" show-icon>
+                    <template #title>已是最新版本</template>
+                  </el-alert>
+                </template>
+                
+                <!-- 更新错误 -->
+                <template v-if="updateState.status === 'error'">
+                  <el-alert type="error" :closable="false" show-icon>
+                    <template #title>检查更新失败</template>
+                    <template #default>
+                      {{ updateState.error }}
+                    </template>
+                  </el-alert>
+                </template>
+              </div>
+              
+              <el-form-item label="查看所有版本">
                 <el-link 
                   type="primary" 
                   href="https://github.com/inspoaibox/Mshell/releases" 
@@ -971,6 +1067,20 @@ const backupLoading = ref(false)
 
 const appVersion = ref('0.1.3')
 
+// 更新相关状态
+const updateState = ref({
+  checking: false,
+  downloading: false,
+  status: '' as '' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error',
+  newVersion: '',
+  releaseNotes: '',
+  progress: 0,
+  bytesPerSecond: 0,
+  transferred: 0,
+  total: 0,
+  error: ''
+})
+
 // 快捷键相关状态
 const shortcuts = ref<Record<string, ShortcutConfig>>({})
 const showEditShortcutDialog = ref(false)
@@ -1047,6 +1157,9 @@ onMounted(async () => {
       console.error('Failed to get app version:', e)
     }
   }
+  
+  // 设置更新事件监听
+  setupUpdateListeners()
 })
 
 const loadSettings = async () => {
@@ -1353,8 +1466,105 @@ const formatFileSize = (bytes: number) => {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
 }
 const checkForUpdates = async () => {
-  // Placeholder for update check logic
-  ElMessage.info('正在检查更新... (功能尚在开发中)')
+  if (updateState.value.checking) return
+  
+  updateState.value.checking = true
+  updateState.value.status = ''
+  updateState.value.error = ''
+  
+  try {
+    const result = await window.electronAPI.update?.check()
+    if (!result?.success) {
+      updateState.value.status = 'error'
+      updateState.value.error = result?.error || '检查更新失败'
+    }
+  } catch (error: any) {
+    updateState.value.status = 'error'
+    updateState.value.error = error.message || '检查更新失败'
+  } finally {
+    updateState.value.checking = false
+  }
+}
+
+const downloadUpdate = async () => {
+  if (updateState.value.downloading) return
+  
+  updateState.value.downloading = true
+  updateState.value.status = 'downloading'
+  
+  try {
+    const result = await window.electronAPI.update?.download()
+    if (!result?.success) {
+      updateState.value.status = 'error'
+      updateState.value.error = result?.error || '下载更新失败'
+      updateState.value.downloading = false
+    }
+  } catch (error: any) {
+    updateState.value.status = 'error'
+    updateState.value.error = error.message || '下载更新失败'
+    updateState.value.downloading = false
+  }
+}
+
+const installUpdate = async () => {
+  try {
+    await window.electronAPI.update?.install()
+  } catch (error: any) {
+    ElMessage.error('安装更新失败: ' + error.message)
+  }
+}
+
+const setupUpdateListeners = () => {
+  if (!window.electronAPI.update) return
+  
+  window.electronAPI.update.onChecking(() => {
+    updateState.value.checking = true
+  })
+  
+  window.electronAPI.update.onAvailable((info: any) => {
+    updateState.value.checking = false
+    updateState.value.status = 'available'
+    updateState.value.newVersion = info.version
+    updateState.value.releaseNotes = info.releaseNotes || ''
+  })
+  
+  window.electronAPI.update.onNotAvailable(() => {
+    updateState.value.checking = false
+    updateState.value.status = 'up-to-date'
+  })
+  
+  window.electronAPI.update.onProgress((progress: any) => {
+    updateState.value.status = 'downloading'
+    updateState.value.progress = Math.round(progress.percent)
+    updateState.value.bytesPerSecond = progress.bytesPerSecond
+    updateState.value.transferred = progress.transferred
+    updateState.value.total = progress.total
+  })
+  
+  window.electronAPI.update.onDownloaded((info: any) => {
+    updateState.value.downloading = false
+    updateState.value.status = 'downloaded'
+    updateState.value.newVersion = info.version
+  })
+  
+  window.electronAPI.update.onError((error: any) => {
+    updateState.value.checking = false
+    updateState.value.downloading = false
+    updateState.value.status = 'error'
+    updateState.value.error = error.message || '更新出错'
+  })
+}
+
+const formatProgress = (percentage: number) => {
+  return `${percentage}%`
+}
+
+const formatBytes = (bytes: number) => {
+  if (!bytes || bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
 // 主题相关函数
@@ -2372,6 +2582,40 @@ const testShortcuts = () => {
 .status-text {
   font-size: var(--text-lg);
   font-weight: 600;
+}
+
+/* 更新相关样式 */
+.version-text {
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+.update-status {
+  margin: var(--spacing-lg) 0;
+}
+
+.update-status .el-alert {
+  margin-bottom: var(--spacing-md);
+}
+
+.release-notes {
+  max-height: 150px;
+  overflow-y: auto;
+  margin: var(--spacing-sm) 0;
+  padding: var(--spacing-sm);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+
+.update-actions {
+  margin-top: var(--spacing-md);
+}
+
+.download-info {
+  margin-top: var(--spacing-sm);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
 }
 
 </style>

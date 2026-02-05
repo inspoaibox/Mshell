@@ -819,7 +819,10 @@ const connectSession = async (session: SessionConfig) => {
       readyTimeout: (sshSettings.timeout || 30) * 1000,
       keepaliveInterval: sshSettings.keepalive ? (sshSettings.keepaliveInterval || 60) * 1000 : undefined,
       keepaliveCountMax: sshSettings.keepalive ? 3 : undefined,
-      sessionName: session.name
+      sessionName: session.name,
+      // 跳板机和代理配置 - 序列化以便 IPC 传输
+      proxyJump: session.proxyJump ? JSON.parse(JSON.stringify(session.proxyJump)) : undefined,
+      proxy: session.proxy ? JSON.parse(JSON.stringify(session.proxy)) : undefined
     })
 
     if (!sshResult.success) {

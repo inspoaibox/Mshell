@@ -17,9 +17,13 @@ export const useSessionStore = defineStore('session', () => {
 
   async function createSession(config: Omit<SessionConfig, 'id' | 'createdAt' | 'updatedAt'>) {
     try {
-      const newSession = await window.electronAPI.session.create(config)
-      sessions.value.push(newSession)
-      return newSession
+      const result = await window.electronAPI.session.create(config)
+      if (result.success) {
+        sessions.value.push(result.data)
+        return result.data
+      } else {
+        throw new Error(result.error || '创建会话失败')
+      }
     } catch (error) {
       console.error('Failed to create session:', error)
       throw error
@@ -28,7 +32,10 @@ export const useSessionStore = defineStore('session', () => {
 
   async function updateSession(id: string, updates: Partial<SessionConfig>) {
     try {
-      await window.electronAPI.session.update(id, updates)
+      const result = await window.electronAPI.session.update(id, updates)
+      if (!result.success) {
+        throw new Error(result.error || '更新会话失败')
+      }
       const index = sessions.value.findIndex((s) => s.id === id)
       if (index !== -1) {
         sessions.value[index] = { ...sessions.value[index], ...updates }

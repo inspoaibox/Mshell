@@ -248,6 +248,20 @@ export interface ElectronAPI {
         saveTerminalChatHistory: (connectionId: string, messages: any[]) => Promise<{ success: boolean; error?: string }>
         clearTerminalChatHistory: (connectionId: string) => Promise<{ success: boolean; error?: string }>
     }
+
+    // 更新操作
+    update?: {
+        check: () => Promise<{ success: boolean; error?: string }>
+        download: () => Promise<{ success: boolean; error?: string }>
+        install: () => Promise<{ success: boolean }>
+        getVersion: () => Promise<{ success: boolean; data?: { version: string; name: string } }>
+        onChecking: (callback: () => void) => void
+        onAvailable: (callback: (info: { version: string; releaseDate?: string; releaseNotes?: string }) => void) => void
+        onNotAvailable: (callback: (info: { version: string }) => void) => void
+        onProgress: (callback: (progress: { percent: number; bytesPerSecond: number; transferred: number; total: number }) => void) => void
+        onDownloaded: (callback: (info: { version: string; releaseNotes?: string }) => void) => void
+        onError: (callback: (error: { message: string }) => void) => void
+    }
 }
 
 declare global {

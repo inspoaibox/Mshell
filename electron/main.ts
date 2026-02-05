@@ -28,6 +28,7 @@ import { backupManager } from './managers/BackupManager'
 import { appSettingsManager } from './utils/app-settings'
 import { sessionLockManager } from './managers/SessionLockManager'
 import { aiManager } from './managers/AIManager'
+import { updateManager } from './managers/UpdateManager'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -274,6 +275,18 @@ app.whenReady().then(async () => {
   // 设置 AI Manager 的主窗口引用
   if (mainWindow) {
     aiManager.setMainWindow(mainWindow)
+    
+    // 初始化更新管理器
+    updateManager.init(mainWindow)
+    
+    // 启动时检查更新（如果设置中启用了自动检查）
+    const settings = appSettingsManager.getSettings()
+    if (settings.updates?.autoCheck) {
+      // 延迟检查，等待窗口完全加载
+      setTimeout(() => {
+        updateManager.checkForUpdates()
+      }, 5000)
+    }
   }
 
   app.on('activate', () => {

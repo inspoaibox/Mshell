@@ -13,7 +13,13 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
-              external: ['electron', 'ssh2', 'ssh2-sftp-client']
+              external: [
+                'electron',
+                'ssh2',
+                'ssh2-sftp-client',
+                '@aws-sdk/client-s3',
+                'aws-sdk'
+              ]
             }
           }
         }

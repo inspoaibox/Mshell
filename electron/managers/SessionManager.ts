@@ -3,31 +3,45 @@ import { join } from 'path'
 import { promises as fs } from 'fs'
 import { credentialManager } from './CredentialManager'
 import { v4 as uuidv4 } from 'uuid'
+import type { ProxyJumpConfig, ProxyConfig, SessionType, RDPOptions, VNCOptions } from '../../src/types/session'
 
 export interface SessionConfig {
   id: string
   name: string
+  type?: SessionType // 会话类型，默认为 'ssh'
   group?: string
   host: string
   port: number
   username: string
   authType: 'password' | 'privateKey'
   password?: string
+  privateKeyId?: string // SSH密钥管理器中的密钥ID
   privateKeyPath?: string
   passphrase?: string
   portForwards?: any[]
   color?: string
   sortOrder?: number // 用于拖拽排序
+  // 跳板机配置
+  proxyJump?: ProxyJumpConfig
+  // 代理配置
+  proxy?: ProxyConfig
   // 服务器管理字段
+  description?: string
   provider?: string // 提供商
   region?: string // 地区
   expiryDate?: Date // 到期时间
-  billingCycle?: 'monthly' | 'quarterly' | 'semi-annually' | 'annually' | 'custom' // 计费周期
+  billingCycle?: 'monthly' | 'quarterly' | 'semi-annually' | 'annually' | 'biennially' | 'triennially' | 'custom' // 计费周期
   billingAmount?: number // 计费费用
   billingCurrency?: string // 货币单位，默认 CNY
   notes?: string // 备注
   createdAt: Date
   updatedAt: Date
+  usageCount?: number
+  lastConnected?: Date
+  // RDP 特有配置
+  rdpOptions?: RDPOptions
+  // VNC 特有配置
+  vncOptions?: VNCOptions
 }
 
 export interface SessionGroup {
@@ -141,7 +155,19 @@ export class SessionManager {
    */
   private encryptSession(session: SessionConfig): any {
     const sensitiveFields = ['password', 'passphrase'] as (keyof SessionConfig)[]
-    return credentialManager.encryptFields(session, sensitiveFields)
+    const encrypted = credentialManager.encryptFields(session, sensitiveFields)
+    
+    // 处理跳板机配置中的敏感字段
+    if (encrypted.proxyJump) {
+      encrypted.proxyJump = this.encryptProxyJump(encrypted.proxyJump)
+    }
+    
+    // 处理代理配置中的敏感字段
+    if (encrypted.proxy) {
+      encrypted.proxy = this.encryptProxy(encrypted.proxy)
+    }
+    
+    return encrypted
   }
 
   /**
@@ -149,7 +175,63 @@ export class SessionManager {
    */
   private decryptSession(session: any): SessionConfig {
     const sensitiveFields = ['password', 'passphrase'] as (keyof SessionConfig)[]
-    return credentialManager.decryptFields(session, sensitiveFields)
+    const decrypted = credentialManager.decryptFields(session, sensitiveFields)
+    
+    // 处理跳板机配置中的敏感字段
+    if (decrypted.proxyJump) {
+      decrypted.proxyJump = this.decryptProxyJump(decrypted.proxyJump)
+    }
+    
+    // 处理代理配置中的敏感字段
+    if (decrypted.proxy) {
+      decrypted.proxy = this.decryptProxy(decrypted.proxy)
+    }
+    
+    return decrypted
+  }
+
+  /**
+   * 递归加密跳板机配置
+   */
+  private encryptProxyJump(config: ProxyJumpConfig): any {
+    const sensitiveFields = ['password', 'passphrase'] as (keyof ProxyJumpConfig)[]
+    const encrypted = credentialManager.encryptFields({ ...config }, sensitiveFields)
+    
+    if (encrypted.nextJump) {
+      encrypted.nextJump = this.encryptProxyJump(encrypted.nextJump)
+    }
+    
+    return encrypted
+  }
+
+  /**
+   * 递归解密跳板机配置
+   */
+  private decryptProxyJump(config: any): ProxyJumpConfig {
+    const sensitiveFields = ['password', 'passphrase'] as (keyof ProxyJumpConfig)[]
+    const decrypted = credentialManager.decryptFields({ ...config }, sensitiveFields)
+    
+    if (decrypted.nextJump) {
+      decrypted.nextJump = this.decryptProxyJump(decrypted.nextJump)
+    }
+    
+    return decrypted
+  }
+
+  /**
+   * 加密代理配置
+   */
+  private encryptProxy(config: ProxyConfig): any {
+    const sensitiveFields = ['password'] as (keyof ProxyConfig)[]
+    return credentialManager.encryptFields({ ...config }, sensitiveFields)
+  }
+
+  /**
+   * 解密代理配置
+   */
+  private decryptProxy(config: any): ProxyConfig {
+    const sensitiveFields = ['password'] as (keyof ProxyConfig)[]
+    return credentialManager.decryptFields({ ...config }, sensitiveFields)
   }
 
   /**
@@ -186,6 +268,11 @@ export class SessionManager {
       config.region = await this.detectRegion(config.host)
     }
 
+    // 处理日期字段 - 如果是字符串则转换为 Date
+    if (config.expiryDate && typeof config.expiryDate === 'string') {
+      (config as any).expiryDate = new Date(config.expiryDate)
+    }
+
     const now = new Date()
     const newSession: SessionConfig = {
       ...config,
@@ -215,6 +302,11 @@ export class SessionManager {
       if (host) {
         updates.region = await this.detectRegion(host)
       }
+    }
+
+    // 处理日期字段 - 如果是字符串则转换为 Date
+    if (updates.expiryDate && typeof updates.expiryDate === 'string') {
+      (updates as any).expiryDate = new Date(updates.expiryDate)
     }
 
     const updated: SessionConfig = {

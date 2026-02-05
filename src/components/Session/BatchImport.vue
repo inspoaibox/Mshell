@@ -422,7 +422,7 @@ const handleImport = async () => {
           groupId: groupId,
           groupName: session.groupName
         })
-        await window.electronAPI.session.create({
+        const result = await window.electronAPI.session.create({
           name: session.name,
           host: session.host,
           port: session.port,
@@ -431,7 +431,12 @@ const handleImport = async () => {
           authType: session.password ? 'password' : 'none',
           group: groupId  // SessionConfig 使用 group 字段存储 groupId
         })
-        successCount++
+        if (result.success) {
+          successCount++
+        } else {
+          failCount++
+          console.error('Failed to create session:', result.error)
+        }
       } catch (error) {
         failCount++
         console.error('Failed to create session:', error)

@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     cancelReconnect: (id: string) => ipcRenderer.invoke('ssh:cancelReconnect', id),
     setReconnectConfig: (id: string, maxAttempts: number, interval: number) =>
       ipcRenderer.invoke('ssh:setReconnectConfig', id, maxAttempts, interval),
+    testProxy: (proxyConfig: any) => ipcRenderer.invoke('ssh:testProxy', proxyConfig),
+    testProxyJump: (proxyJumpConfig: any, underlyingProxy?: any) => 
+      ipcRenderer.invoke('ssh:testProxyJump', proxyJumpConfig, underlyingProxy),
     // 返回取消订阅函数，防止内存泄漏
     onData: (callback: (id: string, data: string) => void) => {
       ipcRenderer.on('ssh:data', (_event, id, data) => callback(id, data))
@@ -552,6 +555,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     onError: (callback: (connectionId: string, error: string) => void) => {
       ipcRenderer.on('vnc:error', (_event, connectionId, error) => callback(connectionId, error))
+    }
+  },
+
+  // Update operations
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    getVersion: () => ipcRenderer.invoke('update:getVersion'),
+    onChecking: (callback: () => void) => {
+      ipcRenderer.on('update:checking', () => callback())
+    },
+    onAvailable: (callback: (info: any) => void) => {
+      ipcRenderer.on('update:available', (_event, info) => callback(info))
+    },
+    onNotAvailable: (callback: (info: any) => void) => {
+      ipcRenderer.on('update:not-available', (_event, info) => callback(info))
+    },
+    onProgress: (callback: (progress: any) => void) => {
+      ipcRenderer.on('update:progress', (_event, progress) => callback(progress))
+    },
+    onDownloaded: (callback: (info: any) => void) => {
+      ipcRenderer.on('update:downloaded', (_event, info) => callback(info))
+    },
+    onError: (callback: (error: any) => void) => {
+      ipcRenderer.on('update:error', (_event, error) => callback(error))
     }
   }
 })

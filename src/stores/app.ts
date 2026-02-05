@@ -135,15 +135,22 @@ export const useAppStore = defineStore('app', () => {
 
   // 创建会话
   async function createSession(config: Partial<SessionConfig>) {
-    const newSession = await window.electronAPI.session.create(config)
-    sessions.value.push(newSession)
-    await loadSessions() // 重新加载以确保分组正确
-    return newSession
+    const result = await window.electronAPI.session.create(config)
+    if (result.success) {
+      sessions.value.push(result.data)
+      await loadSessions() // 重新加载以确保分组正确
+      return result.data
+    } else {
+      throw new Error(result.error || '创建会话失败')
+    }
   }
 
   // 更新会话
   async function updateSession(id: string, updates: Partial<SessionConfig>) {
-    await window.electronAPI.session.update(id, updates)
+    const result = await window.electronAPI.session.update(id, updates)
+    if (!result.success) {
+      throw new Error(result.error || '更新会话失败')
+    }
     await loadSessions() // 重新加载
   }
 

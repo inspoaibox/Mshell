@@ -738,9 +738,10 @@ const handleManualReconnect = async () => {
       // 忽略断开错误
     }
     
-    // 重新连接
+    // 重新连接 - 序列化 session 以便 IPC 传输
     connectionStatus.value = 'connecting'
-    const result = await window.electronAPI.ssh.connect(props.connectionId, session)
+    const sessionData = JSON.parse(JSON.stringify(session))
+    const result = await window.electronAPI.ssh.connect(props.connectionId, sessionData)
     
     if (result.success) {
       connectionStatus.value = 'connected'
@@ -973,9 +974,9 @@ onMounted(async () => {
       keepaliveInterval: sshSettings.keepalive ? (sshSettings.keepaliveInterval || 60) * 1000 : undefined,
       keepaliveCountMax: sshSettings.keepalive ? 3 : undefined,
       sessionName: props.session.name,
-      // 跳板机和代理配置
-      proxyJump: props.session.proxyJump,
-      proxy: props.session.proxy
+      // 跳板机和代理配置 - 序列化以便 IPC 传输
+      proxyJump: props.session.proxyJump ? JSON.parse(JSON.stringify(props.session.proxyJump)) : undefined,
+      proxy: props.session.proxy ? JSON.parse(JSON.stringify(props.session.proxy)) : undefined
     })
 
     if (result.success) {

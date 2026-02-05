@@ -5,15 +5,26 @@
         <el-icon><Connection /></el-icon>
         <span>启用跳板机 (ProxyJump)</span>
       </el-checkbox>
-      <el-button
-        v-if="localConfig.enabled && !isNested"
-        type="primary"
-        size="small"
-        :icon="Plus"
-        @click.prevent="addNextJump"
-      >
-        添加下一级
-      </el-button>
+      <div class="header-actions">
+        <el-button
+          v-if="localConfig.enabled && localConfig.host && !isNested"
+          type="success"
+          size="small"
+          :loading="testing"
+          @click.prevent="testConnection"
+        >
+          测试连接
+        </el-button>
+        <el-button
+          v-if="localConfig.enabled && !isNested"
+          type="primary"
+          size="small"
+          :icon="Plus"
+          @click.prevent="addNextJump"
+        >
+          添加下一级
+        </el-button>
+      </div>
     </div>
 
     <div v-if="localConfig.enabled" class="config-body">
@@ -28,24 +39,25 @@
         />
       </div>
 
-      <div class="host-port-row">
-        <el-form-item label="主机" label-width="100px" style="flex: 1">
-          <el-input
-            v-model="localConfig.host"
-            placeholder="跳板机IP或域名"
-            @input="emitUpdate"
-          />
-        </el-form-item>
-        <el-form-item label="端口" label-width="60px" style="width: 140px">
-          <el-input-number
-            v-model="localConfig.port"
-            :min="1"
-            :max="65535"
-            style="width: 100%"
-            @change="emitUpdate"
-          />
-        </el-form-item>
-      </div>
+      <el-form-item label="主机" label-width="100px">
+        <el-input
+          v-model="localConfig.host"
+          placeholder="跳板机IP或域名"
+          @input="emitUpdate"
+        />
+      </el-form-item>
+
+      <el-form-item label="端口" label-width="100px">
+        <el-input-number
+          v-model="localConfig.port"
+          :min="1"
+          :max="65535"
+          :controls="true"
+          controls-position="right"
+          style="width: 180px"
+          @change="emitUpdate"
+        />
+      </el-form-item>
 
       <el-form-item label="用户名" label-width="100px">
         <el-input
@@ -110,7 +122,9 @@
             <el-tag type="warning" size="small">...</el-tag>
           </template>
           <el-icon><Right /></el-icon>
-          <el-tag type="success" size="small">目标服务器</el-tag>
+          <el-tag type="success" size="small">
+            {{ props.targetHost || '目标服务器' }}{{ props.targetPort ? ':' + props.targetPort : '' }}
+          </el-tag>
         </div>
       </div>
 
@@ -130,6 +144,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Connection, Plus, Delete, Right } from '@element-plus/icons-vue'
 import type { ProxyJumpConfig as ProxyJumpConfigType } from '@/types/session'
 
@@ -137,6 +152,8 @@ interface Props {
   config?: ProxyJumpConfigType
   level?: number
   isNested?: boolean
+  targetHost?: string
+  targetPort?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -162,6 +179,8 @@ const localConfig = ref<ProxyJumpConfigType>({
   nextJump: props.config?.nextJump
 })
 
+const testing = ref(false)
+
 // 监听外部配置变化
 watch(() => props.config, (newConfig) => {
   if (newConfig) {
@@ -172,6 +191,49 @@ watch(() => props.config, (newConfig) => {
 // 发送更新
 const emitUpdate = () => {
   emit('update', { ...localConfig.value })
+}
+
+// 测试跳板机连接
+const testConnection = async () => {
+  if (!localConfig.value.host || !localConfig.value.port || !localConfig.value.username) {
+    ElMessage.warning('请填写跳板机主机、端口和用户名')
+    return
+  }
+
+  if (localConfig.value.authType === 'password' && !localConfig.value.password) {
+    ElMessage.warning('请填写跳板机密码')
+    return
+  }
+
+  if (localConfig.value.authType === 'privateKey' && !localConfig.value.privateKeyPath) {
+    ElMessage.warning('请选择私钥文件')
+    return
+  }
+
+  testing.value = true
+  try {
+    const result = await window.electronAPI.ssh.testProxyJump({
+      enabled: true,
+      host: localConfig.value.host,
+      port: localConfig.value.port,
+      username: localConfig.value.username,
+      authType: localConfig.value.authType,
+      password: localConfig.value.password,
+      privateKeyPath: localConfig.value.privateKeyPath,
+      passphrase: localConfig.value.passphrase,
+      nextJump: localConfig.value.nextJump
+    })
+
+    if (result.success) {
+      ElMessage.success(`${result.message} (延迟: ${result.latency}ms)`)
+    } else {
+      ElMessage.error(result.error || '跳板机连接失败')
+    }
+  } catch (error: any) {
+    ElMessage.error(`测试失败: ${error.message}`)
+  } finally {
+    testing.value = false
+  }
 }
 
 // 添加下一级跳板
@@ -246,6 +308,11 @@ const selectPrivateKey = async () => {
   gap: 6px;
 }
 
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .config-body {
   margin-top: 16px;
   padding-top: 16px;
@@ -260,11 +327,6 @@ const selectPrivateKey = async () => {
   padding: 8px 12px;
   background: var(--bg-tertiary);
   border-radius: 4px;
-}
-
-.host-port-row {
-  display: flex;
-  gap: 12px;
 }
 
 .connection-preview {

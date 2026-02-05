@@ -54,7 +54,10 @@ const handleTerminalCreate = async (terminalId: string) => {
       readyTimeout: (sshSettings.timeout || 30) * 1000,
       keepaliveInterval: sshSettings.keepalive ? (sshSettings.keepaliveInterval || 60) * 1000 : undefined,
       keepaliveCountMax: sshSettings.keepalive ? 3 : undefined,
-      sessionName: props.session.name
+      sessionName: props.session.name,
+      // 跳板机和代理配置 - 序列化以便 IPC 传输
+      proxyJump: props.session.proxyJump ? JSON.parse(JSON.stringify(props.session.proxyJump)) : undefined,
+      proxy: props.session.proxy ? JSON.parse(JSON.stringify(props.session.proxy)) : undefined
     })
 
     if (result.success) {

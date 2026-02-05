@@ -4,7 +4,9 @@ import { sshConnectionManager, SSHConnectionOptions } from '../managers/SSHConne
 import { logger } from '../utils/logger'
 import { knownHostsManager } from '../utils/known-hosts'
 import { auditLogManager, AuditAction } from '../managers/AuditLogManager'
-import type { ProxyJumpConfig } from '../../src/types/session'
+import { ProxyHelper } from '../utils/proxy'
+import { ProxyJumpHelper } from '../utils/proxy-jump'
+import type { ProxyJumpConfig, ProxyConfig } from '../../src/types/session'
 
 /**
  * 递归处理跳板机配置中的私钥路径
@@ -320,6 +322,81 @@ export function registerSSHHandlers() {
       return { success: true }
     } catch (error: any) {
       return { success: false, error: error.message }
+    }
+  })
+
+  // 测试代理连接
+  ipcMain.handle('ssh:testProxy', async (_event, proxyConfig: ProxyConfig) => {
+    try {
+      // 使用一个公共的测试目标（如 Google DNS）
+      const testHost = '8.8.8.8'
+      const testPort = 53
+      
+      const startTime = Date.now()
+      const socket = await ProxyHelper.connect(proxyConfig, testHost, testPort)
+      const latency = Date.now() - startTime
+      
+      // 连接成功，关闭 socket
+      socket.destroy()
+      
+      return { 
+        success: true, 
+        message: `代理连接成功`,
+        latency 
+      }
+    } catch (error: any) {
+      logger.logError('proxy', `Proxy test failed`, error)
+      return { 
+        success: false, 
+        error: error.message || '代理连接失败'
+      }
+    }
+  })
+
+  // 测试跳板机连接
+  ipcMain.handle('ssh:testProxyJump', async (_event, proxyJumpConfig: ProxyJumpConfig, underlyingProxy?: ProxyConfig) => {
+    try {
+      // 处理私钥
+      const processedConfig = await processProxyJumpPrivateKeys(proxyJumpConfig)
+      
+      // 验证配置
+      const validation = ProxyJumpHelper.validateProxyConfig(processedConfig)
+      if (!validation.valid) {
+        return { success: false, error: validation.error }
+      }
+      
+      // 使用一个测试目标（跳板机自身）
+      const testHost = processedConfig.host
+      const testPort = processedConfig.port
+      
+      const startTime = Date.now()
+      
+      // 尝试通过跳板机建立连接
+      const socket = await ProxyJumpHelper.connectThroughProxy(
+        processedConfig,
+        testHost,
+        testPort,
+        underlyingProxy
+      )
+      
+      const latency = Date.now() - startTime
+      
+      // 连接成功，关闭 socket
+      socket.destroy()
+      
+      const chainDesc = ProxyJumpHelper.getProxyChainDescription(processedConfig)
+      
+      return { 
+        success: true, 
+        message: `跳板机连接成功: ${chainDesc}`,
+        latency 
+      }
+    } catch (error: any) {
+      logger.logError('proxy-jump', `ProxyJump test failed`, error)
+      return { 
+        success: false, 
+        error: error.message || '跳板机连接失败'
+      }
     }
   })
 }
