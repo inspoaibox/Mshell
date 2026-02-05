@@ -24,7 +24,7 @@
 
       <!-- 颜色配置 -->
       <div class="form-section">
-        <h4>主色调</h4>
+        <h4>主色�?/h4>
         <div class="color-grid">
           <div class="color-item">
             <label>主色</label>
@@ -32,7 +32,7 @@
             <input v-model="themeData.colors.primary" type="text" class="color-input" />
           </div>
           <div class="color-item">
-            <label>悬停色</label>
+            <label>悬停�?/label>
             <input v-model="themeData.colors.primaryHover" type="color" />
             <input v-model="themeData.colors.primaryHover" type="text" class="color-input" />
           </div>
@@ -45,15 +45,15 @@
       </div>
 
       <div class="form-section">
-        <h4>背景色</h4>
+        <h4>背景�?/h4>
         <div class="color-grid">
           <div class="color-item">
-            <label>主背景</label>
+            <label>主背�?/label>
             <input v-model="themeData.colors.bgPrimary" type="color" />
             <input v-model="themeData.colors.bgPrimary" type="text" class="color-input" />
           </div>
           <div class="color-item">
-            <label>次背景</label>
+            <label>次背�?/label>
             <input v-model="themeData.colors.bgSecondary" type="color" />
             <input v-model="themeData.colors.bgSecondary" type="text" class="color-input" />
           </div>
@@ -71,15 +71,15 @@
       </div>
 
       <div class="form-section">
-        <h4>文本色</h4>
+        <h4>文本�?/h4>
         <div class="color-grid">
           <div class="color-item">
-            <label>主文本</label>
+            <label>主文�?/label>
             <input v-model="themeData.colors.textPrimary" type="color" />
             <input v-model="themeData.colors.textPrimary" type="text" class="color-input" />
           </div>
           <div class="color-item">
-            <label>次文本</label>
+            <label>次文�?/label>
             <input v-model="themeData.colors.textSecondary" type="color" />
             <input v-model="themeData.colors.textSecondary" type="text" class="color-input" />
           </div>
@@ -132,10 +132,10 @@
               <p class="preview-text-tertiary">三级文本</p>
             </div>
             <div class="preview-status">
-              <span class="status-success">✓ 成功</span>
-              <span class="status-warning">⚠ 警告</span>
-              <span class="status-error">✗ 错误</span>
-              <span class="status-info">ℹ 信息</span>
+              <span class="status-success">�?成功</span>
+              <span class="status-warning">�?警告</span>
+              <span class="status-error">�?错误</span>
+              <span class="status-info">�?信息</span>
             </div>
           </div>
         </div>
@@ -165,9 +165,9 @@ const emit = defineEmits<{
 
 const isEditing = computed(() => !!props.theme)
 
-// 初始化主题数据
+// 初始化主题数�?
 const themeData = ref<Omit<Theme, 'id'>>({
-  name: props.theme?.name || '新主题',
+  name: props.theme?.name || '新主�?,
   type: props.theme?.type || 'dark',
   colors: props.theme?.colors || {
     primary: '#3b82f6',
@@ -247,13 +247,13 @@ const handleSave = () => {
 
 .editor-header h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--text-xl);
 }
 
 .btn-close {
   background: transparent;
   border: none;
-  font-size: 18px;
+  font-size: var(--text-xl);
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 4px;
@@ -276,7 +276,7 @@ const handleSave = () => {
 
 .form-section h4 {
   margin: 0 0 12px 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -289,7 +289,7 @@ const handleSave = () => {
 .form-group label {
   display: block;
   margin-bottom: 6px;
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--text-secondary);
 }
 
@@ -301,7 +301,7 @@ const handleSave = () => {
   border: 1px solid var(--border-color);
   border-radius: 4px;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .color-grid {
@@ -317,7 +317,7 @@ const handleSave = () => {
 }
 
 .color-item label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
@@ -335,7 +335,7 @@ const handleSave = () => {
   border: 1px solid var(--border-color);
   border-radius: 4px;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: monospace;
 }
 
@@ -397,7 +397,7 @@ const handleSave = () => {
 .preview-status span {
   padding: 4px 8px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .status-success {
@@ -434,7 +434,7 @@ const handleSave = () => {
   border-radius: 4px;
   border: none;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--text-base);
   transition: all 0.2s;
 }
 

@@ -118,6 +118,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('sftp:chmod', connectionId, path, mode),
     startDrag: (connectionId: string, remotePath: string, fileName: string) =>
       ipcRenderer.invoke('sftp:startDrag', connectionId, remotePath, fileName),
+    compress: (connectionId: string, sourcePath: string, archivePath: string) =>
+      ipcRenderer.invoke('sftp:compress', connectionId, sourcePath, archivePath),
+    compressMultiple: (connectionId: string, sourcePaths: string[], archivePath: string) =>
+      ipcRenderer.invoke('sftp:compressMultiple', connectionId, sourcePaths, archivePath),
+    extract: (connectionId: string, archivePath: string, targetDir: string) =>
+      ipcRenderer.invoke('sftp:extract', connectionId, archivePath, targetDir),
     onProgress: (callback: (taskId: string, progress: any) => void) => {
       ipcRenderer.on('sftp:progress', (_event, taskId, progress) => callback(taskId, progress))
     },
@@ -175,7 +181,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createDirectory: (dirPath: string) => ipcRenderer.invoke('fs:createDirectory', dirPath),
     deleteFile: (filePath: string) => ipcRenderer.invoke('fs:deleteFile', filePath),
     rename: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
-    stat: (filePath: string) => ipcRenderer.invoke('fs:stat', filePath)
+    stat: (filePath: string) => ipcRenderer.invoke('fs:stat', filePath),
+    compress: (sourcePath: string, archivePath: string) => 
+      ipcRenderer.invoke('fs:compress', sourcePath, archivePath),
+    compressMultiple: (sourcePaths: string[], archivePath: string) => 
+      ipcRenderer.invoke('fs:compressMultiple', sourcePaths, archivePath),
+    extract: (archivePath: string, targetDir: string) => 
+      ipcRenderer.invoke('fs:extract', archivePath, targetDir)
   },
 
   // Port forward operations

@@ -8,8 +8,8 @@
           @keyup.enter="handleConnect"
         />
         <template #extra>
-          <span style="font-size: 12px; color: #999">
-            格式: 用户名@主机名:端口 (端口可选，默认 22)
+          <span style="font-size: var(--text-sm); color: #999">
+            格式: 用户名@主机:端口 (端口可选，默认 22)
           </span>
         </template>
       </el-form-item>

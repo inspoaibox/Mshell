@@ -52,7 +52,7 @@ export class SFTPManager extends EventEmitter {
   }
 
   /**
-   * 初始�?SFTP 会话
+   * 初始化 SFTP 会话
    */
   async initSFTP(connectionId: string, sshClient: Client): Promise<void> {
     try {
@@ -612,7 +612,7 @@ export class SFTPManager extends EventEmitter {
   }
 
   /**
-   * 获取所有传输任�?
+   * 获取所有传输任务
    */
   getAllTasks(): TransferTask[] {
     return Array.from(this.transferTasks.values())

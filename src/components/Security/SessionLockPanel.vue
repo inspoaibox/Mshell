@@ -5,16 +5,16 @@
     </div>
 
     <div class="panel-content">
-      <!-- 锁定状态 -->
+      <!-- 锁定状�?-->
       <div class="lock-status">
         <div class="status-card" :class="{ locked: status.isLocked }">
           <el-icon :size="48">
             <Lock v-if="status.isLocked" />
             <Unlock v-else />
           </el-icon>
-          <h3>{{ status.isLocked ? '已锁定' : '未锁定' }}</h3>
+          <h3>{{ status.isLocked ? '已锁�? : '未锁�? }}</h3>
           <p v-if="!status.isLocked && status.hasPassword">
-            {{ config.autoLockEnabled ? `${config.autoLockTimeout} 分钟无操作后自动锁定` : '自动锁定已禁用' }}
+            {{ config.autoLockEnabled ? `${config.autoLockTimeout} 分钟无操作后自动锁定` : '自动锁定已禁�? }}
           </p>
         </div>
       </div>
@@ -35,9 +35,9 @@
           </el-form-item>
           <el-form-item label="关闭到托盘时锁定" v-if="config.hasPassword">
             <el-switch v-model="config.lockOnMinimize" @change="saveConfig" />
-            <span style="margin-left: 8px; color: var(--text-secondary); font-size: 12px">点击关闭按钮隐藏到托盘时自动锁定</span>
+            <span style="margin-left: 8px; color: var(--text-secondary); font-size: var(--text-sm)">点击关闭按钮隐藏到托盘时自动锁定</span>
           </el-form-item>
-          <el-form-item label="休眠时锁定" v-if="config.hasPassword">
+          <el-form-item label="休眠时锁�? v-if="config.hasPassword">
             <el-switch v-model="config.lockOnSuspend" @change="saveConfig" />
           </el-form-item>
         </el-form>
@@ -57,10 +57,10 @@
       </div>
     </div>
 
-    <!-- 设置密码对话框 -->
+    <!-- 设置密码对话�?-->
     <el-dialog v-model="showSetPasswordDialog" title="设置密码" width="400px">
       <el-form label-width="80px">
-        <el-form-item label="新密码">
+        <el-form-item label="新密�?>
           <el-input v-model="newPassword" type="password" show-password />
         </el-form-item>
         <el-form-item label="确认密码">
@@ -73,13 +73,13 @@
       </template>
     </el-dialog>
 
-    <!-- 修改密码对话框 -->
+    <!-- 修改密码对话�?-->
     <el-dialog v-model="showChangePasswordDialog" title="修改密码" width="400px">
       <el-form label-width="80px">
         <el-form-item label="当前密码">
           <el-input v-model="currentPassword" type="password" show-password />
         </el-form-item>
-        <el-form-item label="新密码">
+        <el-form-item label="新密�?>
           <el-input v-model="newPassword" type="password" show-password />
         </el-form-item>
         <el-form-item label="确认密码">
@@ -150,7 +150,7 @@ const saveConfig = async () => {
   try {
     const result = await window.electronAPI.sessionLock?.updateConfig?.(config.value)
     if (result?.success) {
-      ElMessage.success('设置已保存')
+      ElMessage.success('设置已保�?)
     }
   } catch (error: any) {
     ElMessage.error(`保存失败: ${error.message}`)
@@ -167,18 +167,18 @@ const handlePasswordToggle = () => {
 
 const setPassword = async () => {
   if (!newPassword.value) {
-    ElMessage.warning('请输入密码')
+    ElMessage.warning('请输入密�?)
     return
   }
   if (newPassword.value !== confirmPassword.value) {
-    ElMessage.warning('两次输入的密码不一致')
+    ElMessage.warning('两次输入的密码不一�?)
     return
   }
 
   try {
     const result = await window.electronAPI.sessionLock?.setPassword?.(newPassword.value)
     if (result?.success) {
-      ElMessage.success('密码已设置')
+      ElMessage.success('密码已设�?)
       showSetPasswordDialog.value = false
       newPassword.value = ''
       confirmPassword.value = ''
@@ -192,26 +192,26 @@ const setPassword = async () => {
 
 const changePassword = async () => {
   if (!currentPassword.value || !newPassword.value) {
-    ElMessage.warning('请填写所有字段')
+    ElMessage.warning('请填写所有字�?)
     return
   }
   if (newPassword.value !== confirmPassword.value) {
-    ElMessage.warning('两次输入的新密码不一致')
+    ElMessage.warning('两次输入的新密码不一�?)
     return
   }
 
   try {
-    // 先验证当前密码
+    // 先验证当前密�?
     const verifyResult = await window.electronAPI.sessionLock?.verifyPassword?.(currentPassword.value)
     if (!verifyResult?.success) {
       ElMessage.error('当前密码错误')
       return
     }
 
-    // 设置新密码
+    // 设置新密�?
     const result = await window.electronAPI.sessionLock?.setPassword?.(newPassword.value)
     if (result?.success) {
-      ElMessage.success('密码已修改')
+      ElMessage.success('密码已修�?)
       showChangePasswordDialog.value = false
       currentPassword.value = ''
       newPassword.value = ''
@@ -224,13 +224,13 @@ const changePassword = async () => {
 
 const removePassword = async () => {
   try {
-    await ElMessageBox.confirm('确定要移除密码保护吗？', '确认', {
+    await ElMessageBox.confirm('确定要移除密码保护吗�?, '确认', {
       type: 'warning'
     })
 
     const result = await window.electronAPI.sessionLock?.removePassword?.()
     if (result?.success) {
-      ElMessage.success('密码已移除')
+      ElMessage.success('密码已移�?)
       config.value.hasPassword = false
       await loadStatus()
     }
@@ -245,7 +245,7 @@ const lockNow = async () => {
   try {
     const result = await window.electronAPI.sessionLock?.lock?.()
     if (result?.success) {
-      ElMessage.success('已锁定')
+      ElMessage.success('已锁�?)
       await loadStatus()
     }
   } catch (error: any) {
@@ -269,7 +269,7 @@ const lockNow = async () => {
 
 .panel-header h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--text-2xl);
 }
 
 .panel-content {
@@ -297,7 +297,7 @@ const lockNow = async () => {
 
 .status-card h3 {
   margin: 16px 0 8px;
-  font-size: 24px;
+  font-size: var(--text-3xl);
 }
 
 .status-card p {
@@ -314,7 +314,7 @@ const lockNow = async () => {
 
 .settings-section h3 {
   margin: 0 0 16px;
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 </style>

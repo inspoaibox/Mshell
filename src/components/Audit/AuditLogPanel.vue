@@ -25,14 +25,14 @@
       <el-date-picker
         v-model="dateRange"
         type="daterange"
-        range-separator="至"
-        start-placeholder="开始日期"
+        range-separator="�?
+        start-placeholder="开始日�?
         end-placeholder="结束日期"
         value-format="YYYY-MM-DD"
         @change="handleFilterChange"
       />
       <div class="log-count">
-        共 {{ totalCount }} 条日志
+        �?{{ totalCount }} 条日�?
       </div>
     </div>
 
@@ -60,7 +60,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="resource" label="资源" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="success" label="状态" width="80">
+        <el-table-column prop="success" label="状�? width="80">
           <template #default="{ row }">
             <el-icon :color="row.success ? '#67c23a' : '#f56c6c'">
               <CircleCheck v-if="row.success" />
@@ -151,13 +151,13 @@ const loadLogs = async () => {
 
 const clearLogs = async () => {
   try {
-    await ElMessageBox.confirm('确定要清空所有审计日志吗？此操作不可恢复。', '确认清空', {
+    await ElMessageBox.confirm('确定要清空所有审计日志吗？此操作不可恢复�?, '确认清空', {
       type: 'warning'
     })
 
     const result = await window.electronAPI.auditLog?.clearAll?.()
     if (result?.success) {
-      ElMessage.success('审计日志已清空')
+      ElMessage.success('审计日志已清�?)
       loadLogs()
     } else {
       ElMessage.error(result?.error || '清空失败')
@@ -192,7 +192,7 @@ const getActionLabel = (action: string) => {
     'file.upload': '上传文件',
     'file.download': '下载文件',
     'file.delete': '删除文件',
-    'file.rename': '重命名',
+    'file.rename': '重命�?,
     'file.edit': '编辑文件',
     'key.generate': '生成密钥',
     'key.import': '导入密钥',
@@ -251,7 +251,7 @@ const getLevelLabel = (level: string) => {
 
 .panel-header h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--text-xl);
 }
 
 .header-actions {
@@ -270,7 +270,7 @@ const getLevelLabel = (level: string) => {
 
 .log-count {
   margin-left: auto;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--text-secondary);
 }
 

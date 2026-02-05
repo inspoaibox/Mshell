@@ -7,7 +7,7 @@
       </el-button>
     </div>
 
-    <!-- 搜索和过滤 -->
+    <!-- 搜索和过�?-->
     <div class="filter-section">
       <el-input
         v-model="searchQuery"
@@ -18,7 +18,7 @@
       />
       <el-select
         v-model="selectedTag"
-        placeholder="按标签筛选"
+        placeholder="按标签筛�?
         clearable
         @change="handleTagFilter"
       >
@@ -56,7 +56,7 @@
           </div>
 
           <div class="card-body">
-            <p class="description">{{ template.description || '无描述' }}</p>
+            <p class="description">{{ template.description || '无描�? }}</p>
             
             <div class="template-info">
               <div class="info-item">
@@ -102,7 +102,7 @@
       </div>
     </div>
 
-    <!-- 创建/编辑模板对话框 -->
+    <!-- 创建/编辑模板对话�?-->
     <el-dialog
       v-model="showCreateDialog"
       :title="editingTemplate ? '编辑模板' : '新建模板'"
@@ -127,7 +127,7 @@
           <el-radio-group v-model="form.type">
             <el-radio value="local">本地转发</el-radio>
             <el-radio value="remote">远程转发</el-radio>
-            <el-radio value="dynamic">动态转发</el-radio>
+            <el-radio value="dynamic">动态转�?/el-radio>
           </el-radio-group>
         </el-form-item>
 
@@ -189,7 +189,7 @@
       </template>
     </el-dialog>
 
-    <!-- 使用模板对话框 -->
+    <!-- 使用模板对话�?-->
     <el-dialog
       v-model="showUseDialog"
       title="使用模板创建转发"
@@ -210,7 +210,7 @@
             >
               <div style="display: flex; justify-content: space-between;">
                 <span>{{ session.name }}</span>
-                <span style="color: var(--text-tertiary); font-size: 12px;">
+                <span style="color: var(--text-tertiary); font-size: var(--text-sm);">
                   {{ session.username }}@{{ session.host }}
                 </span>
               </div>
@@ -272,10 +272,10 @@ const form = ref({
 })
 
 const rules = {
-  name: [{ required: true, message: '请输入模板名称', trigger: 'blur' }],
+  name: [{ required: true, message: '请输入模板名�?, trigger: 'blur' }],
   type: [{ required: true, message: '请选择转发类型', trigger: 'change' }],
-  localHost: [{ required: true, message: '请输入本地主机', trigger: 'blur' }],
-  localPort: [{ required: true, message: '请输入本地端口', trigger: 'blur' }]
+  localHost: [{ required: true, message: '请输入本地主�?, trigger: 'blur' }],
+  localPort: [{ required: true, message: '请输入本地端�?, trigger: 'blur' }]
 }
 
 const filteredTemplates = computed(() => {
@@ -367,7 +367,7 @@ const handleCommand = async (command: string, template: PortForwardTemplate) => 
   } else if (command === 'delete') {
     try {
       await ElMessageBox.confirm(
-        `确定要删除模板 "${template.name}" 吗？`,
+        `确定要删除模�?"${template.name}" 吗？`,
         '确认删除',
         { type: 'warning' }
       )
@@ -478,7 +478,7 @@ const getTypeLabel = (type: string) => {
   const labels: Record<string, string> = {
     local: '本地转发',
     remote: '远程转发',
-    dynamic: '动态转发'
+    dynamic: '动态转�?
   }
   return labels[type] || type
 }
@@ -513,7 +513,7 @@ const getTypeTagType = (type: string) => {
 
 .panel-header h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
@@ -568,7 +568,7 @@ const getTypeTagType = (type: string) => {
 
 .card-header h4 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -582,7 +582,7 @@ const getTypeTagType = (type: string) => {
 
 .description {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--text-secondary);
   line-height: 1.5;
 }
@@ -597,7 +597,7 @@ const getTypeTagType = (type: string) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .info-item .label {

@@ -1,11 +1,8 @@
 /* 导入变量 */
 @import './variables.css';
 
-/* 编程字体 - 从 CDN 加载 */
-@import url('https://fonts.cdnfonts.com/css/jetbrains-mono');
-@import url('https://fonts.cdnfonts.com/css/fira-code');
-@import url('https://fonts.cdnfonts.com/css/cascadia-code');
-@import url('https://fonts.cdnfonts.com/css/source-code-pro');
+/* 编程字体 - 本地加载 */
+@import './fonts.css';
 
 /* 全局重置 */
 * {
@@ -770,4 +767,69 @@ h5, h6 { font-size: var(--text-sm); }
 
 .rounded-full {
   border-radius: var(--radius-full);
+}
+
+
+/* Segmented 分段控制器优化 - 暗色模式适配 */
+.el-segmented {
+  --el-segmented-bg-color: var(--bg-tertiary);
+  --el-segmented-color: var(--text-secondary);
+  --el-segmented-item-selected-color: var(--text-primary);
+  --el-segmented-item-selected-bg-color: var(--bg-elevated);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+}
+
+.el-segmented__group {
+  background-color: transparent;
+}
+
+.el-segmented__item {
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.el-segmented__item:hover:not(.is-selected):not(.is-disabled) {
+  color: var(--text-primary);
+}
+
+.el-segmented__item.is-selected {
+  color: var(--text-primary);
+  background-color: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.el-segmented__item-selected {
+  background-color: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+}
+
+/* 确保分段控制器在暗色模式下的文字颜色 */
+.el-segmented__item-label {
+  color: inherit;
+}
+
+/* Loading 加载组件优化 - 暗色模式适配 */
+.el-loading-mask {
+  background-color: var(--bg-primary) !important;
+  transition: none !important;
+}
+
+.el-loading-spinner {
+  --el-loading-spinner-size: 42px;
+}
+
+.el-loading-spinner .circular {
+  width: var(--el-loading-spinner-size);
+  height: var(--el-loading-spinner-size);
+}
+
+.el-loading-spinner .path {
+  stroke: var(--primary-color);
+}
+
+.el-loading-spinner .el-loading-text {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
 }

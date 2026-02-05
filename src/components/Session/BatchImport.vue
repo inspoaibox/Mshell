@@ -82,9 +82,9 @@ ssh://ubuntu:pass123@example.com:22
       <div v-if="parseErrors.length > 0" class="error-section">
         <el-alert type="error" :closable="false">
           <template #title>
-            解析错误 ({{ parseErrors.length }} 行)
+            解析错误 ({{ parseErrors.length }} 条)
           </template>
-          <div v-for="(err, idx) in parseErrors" :key="idx" style="font-size: 12px;">
+          <div v-for="(err, idx) in parseErrors" :key="idx" style="font-size: var(--text-sm);">
             第 {{ err.line }} 行: {{ err.message }}
           </div>
         </el-alert>
@@ -474,7 +474,7 @@ const handleImport = async () => {
   padding: 8px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
 }
 
@@ -486,6 +486,6 @@ code {
   background: var(--bg-tertiary);
   padding: 2px 6px;
   border-radius: 3px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 </style>

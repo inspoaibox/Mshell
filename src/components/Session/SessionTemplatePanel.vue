@@ -72,14 +72,14 @@
         </el-form-item>
         <el-divider content-position="left">连接配置</el-divider>
         <el-form-item label="主机">
-          <el-input v-model="templateForm.host" placeholder="支持变量，如：${ip} 或 server-${env}.example.com" />
+          <el-input v-model="templateForm.host" placeholder="支持变量，如 ${ip} 或 server-${env}.example.com" />
           <div class="form-tip">使用 ${变量名} 格式定义变量，使用模板时会提示输入</div>
         </el-form-item>
         <el-form-item label="端口">
           <el-input-number v-model="templateForm.port" :min="1" :max="65535" />
         </el-form-item>
         <el-form-item label="用户名">
-          <el-input v-model="templateForm.username" placeholder="支持变量，如：${user} 或 admin" />
+          <el-input v-model="templateForm.username" placeholder="支持变量，如 ${user} 或 admin" />
         </el-form-item>
         <el-form-item label="认证方式">
           <el-radio-group v-model="templateForm.authType">
@@ -92,7 +92,7 @@
         </el-form-item>
         <el-divider content-position="left">分类信息</el-divider>
         <el-form-item label="提供商">
-          <el-input v-model="templateForm.provider" placeholder="如: AWS, Azure, 阿里云" />
+          <el-input v-model="templateForm.provider" placeholder="如 AWS, Azure, 阿里云" />
         </el-form-item>
         <el-form-item label="标签">
           <el-select v-model="templateForm.tags" multiple filterable allow-create style="width: 100%"
@@ -175,7 +175,7 @@
         </ul>
         
         <h3>📝 变量语法</h3>
-        <p>在模板的主机名、用户名等字段中使用 <code>${变量名}</code> 格式定义变量：</p>
+        <p>在模板的主机名、用户名等字段中使用 <code>${变量名}</code> 格式定义变量。</p>
         <div class="code-example">
           <div class="example-item">
             <span class="field">主机：</span>
@@ -615,7 +615,7 @@ const resetForm = () => {
 
 .panel-header h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--text-2xl);
 }
 
 .help-icon {
@@ -629,7 +629,7 @@ const resetForm = () => {
 }
 
 .guide-btn {
-  font-size: 13px;
+  font-size: var(--text-md);
   padding: 4px 8px;
 }
 
@@ -644,7 +644,7 @@ const resetForm = () => {
 
 .feature-help h4 {
   margin: 12px 0 8px 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--text-primary);
 }
 
@@ -654,7 +654,7 @@ const resetForm = () => {
 
 .feature-help p {
   margin: 0 0 8px 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.6;
   color: var(--text-secondary);
 }
@@ -663,7 +663,7 @@ const resetForm = () => {
 .feature-help ul {
   margin: 0;
   padding-left: 20px;
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.8;
   color: var(--text-secondary);
 }
@@ -681,12 +681,12 @@ const resetForm = () => {
 
 .connection-info {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--primary-color);
 }
 
 .form-tip {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   margin-top: 4px;
 }
@@ -737,7 +737,7 @@ const resetForm = () => {
   background: var(--bg-secondary);
   border-radius: 8px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* 使用指南对话框 */
@@ -749,7 +749,7 @@ const resetForm = () => {
 
 .guide-content h3 {
   margin: 24px 0 12px 0;
-  font-size: 16px;
+  font-size: var(--text-lg);
   color: var(--text-primary);
 }
 
@@ -759,7 +759,7 @@ const resetForm = () => {
 
 .guide-content p {
   margin: 0 0 12px 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.7;
   color: var(--text-secondary);
 }
@@ -768,7 +768,7 @@ const resetForm = () => {
 .guide-content ol {
   margin: 0 0 16px 0;
   padding-left: 24px;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.8;
   color: var(--text-secondary);
 }
@@ -782,7 +782,7 @@ const resetForm = () => {
   padding: 2px 6px;
   border-radius: 4px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--primary-color);
 }
 
@@ -798,7 +798,7 @@ const resetForm = () => {
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
-  font-size: 13px;
+  font-size: var(--text-md);
   flex-wrap: wrap;
 }
 
@@ -819,7 +819,7 @@ const resetForm = () => {
 
 .example-item .result {
   color: var(--success-color);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .case-study {
@@ -832,7 +832,7 @@ const resetForm = () => {
 
 .case-study h4 {
   margin: 0 0 8px 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--primary-color);
 }
 
@@ -861,7 +861,7 @@ const resetForm = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   flex-shrink: 0;
 }
@@ -878,7 +878,7 @@ const resetForm = () => {
 
 .step-content p {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 :deep(.el-divider__text) {
@@ -886,6 +886,6 @@ const resetForm = () => {
   align-items: center;
   gap: 6px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 </style>

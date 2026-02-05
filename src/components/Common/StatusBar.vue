@@ -69,7 +69,7 @@ const transferring = computed(() => props.transferCount > 0)
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .status-left,
@@ -86,6 +86,6 @@ const transferring = computed(() => props.transferCount > 0)
 }
 
 .status-item .el-icon {
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 </style>

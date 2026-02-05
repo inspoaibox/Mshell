@@ -4,7 +4,7 @@
       <h3>主题设置</h3>
       <div class="header-actions">
         <button @click="showEditor = true" class="btn-icon" title="创建主题">
-          ➕
+          �?
         </button>
         <button @click="handleImport" class="btn-icon" title="导入主题">
           📥
@@ -33,14 +33,14 @@
               <div class="theme-name">{{ theme.name }}</div>
               <div class="theme-type">{{ theme.type === 'dark' ? '深色' : '浅色' }}</div>
             </div>
-            <div v-if="currentThemeId === theme.id" class="theme-check">✓</div>
+            <div v-if="currentThemeId === theme.id" class="theme-check">�?/div>
           </div>
         </div>
       </div>
 
-      <!-- 自定义主题 -->
+      <!-- 自定义主�?-->
       <div v-if="customThemes.length > 0" class="theme-category">
-        <h4>自定义主题</h4>
+        <h4>自定义主�?/h4>
         <div class="theme-grid">
           <div
             v-for="theme in customThemes"
@@ -66,16 +66,16 @@
                 📤
               </button>
               <button @click.stop="deleteTheme(theme.id)" class="btn-icon-sm" title="删除">
-                🗑️
+                🗑�?
               </button>
             </div>
-            <div v-if="currentThemeId === theme.id" class="theme-check">✓</div>
+            <div v-if="currentThemeId === theme.id" class="theme-check">�?/div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 主题编辑器 -->
+    <!-- 主题编辑�?-->
     <div v-if="showEditor" class="editor-overlay">
       <div class="editor-container">
         <ThemeEditor
@@ -86,7 +86,7 @@
       </div>
     </div>
 
-    <!-- 隐藏的文件输入 -->
+    <!-- 隐藏的文件输�?-->
     <input
       ref="fileInput"
       type="file"
@@ -139,7 +139,7 @@ const handleSave = (themeData: Omit<Theme, 'id'>) => {
     // 更新现有主题
     themeManager.updateCustomTheme(editingTheme.value.id, themeData)
   } else {
-    // 创建新主题
+    // 创建新主�?
     const newTheme = themeManager.createCustomTheme(themeData)
     themeManager.setTheme(newTheme.id)
   }
@@ -187,7 +187,7 @@ const handleFileSelect = async (event: Event) => {
     alert(`主题 "${theme.name}" 导入成功`)
   } catch (error) {
     console.error('Failed to import theme:', error)
-    alert('导入主题失败：' + (error as Error).message)
+    alert('导入主题失败�? + (error as Error).message)
   }
   
   // 清空文件输入
@@ -196,7 +196,7 @@ const handleFileSelect = async (event: Event) => {
 
 // 删除主题
 const deleteTheme = (themeId: string) => {
-  if (confirm('确定要删除这个主题吗？')) {
+  if (confirm('确定要删除这个主题吗�?)) {
     themeManager.deleteCustomTheme(themeId)
     loadThemes()
   }
@@ -224,7 +224,7 @@ onMounted(() => {
 
 .selector-header h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--text-xl);
 }
 
 .header-actions {
@@ -238,7 +238,7 @@ onMounted(() => {
   border-radius: 4px;
   padding: 6px 12px;
   cursor: pointer;
-  font-size: 16px;
+  font-size: var(--text-lg);
   transition: all 0.2s;
 }
 
@@ -259,7 +259,7 @@ onMounted(() => {
 
 .theme-category h4 {
   margin: 0 0 16px 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -316,14 +316,14 @@ onMounted(() => {
 }
 
 .theme-name {
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 4px;
 }
 
 .theme-type {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
@@ -338,7 +338,7 @@ onMounted(() => {
   border-radius: 4px;
   padding: 4px 8px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-sm);
   transition: all 0.2s;
 }
 
@@ -359,7 +359,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: bold;
 }
 

@@ -111,7 +111,7 @@
                             <el-icon :size="12"><User /></el-icon>
                             {{ session.username || '-' }}
                           </span>
-                          <span class="detail-separator">•</span>
+                          <span class="detail-separator">|</span>
                           <span class="detail-item">
                             <el-icon :size="12"><Monitor /></el-icon>
                             {{ session.host }}:{{ session.port }}
@@ -213,7 +213,7 @@
                           <el-icon :size="12"><User /></el-icon>
                           {{ session.username || '-' }}
                         </span>
-                        <span class="detail-separator">•</span>
+                        <span class="detail-separator">|</span>
                         <span class="detail-item">
                           <el-icon :size="12"><Monitor /></el-icon>
                           {{ session.host }}:{{ session.port }}
@@ -476,7 +476,7 @@ const handleContextMenu = async (session: SessionConfig, event: MouseEvent) => {
     { type: 'separator' },
     { label: '编辑', action: 'edit' },
     { label: '复制会话', action: 'copy' },
-    { label: '移动到分组...', action: 'move' },
+    { label: '移动到分组..', action: 'move' },
     { type: 'separator' },
     { label: '删除', action: 'delete' }
   ]
@@ -681,7 +681,7 @@ const handleSessionReorder = async (groupId: string, fromIndex: number, toIndex:
       await appStore.updateSession(session.id, { sortOrder: i })
     }
     
-    // 重新加载会话列表以反映更改
+    // 重新加载会话列表以反映更新
     await appStore.loadSessions()
     
     ElMessage.success('会话已重新排序')
@@ -728,7 +728,7 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
 
 .header-title {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.5px;
@@ -741,7 +741,7 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
 .session-groups-container {
   flex: 1;
   overflow-y: auto;
-  padding: 5px; /* 统一为5px */
+  padding: 5px; /* 统一为 5px */
 }
 
 .session-collapse {
@@ -752,7 +752,7 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
 }
 
 .group-item {
-  margin: 5px; /* 统一为5px */
+  margin: 5px; /* 统一为 5px */
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--bg-secondary);
@@ -771,7 +771,7 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
   height: 40px;
   line-height: 40px;
   padding: 0 8px;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   border: none;
   background: transparent;
@@ -788,7 +788,7 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
 }
 
 .session-groups-container :deep(.el-collapse-item__content) {
-  padding: 5px; /* 统一为5px */
+  padding: 5px; /* 统一为 5px */
 }
 
 .session-groups-container :deep(.el-collapse-item__arrow) {
@@ -813,18 +813,18 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
 
 .group-icon {
   color: var(--primary-color);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .group-name {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .session-items {
   display: flex;
   flex-direction: column;
-  padding: 5px; /* 统一为5px */
+  padding: 5px; /* 统一为 5px */
   max-height: 600px;
   width: 100%;
 }
@@ -843,7 +843,7 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
   display: flex;
   align-items: center;
   padding: 6px 8px;
-  margin: 5px; /* 统一为5px */
+  margin: 5px; /* 统一为 5px */
   width: calc(100% - 10px); /* 减去左右margin */
   background: var(--bg-tertiary);
   border: 1px solid transparent;
@@ -958,14 +958,14 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
 
 .session-type-tag {
   flex-shrink: 0;
-  font-size: 9px !important;
+  font-size: var(--text-2xs) !important;
   height: 14px;
   line-height: 14px;
   padding: 0 4px;
 }
 
 .session-name {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
   font-weight: 600;
   white-space: nowrap;
@@ -992,7 +992,7 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
 
 .expiry-tag {
   flex-shrink: 0;
-  font-size: 9px !important;
+  font-size: var(--text-2xs) !important;
   height: 15px; /* 减小高度 */
   line-height: 15px; /* 减小高度 */
   padding: 0 4px; /* 减少内边距 */
@@ -1002,7 +1002,7 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
   display: flex;
   align-items: center;
   gap: 3px; /* 减少间距 */
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   line-height: 1.2;
 }

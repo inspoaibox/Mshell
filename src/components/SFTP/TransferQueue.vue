@@ -649,6 +649,13 @@ onUnmounted(() => {
 .transfer-icon {
   font-size: var(--text-2xl);
   flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1;
 }
 
 .transfer-info {

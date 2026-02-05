@@ -695,7 +695,7 @@ const describeCron = (cron: string): string => {
 }
 
 .stat-value {
-  font-size: 20px;
+  font-size: var(--text-2xl);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -704,7 +704,7 @@ const describeCron = (cron: string): string => {
 .stat-value.danger { color: var(--error-color); }
 
 .stat-label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
@@ -717,36 +717,36 @@ const describeCron = (cron: string): string => {
 
 .command-text {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
 .cron-text {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--primary-color);
   cursor: help;
 }
 
 .time-text {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
 .no-data {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .exec-stats {
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .exec-stats .success { color: var(--success-color); }
 .exec-stats .danger { color: var(--error-color); }
 
 .form-tip {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   margin-top: 4px;
   line-height: 1.5;
@@ -761,7 +761,7 @@ const describeCron = (cron: string): string => {
 .preset-cron {
   float: right;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
 }
 
@@ -772,7 +772,7 @@ const describeCron = (cron: string): string => {
 
 .output-text {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-all;
@@ -781,7 +781,7 @@ const describeCron = (cron: string): string => {
 }
 
 .error-text {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--error-color);
 }
 
@@ -807,7 +807,7 @@ const describeCron = (cron: string): string => {
 
 .guide-content h3 {
   margin: 24px 0 12px 0;
-  font-size: 16px;
+  font-size: var(--text-lg);
   color: var(--text-primary);
 }
 
@@ -817,7 +817,7 @@ const describeCron = (cron: string): string => {
 
 .guide-content p {
   margin: 0 0 12px 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.7;
   color: var(--text-secondary);
 }
@@ -825,7 +825,7 @@ const describeCron = (cron: string): string => {
 .guide-content ul {
   margin: 0 0 16px 0;
   padding-left: 24px;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.8;
   color: var(--text-secondary);
 }
@@ -835,7 +835,7 @@ const describeCron = (cron: string): string => {
   padding: 2px 6px;
   border-radius: 4px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--primary-color);
 }
 
@@ -848,7 +848,7 @@ const describeCron = (cron: string): string => {
 }
 
 .cron-explain code {
-  font-size: 16px;
+  font-size: var(--text-lg);
   display: block;
   margin-bottom: 8px;
 }
@@ -857,7 +857,7 @@ const describeCron = (cron: string): string => {
   display: flex;
   justify-content: center;
   gap: 24px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
@@ -885,6 +885,6 @@ const describeCron = (cron: string): string => {
 
 .example-row span {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 </style>

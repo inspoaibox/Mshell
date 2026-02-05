@@ -501,7 +501,7 @@ const formatDate = (date: string) => {
 
 .panel-header h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--text-2xl);
 }
 
 .header-actions {

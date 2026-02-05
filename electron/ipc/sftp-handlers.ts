@@ -449,4 +449,102 @@ export function registerSFTPHandlers() {
       win.webContents.send('sftp:error', taskId, error)
     })
   })
+
+  // 远程压缩单个文件或目录
+  ipcMain.handle('sftp:compress', async (_event, connectionId: string, sourcePath: string, archivePath: string) => {
+    try {
+      const connection = sshConnectionManager.getConnection(connectionId)
+      if (!connection) {
+        return { success: false, error: '连接不存在' }
+      }
+
+      const ext = archivePath.toLowerCase()
+      let command: string
+
+      if (ext.endsWith('.zip')) {
+        command = `cd "$(dirname "${sourcePath}")" && zip -r "${archivePath}" "$(basename "${sourcePath}")"`
+      } else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) {
+        command = `tar -czf "${archivePath}" -C "$(dirname "${sourcePath}")" "$(basename "${sourcePath}")"`
+      } else if (ext.endsWith('.tar')) {
+        command = `tar -cf "${archivePath}" -C "$(dirname "${sourcePath}")" "$(basename "${sourcePath}")"`
+      } else if (ext.endsWith('.gz')) {
+        command = `gzip -c "${sourcePath}" > "${archivePath}"`
+      } else {
+        command = `tar -czf "${archivePath}" -C "$(dirname "${sourcePath}")" "$(basename "${sourcePath}")"`
+      }
+
+      await connection.execCommand(command)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 远程压缩多个文件或目录
+  ipcMain.handle('sftp:compressMultiple', async (_event, connectionId: string, sourcePaths: string[], archivePath: string) => {
+    try {
+      const connection = sshConnectionManager.getConnection(connectionId)
+      if (!connection) {
+        return { success: false, error: '连接不存在' }
+      }
+
+      const ext = archivePath.toLowerCase()
+      const parentDir = sourcePaths[0].substring(0, sourcePaths[0].lastIndexOf('/'))
+      const fileNames = sourcePaths.map(p => `"$(basename "${p}")"`).join(' ')
+      let command: string
+
+      if (ext.endsWith('.zip')) {
+        command = `cd "${parentDir}" && zip -r "${archivePath}" ${fileNames}`
+      } else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) {
+        command = `tar -czf "${archivePath}" -C "${parentDir}" ${fileNames}`
+      } else if (ext.endsWith('.tar')) {
+        command = `tar -cf "${archivePath}" -C "${parentDir}" ${fileNames}`
+      } else {
+        command = `tar -czf "${archivePath}" -C "${parentDir}" ${fileNames}`
+      }
+
+      await connection.execCommand(command)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 远程解压文件
+  ipcMain.handle('sftp:extract', async (_event, connectionId: string, archivePath: string, targetDir: string) => {
+    try {
+      const connection = sshConnectionManager.getConnection(connectionId)
+      if (!connection) {
+        return { success: false, error: '连接不存在' }
+      }
+
+      const ext = archivePath.toLowerCase()
+      let command: string
+
+      // 确保目标目录存在
+      await connection.execCommand(`mkdir -p "${targetDir}"`)
+
+      if (ext.endsWith('.zip')) {
+        command = `unzip -o "${archivePath}" -d "${targetDir}"`
+      } else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) {
+        command = `tar -xzf "${archivePath}" -C "${targetDir}"`
+      } else if (ext.endsWith('.tar')) {
+        command = `tar -xf "${archivePath}" -C "${targetDir}"`
+      } else if (ext.endsWith('.gz')) {
+        const outputFile = archivePath.replace(/\.gz$/, '')
+        command = `gunzip -c "${archivePath}" > "${targetDir}/$(basename "${outputFile}")"`
+      } else {
+        return { success: false, error: '不支持的压缩格式' }
+      }
+
+      const result = await connection.execCommand(command)
+      if (result.code !== 0 && result.stderr) {
+        return { success: false, error: result.stderr }
+      }
+      
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
 }

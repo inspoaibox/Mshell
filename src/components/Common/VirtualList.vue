@@ -12,7 +12,7 @@
       </template>
     </VirtualScroll>
 
-    <!-- 空状态 -->
+    <!-- 空状�?-->
     <div v-if="filteredItems.length === 0" class="list-empty">
       <slot name="empty">
         <div class="empty-icon">📋</div>
@@ -27,10 +27,10 @@
       </button>
     </div>
 
-    <!-- 加载中 -->
+    <!-- 加载�?-->
     <div v-if="loading" class="loading">
       <div class="spinner"></div>
-      <span>加载中...</span>
+      <span>加载�?..</span>
     </div>
   </div>
 </template>
@@ -70,17 +70,17 @@ const filteredItems = computed(() => {
   return props.items.filter(props.filterFn)
 })
 
-// 滚动到指定索引
+// 滚动到指定索�?
 const scrollToIndex = (index: number, behavior: ScrollBehavior = 'smooth') => {
   virtualScrollRef.value?.scrollToIndex(index, behavior)
 }
 
-// 滚动到顶部
+// 滚动到顶�?
 const scrollToTop = (behavior: ScrollBehavior = 'smooth') => {
   virtualScrollRef.value?.scrollToTop(behavior)
 }
 
-// 滚动到底部
+// 滚动到底�?
 const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
   virtualScrollRef.value?.scrollToBottom(behavior)
 }
@@ -112,13 +112,13 @@ defineExpose({
 }
 
 .empty-icon {
-  font-size: 64px;
+  font-size: var(--text-7xl);
   margin-bottom: 16px;
   opacity: 0.5;
 }
 
 .empty-text {
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 
 .load-more {

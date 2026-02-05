@@ -23,14 +23,15 @@
       :item-height="rowHeight"
       :buffer="buffer"
       class="table-body"
+      :key="dataKey"
     >
-      <template #default="{ item, index }">
+      <template #default="{ item, index: globalIndex }">
         <div
-          :class="['table-row', { selected: isSelected(item), hover: hoverIndex === index }]"
-          @click="handleRowClick(item)"
+          :class="['table-row', { selected: isSelected(item), hover: hoverIndex === globalIndex }]"
+          @click="(e) => handleRowClick(item, globalIndex, e)"
           @dblclick="handleRowDblclick(item)"
           @contextmenu="(e) => handleRowContextmenu(item, null, e)"
-          @mouseenter="hoverIndex = index"
+          @mouseenter="hoverIndex = globalIndex"
           @mouseleave="hoverIndex = -1"
         >
           <div
@@ -44,7 +45,7 @@
               :name="column.slot"
               :row="item"
               :column="column"
-              :index="index"
+              :index="globalIndex"
             ></slot>
             <span v-else>{{ getCellValue(item, column.key) }}</span>
           </div>
@@ -63,7 +64,7 @@
 </template>
 
 <script setup lang="ts" generic="T extends Record<string, any>">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import VirtualScroll from './VirtualScroll.vue'
 
 export interface Column {
@@ -104,6 +105,17 @@ const sortOrder = ref<'asc' | 'desc'>('asc')
 const selectedRows = ref<Set<any>>(new Set())
 const hoverIndex = ref(-1)
 const scrollbarWidth = ref(8) // 滚动条宽度
+const lastSelectedIndex = ref<number>(-1) // 记录上次选中的索引，用于 Shift 多选
+const dataKey = ref(0) // 用于强制刷新虚拟滚动
+
+// 监听数据变化，清空选择并刷新
+watch(() => props.data, () => {
+  // 数据变化时清空选择
+  selectedRows.value.clear()
+  lastSelectedIndex.value = -1
+  // 强制刷新虚拟滚动
+  dataKey.value++
+}, { deep: false })
 
 // 排序后的数据
 const sortedData = computed(() => {
@@ -136,18 +148,52 @@ const handleSort = (key: string) => {
 }
 
 // 处理行点击
-const handleRowClick = (row: T) => {
+const handleRowClick = (row: T, index: number, event?: MouseEvent) => {
   emit('rowClick', row)
 
   if (props.selectable) {
     const key = getCellValue(row, props.selectedKey)
-    if (selectedRows.value.has(key)) {
-      selectedRows.value.delete(key)
+    const isCtrlSelect = event?.ctrlKey || event?.metaKey
+    const isShiftSelect = event?.shiftKey
+    
+    if (isShiftSelect && lastSelectedIndex.value !== -1) {
+      // Shift + 点击：范围选择
+      const start = Math.min(lastSelectedIndex.value, index)
+      const end = Math.max(lastSelectedIndex.value, index)
+      
+      // 如果没有按 Ctrl，先清空之前的选择
+      if (!isCtrlSelect) {
+        selectedRows.value.clear()
+      }
+      
+      // 选择范围内的所有行
+      for (let i = start; i <= end; i++) {
+        const item = sortedData.value[i]
+        if (item) {
+          const itemKey = getCellValue(item, props.selectedKey)
+          selectedRows.value.add(itemKey)
+        }
+      }
+      // Shift 选择后不更新 lastSelectedIndex，保持锚点不变
+    } else if (isCtrlSelect) {
+      // Ctrl/Cmd + 点击：切换单个选择
+      if (selectedRows.value.has(key)) {
+        selectedRows.value.delete(key)
+      } else {
+        selectedRows.value.add(key)
+      }
+      lastSelectedIndex.value = index
     } else {
+      // 普通点击：单选模式
+      selectedRows.value.clear()
       selectedRows.value.add(key)
+      lastSelectedIndex.value = index
     }
     
-    const selected = props.data.filter(item => 
+    // 触发一次响应式更新
+    selectedRows.value = new Set(selectedRows.value)
+    
+    const selected = sortedData.value.filter(item => 
       selectedRows.value.has(getCellValue(item, props.selectedKey))
     )
     emit('selectionChange', selected)
@@ -174,6 +220,7 @@ const isSelected = (row: T): boolean => {
 // 清空选择
 const clearSelection = () => {
   selectedRows.value.clear()
+  lastSelectedIndex.value = -1
   emit('selectionChange', [])
 }
 
@@ -192,13 +239,19 @@ const scrollToRow = (index: number, behavior: ScrollBehavior = 'smooth') => {
   virtualScrollRef.value?.scrollToIndex(index, behavior)
 }
 
+// 刷新视图
+const refresh = () => {
+  dataKey.value++
+}
+
 // 暴露方法
 defineExpose({
   clearSelection,
   selectAll,
   scrollToRow,
   scrollToTop: () => virtualScrollRef.value?.scrollToTop(),
-  scrollToBottom: () => virtualScrollRef.value?.scrollToBottom()
+  scrollToBottom: () => virtualScrollRef.value?.scrollToBottom(),
+  refresh
 })
 </script>
 
@@ -211,6 +264,7 @@ defineExpose({
   border: 1px solid var(--border-color);
   border-radius: 8px;
   overflow: hidden;
+  user-select: none; /* 禁用文本选择 */
 }
 
 .table-header {
@@ -224,7 +278,7 @@ defineExpose({
 
 .table-header-cell {
   padding: 12px 16px;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-secondary);
   text-align: left;
@@ -245,7 +299,7 @@ defineExpose({
 }
 
 .sort-icon {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--primary-color);
 }
 
@@ -267,12 +321,13 @@ defineExpose({
 }
 
 .table-row.selected {
-  background: rgba(var(--primary-color-rgb), 0.1);
+  background: rgba(14, 165, 233, 0.15);
+  border-left: 3px solid var(--primary-color);
 }
 
 .table-cell {
   padding: 12px 16px;
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -293,12 +348,12 @@ defineExpose({
 }
 
 .empty-icon {
-  font-size: 64px;
+  font-size: var(--text-7xl);
   margin-bottom: 16px;
   opacity: 0.5;
 }
 
 .empty-text {
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 </style>

@@ -276,7 +276,7 @@ const selectPrivateKey = async () => {
 }
 
 .preview-label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   margin-bottom: 8px;
 }

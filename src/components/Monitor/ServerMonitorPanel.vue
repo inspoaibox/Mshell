@@ -6,12 +6,12 @@
         <button
           @click="toggleMonitoring"
           :class="['btn-toggle', { active: isMonitoring }]"
-          title="开始/暂停监控"
+          title="开启/暂停监控"
         >
           {{ isMonitoring ? '⏸' : '▶' }}
         </button>
         <button @click="refreshMetrics" class="btn-refresh" :disabled="!isMonitoring" title="刷新">
-          ↻
+          🔄
         </button>
       </div>
     </div>
@@ -294,7 +294,7 @@ onUnmounted(() => {
 
 .monitor-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
 }
 
@@ -309,7 +309,7 @@ onUnmounted(() => {
   border: 1px solid var(--border-color);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-md);
   transition: all 0.2s;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -343,13 +343,13 @@ onUnmounted(() => {
 }
 
 .empty-icon {
-  font-size: 48px;
+  font-size: var(--text-5xl);
   margin-bottom: 12px;
   opacity: 0.5;
 }
 
 .monitor-empty p {
-  font-size: 13px;
+  font-size: var(--text-md);
   margin: 0;
 }
 
@@ -396,14 +396,14 @@ onUnmounted(() => {
 }
 
 .metric-title {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
 }
 
 .metric-value {
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 700;
   color: var(--text-primary);
 }
@@ -422,7 +422,7 @@ onUnmounted(() => {
 }
 
 .metric-info {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
 
@@ -437,7 +437,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .network-label {
@@ -459,7 +459,7 @@ onUnmounted(() => {
 .info-row {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .info-label {
@@ -478,7 +478,7 @@ onUnmounted(() => {
 
 .update-time {
   text-align: center;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   padding: 6px;
 }
@@ -486,7 +486,7 @@ onUnmounted(() => {
 .compact-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: var(--text-xs);
   table-layout: fixed;
 }
 
@@ -511,12 +511,12 @@ onUnmounted(() => {
 .network-speed {
   color: var(--primary-color);
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .network-total {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .truncate {

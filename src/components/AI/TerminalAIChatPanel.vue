@@ -440,7 +440,7 @@ const loadCurrentDirectory = async () => {
     
     // 如果获取到了目录
     if (targetDir) {
-      // 如果是 ~ 开头，需要展开为完整路径
+      // 如果以 ~ 开头，需要展开为完整路径
       if (targetDir.startsWith('~')) {
         const homeResult = await window.electronAPI.ssh?.executeCommand(
           props.connectionId,
@@ -590,7 +590,7 @@ const attachFile = async (file: RemoteFile) => {
       }
       
       showFileSelector.value = false
-      ElMessage.success(`已附加: ${file.name}`)
+      ElMessage.success(`已附加 ${file.name}`)
     } else {
       ElMessage.error(result?.error || '读取文件失败，可能是二进制文件或权限不足')
     }
@@ -1193,7 +1193,7 @@ defineExpose({
 
 .title {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--text-md);
   flex-shrink: 0;
 }
 
@@ -1213,7 +1213,7 @@ defineExpose({
 }
 
 .section-label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   margin-bottom: 8px;
 }
@@ -1228,7 +1228,7 @@ defineExpose({
   padding: 6px 12px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--text-md);
   cursor: pointer;
   transition: all 0.2s;
   background: var(--bg-secondary);
@@ -1259,7 +1259,7 @@ defineExpose({
   padding: 8px 12px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--text-md);
   cursor: pointer;
   transition: all 0.2s;
   background: var(--bg-secondary);
@@ -1284,12 +1284,12 @@ defineExpose({
 
 .model-item .check-icon {
   color: var(--primary-color);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .empty-hint {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   padding: 8px;
 }
 
@@ -1322,7 +1322,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .message-content-wrapper {
@@ -1336,7 +1336,7 @@ defineExpose({
   padding: 10px 12px;
   border-radius: 12px;
   border-top-left-radius: 2px;
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.6;
   color: var(--text-primary);
   word-break: break-word;
@@ -1356,7 +1356,7 @@ defineExpose({
 .message-meta {
   display: flex;
   gap: 8px;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   margin-bottom: 4px;
 }
@@ -1384,7 +1384,7 @@ defineExpose({
 
 .markdown-body :deep(code) {
   font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .markdown-body :deep(p) {
@@ -1409,7 +1409,7 @@ defineExpose({
 
 .markdown-body :deep(.code-btn) {
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   background: var(--bg-secondary);
@@ -1441,7 +1441,7 @@ defineExpose({
   gap: 4px;
   margin-top: 8px;
   color: var(--danger-color);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .empty-state {
@@ -1460,7 +1460,7 @@ defineExpose({
 }
 
 .empty-state .hint {
-  font-size: 12px;
+  font-size: var(--text-sm);
   opacity: 0.7;
   margin: 0 0 16px;
 }
@@ -1494,7 +1494,7 @@ defineExpose({
   background: var(--primary-bg-light);
   border: 1px solid var(--primary-color);
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--primary-color);
 }
 
@@ -1547,7 +1547,7 @@ defineExpose({
   align-items: center;
   padding: 8px 12px;
   border-bottom: 1px solid var(--el-border-color, #3c3c3c);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   color: var(--el-text-color-primary, #e0e0e0);
   background-color: var(--el-bg-color, #1e1e1e);
@@ -1612,7 +1612,7 @@ defineExpose({
   gap: 8px;
   padding: 20px;
   color: var(--el-text-color-secondary, #909399);
-  font-size: 12px;
+  font-size: var(--text-sm);
   background-color: var(--el-bg-color, #1e1e1e);
 }
 
@@ -1631,7 +1631,7 @@ defineExpose({
   padding: 6px 8px;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-md);
   transition: background 0.2s;
   color: var(--el-text-color-primary, #e0e0e0);
 }
@@ -1646,7 +1646,7 @@ defineExpose({
 
 .file-item .file-size {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--el-text-color-secondary, #909399);
 }
 

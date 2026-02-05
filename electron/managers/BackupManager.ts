@@ -55,6 +55,7 @@ export interface BackupConfig {
   maxBackups: number
   backupDir?: string // 自定义备份目录
   lastBackup?: string
+  autoBackupPassword?: string // 自动备份密码（加密存储）
 }
 
 /**
@@ -213,7 +214,7 @@ export class BackupManager {
   /**
    * 创建备份
    */
-  async createBackup(password: string, filePath?: string): Promise<string> {
+  async createBackup(password: string, filePath?: string, isAutoBackup: boolean = false): Promise<string> {
     try {
       // 收集所有数据
       const backupData: BackupData = {
@@ -247,7 +248,8 @@ export class BackupManager {
       const encryptedData = await this.encrypt(jsonData, password)
 
       // 确定保存路径
-      const fileName = `backup-${Date.now()}.mshell`
+      const prefix = isAutoBackup ? 'auto-backup' : 'backup'
+      const fileName = `${prefix}-${Date.now()}.mshell`
       const savePath = filePath || join(this.backupDir, fileName)
 
       // 保存到文件
@@ -257,7 +259,7 @@ export class BackupManager {
       this.config.lastBackup = new Date().toISOString()
       await this.saveConfig()
 
-      // 清理旧备份
+      // 清理旧备份（只清理自动备份目录中的文件）
       if (!filePath) {
         await this.cleanOldBackups()
       }
@@ -872,28 +874,72 @@ export class BackupManager {
 
     const intervalMs = this.config.interval * 60 * 60 * 1000 // 转换为毫秒
 
+    // 检查是否需要立即执行备份（距离上次备份超过间隔时间）
+    const shouldBackupNow = this.shouldRunBackupNow()
+    
+    if (shouldBackupNow) {
+      // 立即执行一次备份
+      this.runAutoBackup()
+    }
+
     this.timer = setInterval(async () => {
-      try {
-        // 使用默认密码进行自动备份
-        await this.createBackup('auto-backup-default-password')
-        try {
-          logger.logInfo('system', 'Auto backup completed')
-        } catch (error) {
-          console.log('Auto backup completed')
-        }
-      } catch (error) {
-        try {
-          logger.logError('system', 'Auto backup failed', error as Error)
-        } catch (e) {
-          console.error('Auto backup failed:', error)
-        }
-      }
+      await this.runAutoBackup()
     }, intervalMs)
 
     try {
       logger.logInfo('system', `Auto backup started with interval: ${this.config.interval} hours`)
     } catch (error) {
       console.log(`Auto backup started with interval: ${this.config.interval} hours`)
+    }
+  }
+
+  /**
+   * 检查是否需要立即执行备份
+   */
+  private shouldRunBackupNow(): boolean {
+    if (!this.config.lastBackup) {
+      return true // 从未备份过
+    }
+
+    const lastBackupTime = new Date(this.config.lastBackup).getTime()
+    const now = Date.now()
+    const intervalMs = this.config.interval * 60 * 60 * 1000
+
+    return (now - lastBackupTime) >= intervalMs
+  }
+
+  /**
+   * 执行自动备份
+   */
+  private async runAutoBackup(): Promise<void> {
+    try {
+      // 检查是否配置了自动备份密码
+      if (!this.config.autoBackupPassword) {
+        try {
+          logger.logInfo('system', 'Auto backup skipped: no password configured')
+        } catch (error) {
+          console.log('Auto backup skipped: no password configured')
+        }
+        return
+      }
+
+      await this.createBackup(this.config.autoBackupPassword, undefined, true)
+      
+      // 更新最后备份时间
+      this.config.lastBackup = new Date().toISOString()
+      await this.saveConfig()
+      
+      try {
+        logger.logInfo('system', 'Auto backup completed')
+      } catch (error) {
+        console.log('Auto backup completed')
+      }
+    } catch (error) {
+      try {
+        logger.logError('system', 'Auto backup failed', error as Error)
+      } catch (e) {
+        console.error('Auto backup failed:', error)
+      }
     }
   }
 

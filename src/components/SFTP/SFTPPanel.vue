@@ -7,6 +7,9 @@
         <div class="browser-header">
           <div class="header-title">
             <h3>本地文件</h3>
+            <el-tooltip content="Ctrl+点击 多选单个，Shift+点击 范围选择" placement="top">
+              <el-icon class="help-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
           </div>
           
           <!-- 盘符选择 -->
@@ -84,24 +87,22 @@
       <!-- 中间：传输按钮 -->
       <div class="transfer-controls">
         <el-tooltip content="上传选中文件到远程" placement="left">
-          <el-button
-            type="primary"
-            :icon="Upload"
+          <button
+            class="transfer-btn upload-btn"
             @click="uploadSelected"
             :disabled="selectedLocalFiles.length === 0 || !currentSession"
-            circle
-            size="large"
-          />
+          >
+            <el-icon><Top /></el-icon>
+          </button>
         </el-tooltip>
         <el-tooltip content="下载选中文件到本地" placement="right">
-          <el-button
-            type="success"
-            :icon="Download"
+          <button
+            class="transfer-btn download-btn"
             @click="downloadSelected"
             :disabled="selectedRemoteFiles.length === 0 || !currentSession"
-            circle
-            size="large"
-          />
+          >
+            <el-icon><Bottom /></el-icon>
+          </button>
         </el-tooltip>
       </div>
 
@@ -110,6 +111,9 @@
         <div class="browser-header">
           <div class="header-title">
             <h3>远程文件</h3>
+            <el-tooltip content="Ctrl+点击 多选单个，Shift+点击 范围选择" placement="top">
+              <el-icon class="help-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
           </div>
           
           <!-- 会话选择 -->
@@ -580,7 +584,8 @@ import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import {
   Connection, FolderOpened, Back, FolderAdd,
   Upload, Download, Refresh, Folder, Document, Link, ArrowDown,
-  VideoPause, VideoPlay, Close, Delete, CircleCheck, Top, Bottom, Clock
+  VideoPause, VideoPlay, Close, Delete, CircleCheck, Top, Bottom, Clock,
+  QuestionFilled
 } from '@element-plus/icons-vue'
 import type { SessionConfig } from '@/types/session'
 import FilePreview from './FilePreview.vue'
@@ -879,8 +884,10 @@ const disconnectSession = async () => {
 }
 
 // 本地文件操作
-const loadLocalDirectory = async () => {
-  loadingLocal.value = true
+const loadLocalDirectory = async (silent = false) => {
+  if (!silent) {
+    loadingLocal.value = true
+  }
   try {
     const result = await window.electronAPI.fs.readDirectory(localPath.value)
     if (result.success && result.files) {
@@ -937,8 +944,10 @@ const navigateToLocalPathInput = async () => {
   }
 }
 
-const refreshLocalDirectory = () => {
-  loadLocalDirectory()
+const refreshLocalDirectory = async () => {
+  console.log('[SFTP] Refreshing local directory:', localPath.value)
+  await loadLocalDirectory()
+  console.log('[SFTP] Local directory refreshed, files:', localFiles.value.length)
 }
 
 const createLocalFolder = async () => {
@@ -979,7 +988,7 @@ const handleLocalClick = (row: FileInfo) => {
 const handleLocalDoubleClick = (row: FileInfo) => {
   if (row.type === 'directory') {
     localPath.value = row.path
-    loadLocalDirectory()
+    loadLocalDirectory(true)
   }
 }
 
@@ -995,6 +1004,7 @@ const handleLocalContextMenu = async (row: FileInfo, column: any, event: MouseEv
     // 多选菜单
     menuItems.push(
       { label: `上传 ${selectedLocalFiles.value.length} 个文件`, action: 'upload-multiple' },
+      { label: `压缩 ${selectedLocalFiles.value.length} 个项目`, action: 'compress-multiple' },
       { label: `删除 ${selectedLocalFiles.value.length} 个项目`, action: 'delete-multiple' }
     )
   } else {
@@ -1004,6 +1014,15 @@ const handleLocalContextMenu = async (row: FileInfo, column: any, event: MouseEv
     }
     
     menuItems.push({ label: '上传到远程', action: 'upload' })
+    
+    // 压缩/解压选项
+    const ext = row.name.toLowerCase()
+    if (ext.endsWith('.zip') || ext.endsWith('.tar') || ext.endsWith('.tar.gz') || ext.endsWith('.tgz') || ext.endsWith('.7z')) {
+      menuItems.push({ label: '解压到当前目录', action: 'extract' })
+      menuItems.push({ label: '解压到...', action: 'extract-to' })
+    } else {
+      menuItems.push({ label: '压缩', action: 'compress' })
+    }
     
     menuItems.push(
       { label: '重命名', action: 'rename' },
@@ -1034,6 +1053,14 @@ const handleLocalContextMenu = async (row: FileInfo, column: any, event: MouseEv
       await deleteLocalFile(row)
     } else if (result === 'delete-multiple') {
       await deleteLocalFilesMultiple()
+    } else if (result === 'compress') {
+      await compressLocalFile(row)
+    } else if (result === 'compress-multiple') {
+      await compressLocalFilesMultiple()
+    } else if (result === 'extract') {
+      await extractLocalFile(row, localPath.value)
+    } else if (result === 'extract-to') {
+      await extractLocalFileTo(row)
     }
   } catch (error) {
     // 用户取消
@@ -1098,10 +1125,12 @@ const deleteLocalFilesMultiple = async () => {
 }
 
 // 远程文件操作
-const loadRemoteDirectory = async () => {
+const loadRemoteDirectory = async (silent = false) => {
   if (!currentSession.value) return
   
-  loadingRemote.value = true
+  if (!silent) {
+    loadingRemote.value = true
+  }
   try {
     const result = await window.electronAPI.sftp.listDirectory(
       currentSession.value.id,
@@ -1141,8 +1170,10 @@ const navigateToRemotePathInput = async () => {
   await loadRemoteDirectory()
 }
 
-const refreshRemoteDirectory = () => {
-  loadRemoteDirectory()
+const refreshRemoteDirectory = async () => {
+  console.log('[SFTP] Refreshing remote directory:', remotePath.value)
+  await loadRemoteDirectory()
+  console.log('[SFTP] Remote directory refreshed, files:', remoteFiles.value.length)
 }
 
 const createRemoteFolder = async () => {
@@ -1209,7 +1240,7 @@ const handleRemoteClick = (row: FileInfo) => {
 const handleRemoteDoubleClick = (row: FileInfo) => {
   if (row.type === 'directory') {
     remotePath.value = row.path
-    loadRemoteDirectory()
+    loadRemoteDirectory(true)
   }
 }
 
@@ -1227,29 +1258,47 @@ const handleRemoteContextMenu = async (row: FileInfo, column: any, event: MouseE
     // 多选菜单
     menuItems = [
       { label: `下载 ${selectedRemoteFiles.value.length} 个文件`, action: 'download-multiple' },
+      { label: `压缩 ${selectedRemoteFiles.value.length} 个项目`, action: 'compress-multiple' },
       { label: `删除 ${selectedRemoteFiles.value.length} 个项目`, action: 'delete-multiple' }
     ]
   } else {
-    // 单选菜单
+    // 单选菜单 - 检查是否是压缩文件
+    const ext = row.name.toLowerCase()
+    const isArchive = ext.endsWith('.zip') || ext.endsWith('.tar') || ext.endsWith('.tar.gz') || ext.endsWith('.tgz') || ext.endsWith('.gz')
+    
     menuItems = row.type === 'directory'
       ? [
           { label: '打开', action: 'open' },
+          { label: '压缩', action: 'compress' },
           { label: '重命名', action: 'rename' },
           { label: '移动', action: 'move' },
           { label: '复制', action: 'copy' },
           { label: '权限', action: 'permissions' },
           { label: '删除', action: 'delete' }
         ]
-      : [
-          { label: '预览', action: 'preview' },
-          { label: '下载', action: 'download' },
-          { label: '编辑', action: 'edit' },
-          { label: '重命名', action: 'rename' },
-          { label: '移动', action: 'move' },
-          { label: '复制', action: 'copy' },
-          { label: '权限', action: 'permissions' },
-          { label: '删除', action: 'delete' }
-        ]
+      : isArchive
+        ? [
+            { label: '预览', action: 'preview' },
+            { label: '下载', action: 'download' },
+            { label: '解压到当前目录', action: 'extract' },
+            { label: '解压到...', action: 'extract-to' },
+            { label: '重命名', action: 'rename' },
+            { label: '移动', action: 'move' },
+            { label: '复制', action: 'copy' },
+            { label: '权限', action: 'permissions' },
+            { label: '删除', action: 'delete' }
+          ]
+        : [
+            { label: '预览', action: 'preview' },
+            { label: '下载', action: 'download' },
+            { label: '编辑', action: 'edit' },
+            { label: '压缩', action: 'compress' },
+            { label: '重命名', action: 'rename' },
+            { label: '移动', action: 'move' },
+            { label: '复制', action: 'copy' },
+            { label: '权限', action: 'permissions' },
+            { label: '删除', action: 'delete' }
+          ]
   }
 
   try {
@@ -1302,6 +1351,14 @@ const handleRemoteContextMenu = async (row: FileInfo, column: any, event: MouseE
       await deleteRemoteFile(row)
     } else if (result === 'delete-multiple') {
       await deleteRemoteFilesMultiple()
+    } else if (result === 'compress') {
+      await compressRemoteFile(row)
+    } else if (result === 'compress-multiple') {
+      await compressRemoteFilesMultiple()
+    } else if (result === 'extract') {
+      await extractRemoteFile(row, remotePath.value)
+    } else if (result === 'extract-to') {
+      await extractRemoteFileTo(row)
     }
   } catch (error) {
     // 用户取消
@@ -2307,6 +2364,239 @@ const formatSpeed = (speed: number) => {
   if (!speed) return ''
   return `${formatSize({ size: speed })}/s`
 }
+
+// ==================== 压缩/解压功能 ====================
+
+// 本地文件压缩
+const compressLocalFile = async (file: FileInfo) => {
+  try {
+    const { value: archiveName } = await ElMessageBox.prompt(
+      '请输入压缩文件名',
+      '压缩文件',
+      {
+        inputValue: `${file.name}.zip`,
+        inputPattern: /^.+\.(zip|tar|tar\.gz|tgz)$/,
+        inputErrorMessage: '请输入有效的压缩文件名 (.zip, .tar, .tar.gz, .tgz)'
+      }
+    )
+    
+    if (!archiveName) return
+    
+    const archivePath = `${localPath.value}/${archiveName}`.replace(/\\/g, '/')
+    
+    ElMessage.info('正在压缩...')
+    
+    const result = await window.electronAPI.fs.compress(file.path, archivePath)
+    
+    if (result.success) {
+      ElMessage.success('压缩完成')
+      await loadLocalDirectory()
+    } else {
+      ElMessage.error(`压缩失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(`压缩失败: ${error.message || error}`)
+    }
+  }
+}
+
+// 本地多文件压缩
+const compressLocalFilesMultiple = async () => {
+  if (selectedLocalFiles.value.length === 0) return
+  
+  try {
+    const { value: archiveName } = await ElMessageBox.prompt(
+      `将压缩 ${selectedLocalFiles.value.length} 个项目`,
+      '批量压缩',
+      {
+        inputValue: 'archive.zip',
+        inputPattern: /^.+\.(zip|tar|tar\.gz|tgz)$/,
+        inputErrorMessage: '请输入有效的压缩文件名 (.zip, .tar, .tar.gz, .tgz)'
+      }
+    )
+    
+    if (!archiveName) return
+    
+    const archivePath = `${localPath.value}/${archiveName}`.replace(/\\/g, '/')
+    const filePaths = selectedLocalFiles.value.map(f => f.path)
+    
+    ElMessage.info('正在压缩...')
+    
+    const result = await window.electronAPI.fs.compressMultiple(filePaths, archivePath)
+    
+    if (result.success) {
+      ElMessage.success('压缩完成')
+      await loadLocalDirectory()
+    } else {
+      ElMessage.error(`压缩失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(`压缩失败: ${error.message || error}`)
+    }
+  }
+}
+
+// 本地文件解压
+const extractLocalFile = async (file: FileInfo, targetDir: string) => {
+  try {
+    ElMessage.info('正在解压...')
+    
+    const result = await window.electronAPI.fs.extract(file.path, targetDir)
+    
+    if (result.success) {
+      ElMessage.success('解压完成')
+      await loadLocalDirectory()
+    } else {
+      ElMessage.error(`解压失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    ElMessage.error(`解压失败: ${error.message || error}`)
+  }
+}
+
+// 本地文件解压到指定目录
+const extractLocalFileTo = async (file: FileInfo) => {
+  try {
+    const result = await window.electronAPI.dialog.openDirectory({ properties: ['openDirectory'] })
+    if (!result) return
+    
+    await extractLocalFile(file, result as string)
+  } catch (error: any) {
+    ElMessage.error(`解压失败: ${error.message || error}`)
+  }
+}
+
+// 远程文件压缩
+const compressRemoteFile = async (file: FileInfo) => {
+  if (!currentSession.value) return
+  
+  try {
+    const { value: archiveName } = await ElMessageBox.prompt(
+      '请输入压缩文件名',
+      '压缩文件',
+      {
+        inputValue: `${file.name}.tar.gz`,
+        inputPattern: /^.+\.(zip|tar|tar\.gz|tgz|gz)$/,
+        inputErrorMessage: '请输入有效的压缩文件名 (.zip, .tar, .tar.gz, .tgz, .gz)'
+      }
+    )
+    
+    if (!archiveName) return
+    
+    const archivePath = `${remotePath.value}/${archiveName}`.replace(/\/+/g, '/')
+    
+    ElMessage.info('正在压缩...')
+    
+    const result = await window.electronAPI.sftp.compress(
+      currentSession.value.id,
+      file.path,
+      archivePath
+    )
+    
+    if (result.success) {
+      ElMessage.success('压缩完成')
+      await loadRemoteDirectory()
+    } else {
+      ElMessage.error(`压缩失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(`压缩失败: ${error.message || error}`)
+    }
+  }
+}
+
+// 远程多文件压缩
+const compressRemoteFilesMultiple = async () => {
+  if (!currentSession.value || selectedRemoteFiles.value.length === 0) return
+  
+  try {
+    const { value: archiveName } = await ElMessageBox.prompt(
+      `将压缩 ${selectedRemoteFiles.value.length} 个项目`,
+      '批量压缩',
+      {
+        inputValue: 'archive.tar.gz',
+        inputPattern: /^.+\.(zip|tar|tar\.gz|tgz|gz)$/,
+        inputErrorMessage: '请输入有效的压缩文件名 (.zip, .tar, .tar.gz, .tgz, .gz)'
+      }
+    )
+    
+    if (!archiveName) return
+    
+    const archivePath = `${remotePath.value}/${archiveName}`.replace(/\/+/g, '/')
+    const filePaths = selectedRemoteFiles.value.map(f => f.path)
+    
+    ElMessage.info('正在压缩...')
+    
+    const result = await window.electronAPI.sftp.compressMultiple(
+      currentSession.value.id,
+      filePaths,
+      archivePath
+    )
+    
+    if (result.success) {
+      ElMessage.success('压缩完成')
+      await loadRemoteDirectory()
+    } else {
+      ElMessage.error(`压缩失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(`压缩失败: ${error.message || error}`)
+    }
+  }
+}
+
+// 远程文件解压
+const extractRemoteFile = async (file: FileInfo, targetDir: string) => {
+  if (!currentSession.value) return
+  
+  try {
+    ElMessage.info('正在解压...')
+    
+    const result = await window.electronAPI.sftp.extract(
+      currentSession.value.id,
+      file.path,
+      targetDir
+    )
+    
+    if (result.success) {
+      ElMessage.success('解压完成')
+      await loadRemoteDirectory()
+    } else {
+      ElMessage.error(`解压失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    ElMessage.error(`解压失败: ${error.message || error}`)
+  }
+}
+
+// 远程文件解压到指定目录
+const extractRemoteFileTo = async (file: FileInfo) => {
+  if (!currentSession.value) return
+  
+  try {
+    const { value: targetDir } = await ElMessageBox.prompt(
+      '请输入解压目标目录',
+      '解压到',
+      {
+        inputValue: remotePath.value,
+        inputPattern: /^\/.*$/,
+        inputErrorMessage: '请输入有效的目录路径'
+      }
+    )
+    
+    if (!targetDir) return
+    
+    await extractRemoteFile(file, targetDir)
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(`解压失败: ${error.message || error}`)
+    }
+  }
+}
 </script>
 
 
@@ -2363,7 +2653,18 @@ const formatSpeed = (speed: number) => {
 .header-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
+}
+
+.header-title .help-icon {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  cursor: help;
+  transition: color 0.2s;
+}
+
+.header-title .help-icon:hover {
+  color: var(--primary-color);
 }
 
 .browser-header h3 {
@@ -2471,15 +2772,51 @@ const formatSpeed = (speed: number) => {
   gap: 16px;
   background: var(--bg-tertiary);
   border-right: 1px solid var(--border-color);
-  border-left: 1px solid var(--border-color); /* Double border for separation */
+  border-left: 1px solid var(--border-color);
   z-index: 20;
   box-shadow: 0 0 10px rgba(0,0,0,0.2);
+  padding: 0 12px;
 }
 
-.transfer-controls .el-button {
-  width: 32px;
-  height: 32px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+.transfer-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.transfer-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.transfer-btn .el-icon {
+  font-size: 20px;
+  color: white;
+}
+
+.upload-btn {
+  background: var(--primary-color);
+}
+
+.upload-btn:hover:not(:disabled) {
+  background: var(--primary-hover);
+  transform: scale(1.05);
+}
+
+.download-btn {
+  background: var(--success-color);
+}
+
+.download-btn:hover:not(:disabled) {
+  background: #16a34a;
+  transform: scale(1.05);
 }
 
 /* File List Area */
@@ -2487,6 +2824,16 @@ const formatSpeed = (speed: number) => {
   flex: 1;
   position: relative;
   overflow: auto; /* Internal scroll */
+}
+
+/* VirtualTable 选中状态样式 */
+.file-list :deep(.table-row.selected) {
+  background: rgba(14, 165, 233, 0.2) !important;
+  border-left: 3px solid var(--primary-color);
+}
+
+.file-list :deep(.table-row.selected:hover) {
+  background: rgba(14, 165, 233, 0.25) !important;
 }
 
 /* Table Enhancements */

@@ -79,7 +79,7 @@
                     <span v-if="getRegionFlag(item.region)" v-html="getRegionFlag(item.region)" class="region-flag"></span>
                     {{ item.region || '未知地区' }}
                   </span>
-                  <span>{{ item.count }} 台</span>
+                  <span>{{ item.count }} 次</span>
                 </div>
                 <div class="bar-track">
                   <div 
@@ -107,7 +107,7 @@
               >
                 <div class="provider-header">
                   <span class="provider-name">{{ item.provider }}</span>
-                  <span class="provider-count">{{ item.count }} 台</span>
+                  <span class="provider-count">{{ item.count }} 次</span>
                 </div>
                 <div class="provider-cost">
                   月度费用: {{ formatCurrency(item.cost) }}
@@ -300,7 +300,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="usageCount" label="连接数" width="100" sortable />
+          <el-table-column prop="usageCount" label="连接次" width="100" sortable />
           <el-table-column prop="lastConnected" label="最后活跃" width="180">
             <template #default="{ row }">
               {{ formatDate(row.lastConnected) }}
@@ -548,9 +548,9 @@ const maxUsage = computed(() => {
 
 const detectProvider = (session: any): string => {
   const keywords: Record<string, string[]> = {
-    '阿里云 (Aliyun)': ['aliyun', '阿里云', 'ali'],
-    '腾讯云 (Tencent)': ['tencent', 'qcloud', '腾讯云'],
-    '华为云 (Huawei)': ['huawei', '华为云', 'hwcloud'],
+    '阿里云(Aliyun)': ['aliyun', '阿里云', 'ali'],
+    '腾讯云(Tencent)': ['tencent', 'qcloud', '腾讯云'],
+    '华为云(Huawei)': ['huawei', '华为云', 'hwcloud'],
     'AWS': ['aws', 'amazon'],
     'Azure': ['azure', 'microsoft'],
     'Google Cloud': ['gcp', 'google cloud'],
@@ -881,7 +881,7 @@ watch(timeRange, () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  font-size: var(--text-3xl);
   color: white;
 }
 

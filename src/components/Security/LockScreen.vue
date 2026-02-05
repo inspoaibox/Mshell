@@ -92,10 +92,7 @@ const lockoutRemaining = ref(0)
 let lockoutTimer: NodeJS.Timeout | null = null
 
 onMounted(() => {
-  // 设置锁定时间
   lockTime.value = new Date().toLocaleString('zh-CN')
-  
-  // 自动聚焦密码输入框
   setTimeout(() => {
     passwordInput.value?.focus()
   }, 300)
@@ -114,19 +111,15 @@ const handleUnlock = async () => {
   unlocking.value = true
   
   try {
-    // 调用后端的 unlock 方法，它会处理密码验证、失败次数跟踪和锁定逻辑
     const result = await window.electronAPI.sessionLock?.unlock?.(password.value)
     
     if (result?.success) {
       ElMessage.success('解锁成功')
       emit('unlock')
     } else {
-      // 显示后端返回的错误信息
       errorMessage.value = result?.error || '密码错误'
       
-      // 检查是否包含锁定信息
       if (result?.error?.includes('locked out') || result?.error?.includes('try again in')) {
-        // 从错误信息中提取剩余分钟数
         const match = result.error.match(/(\d+)\s*minute/)
         if (match) {
           const minutes = parseInt(match[1])
@@ -144,7 +137,6 @@ const handleUnlock = async () => {
           }, 1000)
         }
       } else {
-        // 从错误信息中提取剩余尝试次数
         const match = result?.error?.match(/(\d+)\s*attempts?\s*remaining/)
         if (match) {
           remainingAttempts.value = parseInt(match[1])
@@ -241,7 +233,7 @@ const handleUnlock = async () => {
 
 .lock-title {
   margin: 0 0 12px 0;
-  font-size: 32px;
+  font-size: var(--text-4xl);
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.5px;
@@ -249,7 +241,7 @@ const handleUnlock = async () => {
 
 .lock-subtitle {
   margin: 0 0 40px 0;
-  font-size: 16px;
+  font-size: var(--text-lg);
   color: var(--text-secondary);
   font-weight: 500;
 }
@@ -283,7 +275,7 @@ const handleUnlock = async () => {
 
 .lock-input :deep(.el-input__inner) {
   color: var(--text-primary);
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 500;
 }
 
@@ -295,7 +287,6 @@ const handleUnlock = async () => {
   color: var(--text-secondary);
 }
 
-/* 密码显示/隐藏按钮 */
 .lock-input :deep(.el-input__suffix) {
   color: var(--text-secondary);
 }
@@ -312,7 +303,7 @@ const handleUnlock = async () => {
 .unlock-button {
   width: 100%;
   height: 48px;
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 600;
   border-radius: 12px;
   background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
@@ -355,13 +346,13 @@ const handleUnlock = async () => {
 }
 
 .info-label {
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--text-secondary);
   font-weight: 500;
 }
 
 .info-value {
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--text-primary);
   font-weight: 600;
 }
@@ -370,18 +361,17 @@ const handleUnlock = async () => {
   color: var(--warning-color);
 }
 
-/* 响应式 */
 @media (max-width: 480px) {
   .lock-content {
     padding: 40px 32px;
   }
   
   .lock-title {
-    font-size: 28px;
+    font-size: var(--text-4xl);
   }
   
   .lock-subtitle {
-    font-size: 14px;
+    font-size: var(--text-base);
   }
 }
 </style>

@@ -407,7 +407,7 @@ const getStatusTagType = (status: string) => {
 
 .panel-header h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
@@ -424,7 +424,7 @@ const getStatusTagType = (status: string) => {
 
 .form-help {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-tertiary);
   line-height: 1.5;
 }

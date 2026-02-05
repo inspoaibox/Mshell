@@ -44,7 +44,7 @@ const handleDragEnter = (event: DragEvent) => {
 }
 
 const handleDragLeave = (event: DragEvent) => {
-  // 只有当离开整个组件时才设置为 false
+  // 只有当离开整个组件时才设置�?false
   const target = event.target as HTMLElement
   const currentTarget = event.currentTarget as HTMLElement
   
@@ -100,12 +100,12 @@ const handleDrop = (event: DragEvent) => {
 }
 
 .drop-icon {
-  font-size: 48px;
+  font-size: var(--text-5xl);
   opacity: 0.8;
 }
 
 .drop-text {
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--primary-color);
   background: var(--bg-primary);

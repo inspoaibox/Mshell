@@ -117,7 +117,7 @@
               style="margin-bottom: 16px"
             >
               <template #title>
-                快捷键: Ctrl+Alt+L 快速锁定会话
+                快捷键 Ctrl+Alt+L 快速锁定会话
               </template>
             </el-alert>
 
@@ -201,7 +201,7 @@
                   <el-option label="自动" value="auto" />
                   <el-option label="WebGL (推荐)" value="webgl" />
                   <el-option label="Canvas" value="canvas" />
-                  <el-option label="DOM (慢, 兼容性好)" value="dom" />
+                  <el-option label="DOM (慢 兼容性好)" value="dom" />
                 </el-select>
               </el-form-item>
               <el-form-item label="滚动行数">
@@ -329,6 +329,18 @@
             <el-form label-position="left">
               <el-form-item label="启用自动备份">
                 <el-switch v-model="backupConfig.enabled" @change="saveBackupConfig" />
+              </el-form-item>
+              <el-form-item label="自动备份密码">
+                <el-input 
+                  v-model="backupConfig.autoBackupPassword" 
+                  type="password"
+                  placeholder="设置自动备份的加密密码"
+                  show-password
+                  :disabled="!backupConfig.enabled"
+                  @change="saveBackupConfig"
+                  style="max-width: 300px"
+                />
+                <span class="form-hint" style="margin-left: 8px;">恢复自动备份时需要此密码</span>
               </el-form-item>
               <el-form-item label="备份目录">
                 <div style="display: flex; gap: 8px; flex: 1;">
@@ -942,7 +954,8 @@ const backupConfig = ref({
   interval: 24,
   maxBackups: 10,
   backupDir: '',
-  lastBackup: undefined as string | undefined
+  lastBackup: undefined as string | undefined,
+  autoBackupPassword: '' // 自动备份密码
 })
 
 const backupList = ref<any[]>([])
@@ -1086,6 +1099,12 @@ const loadBackupConfig = async () => {
 
 const saveBackupConfig = async () => {
   try {
+    // 如果启用了自动备份但没有设置密码，提示用户
+    if (backupConfig.value.enabled && !backupConfig.value.autoBackupPassword) {
+      ElMessage.warning('请设置自动备份密码')
+      return
+    }
+
     // 使用toRaw获取原始对象，避免Vue响应式代理导致的序列化问题
     const configToSave = toRaw(backupConfig.value)
     
@@ -1895,7 +1914,7 @@ const testShortcuts = () => {
       <p><strong>快捷键系统状态：</strong></p>
       <ul style="list-style: none; padding-left: 0; margin-bottom: 16px;">
         <li>✓ 已注册快捷键数量: ${registeredCount} / ${expectedCount}</li>
-        <li>✓ 快捷键管理器: 已启用</li>
+        <li>✓ 快捷键管理器: 已启动</li>
         <li>✓ 事件监听器: 已激活</li>
       </ul>
   `
@@ -1922,7 +1941,7 @@ const testShortcuts = () => {
         <li>✓ Ctrl+Alt+L - 锁定会话</li>
         <li>✓ Ctrl+1~9 - 切换到指定标签</li>
       </ul>
-      <p style="margin-top: 16px; color: #666; font-size: 13px;">
+      <p style="margin-top: 16px; color: #666; font-size: var(--text-md);">
         <strong>调试提示：</strong><br/>
         1. 关闭此对话框后，尝试按下快捷键<br/>
         2. 打开浏览器控制台（F12）查看日志<br/>
@@ -2351,7 +2370,7 @@ const testShortcuts = () => {
 }
 
 .status-text {
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
