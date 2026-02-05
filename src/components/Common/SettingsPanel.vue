@@ -1474,14 +1474,17 @@ const checkForUpdates = async () => {
   
   try {
     const result = await window.electronAPI.update?.check()
+    console.log('[SettingsPanel] Check update result:', result)
     if (!result?.success) {
       updateState.value.status = 'error'
       updateState.value.error = result?.error || '检查更新失败'
+      updateState.value.checking = false
     }
+    // 如果成功，等待事件回调更新状态
   } catch (error: any) {
+    console.error('[SettingsPanel] Check update error:', error)
     updateState.value.status = 'error'
     updateState.value.error = error.message || '检查更新失败'
-  } finally {
     updateState.value.checking = false
   }
 }
@@ -1515,13 +1518,20 @@ const installUpdate = async () => {
 }
 
 const setupUpdateListeners = () => {
-  if (!window.electronAPI.update) return
+  if (!window.electronAPI.update) {
+    console.warn('[SettingsPanel] Update API not available')
+    return
+  }
+  
+  console.log('[SettingsPanel] Setting up update listeners')
   
   window.electronAPI.update.onChecking(() => {
+    console.log('[SettingsPanel] Update: checking')
     updateState.value.checking = true
   })
   
   window.electronAPI.update.onAvailable((info: any) => {
+    console.log('[SettingsPanel] Update: available', info)
     updateState.value.checking = false
     updateState.value.status = 'available'
     updateState.value.newVersion = info.version
@@ -1529,11 +1539,14 @@ const setupUpdateListeners = () => {
   })
   
   window.electronAPI.update.onNotAvailable(() => {
+    console.log('[SettingsPanel] Update: not available (up-to-date)')
     updateState.value.checking = false
     updateState.value.status = 'up-to-date'
+    ElMessage.info('已是最新版本')
   })
   
   window.electronAPI.update.onProgress((progress: any) => {
+    console.log('[SettingsPanel] Update: progress', progress.percent)
     updateState.value.status = 'downloading'
     updateState.value.progress = Math.round(progress.percent)
     updateState.value.bytesPerSecond = progress.bytesPerSecond
@@ -1542,12 +1555,15 @@ const setupUpdateListeners = () => {
   })
   
   window.electronAPI.update.onDownloaded((info: any) => {
+    console.log('[SettingsPanel] Update: downloaded', info)
     updateState.value.downloading = false
     updateState.value.status = 'downloaded'
     updateState.value.newVersion = info.version
+    ElMessage.success('更新已下载完成，可以安装')
   })
   
   window.electronAPI.update.onError((error: any) => {
+    console.error('[SettingsPanel] Update: error', error)
     updateState.value.checking = false
     updateState.value.downloading = false
     updateState.value.status = 'error'
@@ -2258,10 +2274,11 @@ const testShortcuts = () => {
 }
 
 .settings-section :deep(.el-form-item__label) {
-  width: 120px;
+  width: 160px;
   flex-shrink: 0;
   text-align: left;
   padding-right: var(--spacing-md);
+  white-space: nowrap;
 }
 
 .settings-section :deep(.el-form-item__content) {

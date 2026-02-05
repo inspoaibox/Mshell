@@ -1,6 +1,5 @@
 import { autoUpdater, UpdateInfo, ProgressInfo } from 'electron-updater'
 import { BrowserWindow, ipcMain, app } from 'electron'
-import { logger } from '../utils/logger'
 
 /**
  * 应用更新管理器
@@ -21,18 +20,18 @@ export class UpdateManager {
     autoUpdater.autoDownload = false // 禁用自动下载，让用户选择
     autoUpdater.autoInstallOnAppQuit = true // 退出时自动安装
 
-    // 设置日志
+    // 使用 console 作为日志，electron-updater 需要标准的 log 接口
     autoUpdater.logger = {
-      info: (message: string) => logger.info('[AutoUpdater]', message),
-      warn: (message: string) => logger.warn('[AutoUpdater]', message),
-      error: (message: string) => logger.error('[AutoUpdater]', message),
-      debug: (message: string) => logger.debug('[AutoUpdater]', message)
+      info: (message: any) => console.log('[AutoUpdater]', message),
+      warn: (message: any) => console.warn('[AutoUpdater]', message),
+      error: (message: any) => console.error('[AutoUpdater]', message),
+      debug: (message: any) => console.log('[AutoUpdater:debug]', message)
     }
 
     this.setupEventListeners()
     this.registerIpcHandlers()
 
-    logger.info('[UpdateManager] Initialized')
+    console.log('[UpdateManager] Initialized')
   }
 
   /**
@@ -41,13 +40,13 @@ export class UpdateManager {
   private setupEventListeners() {
     // 正在检查更新
     autoUpdater.on('checking-for-update', () => {
-      logger.info('[UpdateManager] Checking for updates...')
+      console.log('[UpdateManager] Checking for updates...')
       this.sendToRenderer('update:checking')
     })
 
     // 有可用更新
     autoUpdater.on('update-available', (info: UpdateInfo) => {
-      logger.info('[UpdateManager] Update available:', info.version)
+      console.log('[UpdateManager] Update available:', info.version)
       this.sendToRenderer('update:available', {
         version: info.version,
         releaseDate: info.releaseDate,
@@ -57,7 +56,7 @@ export class UpdateManager {
 
     // 没有可用更新
     autoUpdater.on('update-not-available', (info: UpdateInfo) => {
-      logger.info('[UpdateManager] No update available, current version:', info.version)
+      console.log('[UpdateManager] No update available, current version:', info.version)
       this.sendToRenderer('update:not-available', {
         version: info.version
       })
@@ -65,7 +64,7 @@ export class UpdateManager {
 
     // 下载进度
     autoUpdater.on('download-progress', (progress: ProgressInfo) => {
-      logger.debug('[UpdateManager] Download progress:', progress.percent.toFixed(2) + '%')
+      console.log('[UpdateManager] Download progress:', progress.percent.toFixed(2) + '%')
       this.sendToRenderer('update:progress', {
         percent: progress.percent,
         bytesPerSecond: progress.bytesPerSecond,
@@ -76,7 +75,7 @@ export class UpdateManager {
 
     // 下载完成
     autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
-      logger.info('[UpdateManager] Update downloaded:', info.version)
+      console.log('[UpdateManager] Update downloaded:', info.version)
       this.sendToRenderer('update:downloaded', {
         version: info.version,
         releaseNotes: info.releaseNotes
@@ -85,7 +84,7 @@ export class UpdateManager {
 
     // 更新错误
     autoUpdater.on('error', (error: Error) => {
-      logger.error('[UpdateManager] Update error:', error.message)
+      console.error('[UpdateManager] Update error:', error.message)
       this.sendToRenderer('update:error', {
         message: error.message
       })
@@ -136,7 +135,7 @@ export class UpdateManager {
       await autoUpdater.checkForUpdates()
       return { success: true }
     } catch (error: any) {
-      logger.error('[UpdateManager] Check for updates failed:', error.message)
+      console.error('[UpdateManager] Check for updates failed:', error.message)
       return { success: false, error: error.message }
     } finally {
       this.isChecking = false
@@ -151,7 +150,7 @@ export class UpdateManager {
       await autoUpdater.downloadUpdate()
       return { success: true }
     } catch (error: any) {
-      logger.error('[UpdateManager] Download update failed:', error.message)
+      console.error('[UpdateManager] Download update failed:', error.message)
       return { success: false, error: error.message }
     }
   }
@@ -164,7 +163,7 @@ export class UpdateManager {
       autoUpdater.quitAndInstall(false, true)
       return { success: true }
     } catch (error: any) {
-      logger.error('[UpdateManager] Install update failed:', error.message)
+      console.error('[UpdateManager] Install update failed:', error.message)
       return { success: false }
     }
   }

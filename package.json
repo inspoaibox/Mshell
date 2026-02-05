@@ -1,6 +1,6 @@
 {
   "name": "mshell",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MShell - Windows SSH Client",
   "main": "dist-electron/main.js",
   "author": "MShell Team",

@@ -117,6 +117,7 @@ h5, h6 { font-size: var(--text-sm); }
   background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
   border: none;
   box-shadow: var(--shadow-sm);
+  color: #ffffff !important;
 }
 
 .el-button--primary:hover,
@@ -124,6 +125,7 @@ h5, h6 { font-size: var(--text-sm); }
   background: linear-gradient(135deg, var(--primary-hover), var(--accent-hover));
   transform: translateY(-1px);
   box-shadow: var(--shadow-glow);
+  color: #ffffff !important;
 }
 
 .el-button--primary:active {
@@ -286,17 +288,28 @@ h5, h6 { font-size: var(--text-sm); }
 
 /* Switch 开关优化 */
 .el-switch {
-  --el-switch-off-color: var(--bg-elevated);
+  --el-switch-off-color: var(--bg-tertiary);
 }
 
 .el-switch__core {
-  border: 1px solid var(--border-strong);
-  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong) !important;
+  background: var(--bg-tertiary) !important;
 }
 
 .el-switch.is-checked .el-switch__core {
-  border-color: var(--primary-color);
-  background: var(--primary-color);
+  border-color: var(--primary-color) !important;
+  background: var(--primary-color) !important;
+}
+
+/* 浅色主题下 switch 关闭状态使用更深的背景色 */
+:root.light-theme .el-switch__core {
+  background: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
+}
+
+:root.light-theme .el-switch.is-checked .el-switch__core {
+  background: var(--primary-color) !important;
+  border-color: var(--primary-color) !important;
 }
 
 /* Slider 滑块优化 */
