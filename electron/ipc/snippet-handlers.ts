@@ -249,17 +249,38 @@ export function registerSnippetHandlers() {
       let updated = 0
       
       for (const snippet of importData.snippets) {
+        // 验证必需字段
+        if (!snippet.name || !snippet.command) {
+          continue
+        }
+        
         // 检查是否存在相同片段（通过 ID 或 名称 判断）
         const existing = currentSnippets.find(s =>
           s.id === snippet.id || s.name === snippet.name
         )
         
         if (existing) {
-          const { id, ...updates } = snippet
-          await snippetManager.update(existing.id, updates)
+          // 更新现有片段
+          await snippetManager.update(existing.id, {
+            command: snippet.command,
+            description: snippet.description || '',
+            category: snippet.category || '',
+            tags: snippet.tags || [],
+            variables: snippet.variables || [],
+            shortcut: snippet.shortcut
+          })
           updated++
         } else {
-          await snippetManager.create(snippet)
+          // 创建新片段
+          await snippetManager.create({
+            name: snippet.name,
+            command: snippet.command,
+            description: snippet.description || '',
+            category: snippet.category || '',
+            tags: snippet.tags || [],
+            variables: snippet.variables || [],
+            shortcut: snippet.shortcut
+          })
           imported++
         }
       }

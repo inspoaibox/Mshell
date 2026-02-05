@@ -65,6 +65,7 @@
             filterable
             style="width: 100%"
             @focus="loadSSHKeys"
+            @change="handleSSHKeyChange"
           >
             <el-option
               v-for="key in sshKeys"
@@ -481,7 +482,7 @@ const getDefaultForm = () => ({
   rdpCustomWidth: 1920,
   rdpCustomHeight: 1080,
   rdpAdmin: false,
-  rdpDrives: true,
+  rdpDrives: false,
   rdpPrinters: false,
   rdpClipboard: true,
   rdpAudio: 'local' as 'local' | 'remote' | 'none',
@@ -627,7 +628,7 @@ watch(
         form.username = props.session.username || ''
         form.authType = props.session.authType || 'password'
         form.password = props.session.password || ''
-        form.privateKeyId = (props.session as any).privateKeyId || ''
+        form.privateKeyId = props.session.privateKeyId || ''
         form.privateKeyPath = props.session.privateKeyPath || ''
         form.passphrase = props.session.passphrase || ''
         form.groupId = props.session.group || ''
@@ -658,7 +659,7 @@ watch(
           form.rdpResolution = 'auto'
         }
         form.rdpAdmin = rdpOpts.admin || false
-        form.rdpDrives = rdpOpts.drives !== false
+        form.rdpDrives = rdpOpts.drives === true
         form.rdpPrinters = rdpOpts.printers || false
         form.rdpClipboard = rdpOpts.clipboard !== false
         form.rdpAudio = rdpOpts.audio || 'local'
@@ -727,6 +728,13 @@ const handleSelectLocalKeyFile = async () => {
   }
 }
 
+// 当选择 SSH 密钥时，清除本地文件路径
+const handleSSHKeyChange = (keyId: string) => {
+  if (keyId) {
+    form.privateKeyPath = '' // 清除本地文件路径
+  }
+}
+
 // 处理跳板机配置更新
 const handleProxyJumpUpdate = (config: ProxyJumpConfigType) => {
   form.proxyJump = config.enabled ? config : undefined
@@ -768,7 +776,7 @@ const handleSave = async () => {
         } else {
           // 优先使用SSH密钥ID，其次使用本地文件路径
           if (form.privateKeyId) {
-            (sessionData as any).privateKeyId = form.privateKeyId
+            sessionData.privateKeyId = form.privateKeyId
           } else if (form.privateKeyPath) {
             sessionData.privateKeyPath = form.privateKeyPath
           }

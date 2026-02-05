@@ -50,8 +50,8 @@ export class SessionLockManager extends EventEmitter {
     this.config = this.loadConfig()
     this.passwordHash = this.loadPasswordHash()
 
-    // 如果启用了密码保护且有密码，启动时自动锁定
-    if (this.config.enabled && this.passwordHash) {
+    // 如果设置了密码，启动时自动锁定（密码保护的核心功能）
+    if (this.passwordHash) {
       this.isLocked = true
       console.log('[SessionLockManager] Password protection enabled, locking on startup')
     }

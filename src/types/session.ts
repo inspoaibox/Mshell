@@ -11,6 +11,7 @@ export interface SessionConfig {
   username: string
   authType: 'password' | 'privateKey'
   password?: string
+  privateKeyId?: string // SSH密钥管理器中的密钥ID
   privateKeyPath?: string
   privateKey?: string // For runtime connection use
   passphrase?: string

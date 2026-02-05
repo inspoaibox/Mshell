@@ -799,12 +799,16 @@ const connectSession = async (session: SessionConfig) => {
     const settings = await window.electronAPI.settings.get()
     const sshSettings = settings?.ssh || {}
     
+    // 连接到 SSH
+    // 注意：privateKeyId 会在后端 ssh-handlers.ts 中处理
+    // 优先使用 privateKeyId，如果没有则使用 privateKeyPath 或 privateKey
     const sshResult = await window.electronAPI.ssh.connect(session.id, {
       host: session.host,
       port: session.port,
       username: session.username,
       password: session.password,
-      privateKey: session.privateKey,
+      privateKey: session.privateKeyId ? undefined : (session.privateKeyPath || session.privateKey),
+      privateKeyId: session.privateKeyId,
       passphrase: session.passphrase,
       // 应用 SSH 设置
       readyTimeout: (sshSettings.timeout || 30) * 1000,

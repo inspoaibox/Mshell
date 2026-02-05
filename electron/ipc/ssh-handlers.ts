@@ -37,14 +37,32 @@ export function registerSSHHandlers() {
   // 连接 SSH
   ipcMain.handle('ssh:connect', async (_event, id: string, options: any) => {
     try {
-      // 如果提供了privateKey路径，读取文件内容
+      // 处理私钥：可能是文件路径、私钥内容或 privateKeyId
       let privateKeyBuffer: Buffer | undefined
-      if (options.privateKey && typeof options.privateKey === 'string') {
+      
+      // 优先处理 privateKeyId（从密钥管理器读取）
+      if (options.privateKeyId) {
         try {
-          privateKeyBuffer = await fs.readFile(options.privateKey)
+          const { sshKeyManager } = await import('../managers/SSHKeyManager')
+          const privateKeyContent = sshKeyManager.readPrivateKey(options.privateKeyId)
+          privateKeyBuffer = Buffer.from(privateKeyContent)
         } catch (error: any) {
-          logger.logError('connection', `Failed to read private key file: ${options.privateKey}`, error)
-          return { success: false, error: `无法读取密钥文件: ${error.message}` }
+          logger.logError('connection', `Failed to read private key from key manager: ${options.privateKeyId}`, error)
+          return { success: false, error: `无法读取SSH密钥: ${error.message}` }
+        }
+      } else if (options.privateKey && typeof options.privateKey === 'string') {
+        // 判断是私钥内容还是文件路径
+        if (options.privateKey.includes('PRIVATE KEY') || options.privateKey.includes('OPENSSH PRIVATE KEY')) {
+          // 是私钥内容
+          privateKeyBuffer = Buffer.from(options.privateKey)
+        } else {
+          // 是文件路径，读取文件内容
+          try {
+            privateKeyBuffer = await fs.readFile(options.privateKey)
+          } catch (error: any) {
+            logger.logError('connection', `Failed to read private key file: ${options.privateKey}`, error)
+            return { success: false, error: `无法读取密钥文件: ${error.message}` }
+          }
         }
       }
 

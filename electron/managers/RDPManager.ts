@@ -105,9 +105,11 @@ class RDPManager extends EventEmitter {
       lines.push(`session bpp:i:${depthMap[config.colorDepth] || 32}`)
     }
 
-    // 资源重定向
-    if (config.drives !== false) {
+    // 资源重定向 - 默认禁用驱动器重定向以保护隐私
+    if (config.drives === true) {
       lines.push('drivestoredirect:s:*')
+    } else {
+      lines.push('drivestoredirect:s:')
     }
     
     if (config.printers !== false) {

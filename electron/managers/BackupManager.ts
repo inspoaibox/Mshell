@@ -217,7 +217,7 @@ export class BackupManager {
     try {
       // 收集所有数据
       const backupData: BackupData = {
-        version: '2.3.0', // 升级版本号以支持更多数据类型
+        version: '0.2.0', // 升级版本号以支持更多数据类型
         timestamp: new Date().toISOString(),
         sessions: sessionManager.getAllSessions(),
         sessionGroups: sessionManager.getAllGroups(),

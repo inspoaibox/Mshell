@@ -192,12 +192,11 @@ const handleUnlock = async () => {
 .lock-content {
   position: relative;
   z-index: 1;
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--bg-elevated);
   border-radius: 24px;
   padding: 56px 48px;
-  box-shadow: 
-    0 20px 60px rgba(0, 0, 0, 0.3),
-    0 0 0 1px rgba(255, 255, 255, 0.1);
+  box-shadow: var(--shadow-xl);
+  border: 1px solid var(--border-medium);
   max-width: 440px;
   width: 90%;
   text-align: center;
@@ -219,24 +218,24 @@ const handleUnlock = async () => {
   width: 96px;
   height: 96px;
   margin: 0 auto 32px;
-  background: linear-gradient(135deg, #0ea5e9, #6366f1);
+  background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
-  box-shadow: 0 8px 24px rgba(14, 165, 233, 0.4);
+  box-shadow: var(--shadow-glow);
   animation: pulse 2s ease-in-out infinite;
 }
 
 @keyframes pulse {
   0%, 100% {
     transform: scale(1);
-    box-shadow: 0 8px 24px rgba(14, 165, 233, 0.4);
+    box-shadow: var(--shadow-glow);
   }
   50% {
     transform: scale(1.05);
-    box-shadow: 0 12px 32px rgba(14, 165, 233, 0.6);
+    box-shadow: 0 12px 32px rgba(14, 165, 233, 0.5);
   }
 }
 
@@ -244,14 +243,14 @@ const handleUnlock = async () => {
   margin: 0 0 12px 0;
   font-size: 32px;
   font-weight: 700;
-  color: #1e293b;
+  color: var(--text-primary);
   letter-spacing: -0.5px;
 }
 
 .lock-subtitle {
   margin: 0 0 40px 0;
   font-size: 16px;
-  color: #64748b;
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
@@ -264,8 +263,8 @@ const handleUnlock = async () => {
 }
 
 .lock-input :deep(.el-input__wrapper) {
-  background: #f8fafc;
-  border: 2px solid #e2e8f0;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border-color);
   box-shadow: none;
   padding: 12px 16px;
   border-radius: 12px;
@@ -273,38 +272,41 @@ const handleUnlock = async () => {
 }
 
 .lock-input :deep(.el-input__wrapper:hover) {
-  border-color: #cbd5e1;
+  border-color: var(--border-strong);
 }
 
 .lock-input :deep(.el-input__wrapper.is-focus) {
-  border-color: #0ea5e9;
-  background: white;
-  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.1);
+  border-color: var(--primary-color);
+  background: var(--bg-secondary);
+  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.15);
 }
 
 .lock-input :deep(.el-input__inner) {
-  color: #1e293b;
+  color: var(--text-primary);
   font-size: 16px;
   font-weight: 500;
 }
 
 .lock-input :deep(.el-input__inner::placeholder) {
-  color: #94a3b8;
+  color: var(--text-tertiary);
 }
 
 .lock-input :deep(.el-input__prefix) {
-  color: #64748b;
+  color: var(--text-secondary);
+}
+
+/* 密码显示/隐藏按钮 */
+.lock-input :deep(.el-input__suffix) {
+  color: var(--text-secondary);
+}
+
+.lock-input :deep(.el-input__password) {
+  color: var(--text-secondary);
 }
 
 .lock-alert {
   margin-bottom: 20px;
   border-radius: 12px;
-}
-
-.lock-alert :deep(.el-alert__title) {
-  color: #1e293b;
-  font-weight: 500;
-  font-size: 14px;
 }
 
 .unlock-button {
@@ -313,7 +315,7 @@ const handleUnlock = async () => {
   font-size: 16px;
   font-weight: 600;
   border-radius: 12px;
-  background: linear-gradient(135deg, #0ea5e9, #6366f1);
+  background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
   border: none;
   box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4);
   transition: all 0.3s;
@@ -329,15 +331,15 @@ const handleUnlock = async () => {
 }
 
 .unlock-button:disabled {
-  background: #e2e8f0;
-  color: #94a3b8;
+  background: var(--bg-tertiary);
+  color: var(--text-disabled);
   box-shadow: none;
   cursor: not-allowed;
 }
 
 .lock-info {
   padding-top: 28px;
-  border-top: 2px solid #f1f5f9;
+  border-top: 2px solid var(--border-color);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -348,24 +350,24 @@ const handleUnlock = async () => {
   justify-content: space-between;
   align-items: center;
   padding: 8px 16px;
-  background: #f8fafc;
+  background: var(--bg-tertiary);
   border-radius: 8px;
 }
 
 .info-label {
   font-size: 13px;
-  color: #64748b;
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
 .info-value {
   font-size: 14px;
-  color: #1e293b;
+  color: var(--text-primary);
   font-weight: 600;
 }
 
 .attempts-warning {
-  color: #f59e0b;
+  color: var(--warning-color);
 }
 
 /* 响应式 */

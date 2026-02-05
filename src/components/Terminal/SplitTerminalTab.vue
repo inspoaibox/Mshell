@@ -40,12 +40,15 @@ const handleTerminalCreate = async (terminalId: string) => {
     const sshSettings = settings?.ssh || {}
     
     // 连接到 SSH（每个面板使用独立的连接）
+    // 注意：privateKeyId 会在后端 ssh-handlers.ts 中处理
+    // 优先使用 privateKeyId，如果没有则使用 privateKeyPath 或 privateKey
     const result = await window.electronAPI.ssh.connect(terminalId, {
       host: props.session.host,
       port: props.session.port,
       username: props.session.username,
       password: props.session.password,
-      privateKey: props.session.privateKeyPath || props.session.privateKey,
+      privateKey: props.session.privateKeyId ? undefined : (props.session.privateKeyPath || props.session.privateKey),
+      privateKeyId: props.session.privateKeyId,
       passphrase: props.session.passphrase,
       // 应用 SSH 设置
       readyTimeout: (sshSettings.timeout || 30) * 1000,

@@ -29,7 +29,7 @@
                   circle 
                 />
               </el-tooltip>
-              <el-button type="primary" size="small" :icon="Plus" @click="appStore.showSessionForm = true" circle />
+              <el-button type="primary" size="small" :icon="Plus" @click="appStore.openSessionForm()" circle />
               <el-tooltip content="批量导入" placement="bottom">
                 <el-button size="small" :icon="Upload" @click="showBatchImport = true" circle />
               </el-tooltip>
