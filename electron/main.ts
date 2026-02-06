@@ -22,9 +22,11 @@ import { registerWorkflowHandlers } from './ipc/workflow-handlers'
 import { registerAIHandlers } from './ipc/ai-handlers'
 import { registerRDPHandlers } from './ipc/rdp-handlers'
 import { registerVNCHandlers } from './ipc/vnc-handlers'
+import { registerSyncHandlers } from './ipc/sync-handlers'
 import { crashRecoveryManager } from './utils/crash-recovery'
 import { logger } from './utils/logger'
 import { backupManager } from './managers/BackupManager'
+import { syncManager } from './managers/SyncManager'
 import { appSettingsManager } from './utils/app-settings'
 import { sessionLockManager } from './managers/SessionLockManager'
 import { aiManager } from './managers/AIManager'
@@ -59,6 +61,7 @@ registerWorkflowHandlers()
 registerAIHandlers(ipcMain, aiManager)
 registerRDPHandlers()
 registerVNCHandlers()
+registerSyncHandlers()
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -258,6 +261,9 @@ app.whenReady().then(async () => {
   // 初始化备份管理器
   await backupManager.initialize()
 
+  // 初始化同步管理器
+  await syncManager.initialize()
+
   // 初始化 AI 管理器
   await aiManager.initialize()
 
@@ -306,6 +312,7 @@ app.on('before-quit', () => {
   isQuitting = true
   crashRecoveryManager.stop()
   backupManager.cleanup()
+  syncManager.cleanup()
   aiManager.cleanup()
 })
 

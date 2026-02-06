@@ -640,6 +640,297 @@
           </div>
         </el-tab-pane>
 
+        <!-- 云同步 -->
+        <el-tab-pane label="同步" name="sync">
+          <el-tabs v-model="syncActiveTab" class="sync-tabs">
+            <!-- GitHub 同步 -->
+            <el-tab-pane label="GitHub" name="github">
+              <div class="settings-section">
+                <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
+                  <template #title>
+                    通过 GitHub Gist 同步数据到云端，支持多设备同步
+                  </template>
+                </el-alert>
+                
+                <el-form label-position="left">
+                  <!-- 未连接状态 -->
+                  <template v-if="!syncConfig.github?.token">
+                    <el-form-item label="GitHub Token">
+                      <div style="display: flex; gap: 8px; flex: 1;">
+                        <el-input 
+                          v-model="githubTokenInput" 
+                          type="password"
+                          placeholder="输入 GitHub Personal Access Token"
+                          show-password
+                          style="flex: 1;"
+                        />
+                        <el-button 
+                          type="primary" 
+                          :loading="syncState.verifying"
+                          @click="verifyAndConnectGitHub"
+                        >
+                          连接
+                        </el-button>
+                      </div>
+                    </el-form-item>
+                    <el-form-item>
+                      <el-link 
+                        type="primary" 
+                        href="https://github.com/settings/tokens/new?scopes=gist&description=MShell%20Sync" 
+                        target="_blank"
+                      >
+                        创建 Token (需要 gist 权限)
+                      </el-link>
+                    </el-form-item>
+                  </template>
+                  
+                  <!-- 已连接状态 -->
+                  <template v-else>
+                    <el-form-item label="连接状态">
+                      <el-tag type="success">已连接</el-tag>
+                      <span style="margin-left: 8px; color: var(--text-secondary);">
+                        {{ syncConfig.github.username || 'GitHub' }}
+                      </span>
+                    </el-form-item>
+                    
+                    <el-form-item label="同步加密密码">
+                      <el-input 
+                        v-model="syncConfig.encryptionPassword" 
+                        type="password"
+                        placeholder="设置加密密码保护同步数据"
+                        show-password
+                        @change="saveSyncConfig"
+                        style="max-width: 300px;"
+                      />
+                      <span class="form-hint">必填，用于加密云端数据</span>
+                    </el-form-item>
+                    
+                    <el-form-item label="启用同步">
+                      <el-switch 
+                        v-model="syncConfig.enabled" 
+                        :disabled="!syncConfig.encryptionPassword || syncConfig.provider !== 'github'"
+                        @change="onGitHubSyncToggle" 
+                      />
+                    </el-form-item>
+                    
+                    <el-form-item label="自动同步" v-if="syncConfig.enabled && syncConfig.provider === 'github'">
+                      <el-switch v-model="syncConfig.autoSync" @change="saveSyncConfig" />
+                    </el-form-item>
+                    
+                    <el-form-item label="同步间隔" v-if="syncConfig.enabled && syncConfig.autoSync && syncConfig.provider === 'github'">
+                      <el-select v-model="syncConfig.syncInterval" style="width: 150px" @change="saveSyncConfig">
+                        <el-option label="15 分钟" :value="15" />
+                        <el-option label="30 分钟" :value="30" />
+                        <el-option label="1 小时" :value="60" />
+                        <el-option label="2 小时" :value="120" />
+                      </el-select>
+                    </el-form-item>
+                    
+                    <el-form-item label="上次同步" v-if="syncConfig.provider === 'github'">
+                      <span class="form-hint">{{ formatSyncTime(syncConfig.lastSync) }}</span>
+                    </el-form-item>
+                    
+                    <el-form-item label="Gist 地址" v-if="syncConfig.github?.gistUrl">
+                      <el-link type="primary" :href="syncConfig.github.gistUrl" target="_blank">
+                        {{ syncConfig.github.gistUrl }}
+                      </el-link>
+                    </el-form-item>
+                    
+                    <el-form-item label="操作" v-if="syncConfig.provider === 'github'">
+                      <div style="display: flex; gap: 8px;">
+                        <el-button 
+                          type="primary" 
+                          :loading="syncState.syncing"
+                          :disabled="!syncConfig.encryptionPassword"
+                          @click="doSync"
+                        >
+                          立即同步
+                        </el-button>
+                        <el-button 
+                          :loading="syncState.uploading"
+                          :disabled="!syncConfig.encryptionPassword"
+                          @click="doUpload"
+                        >
+                          上传到云端
+                        </el-button>
+                        <el-button 
+                          :loading="syncState.downloading"
+                          :disabled="!syncConfig.encryptionPassword || !syncConfig.github?.gistId"
+                          @click="doDownload"
+                        >
+                          从云端下载
+                        </el-button>
+                      </div>
+                    </el-form-item>
+                    
+                    <el-form-item>
+                      <el-button type="danger" text @click="disconnectGitHub">
+                        断开 GitHub 连接
+                      </el-button>
+                    </el-form-item>
+                  </template>
+                </el-form>
+              </div>
+            </el-tab-pane>
+            
+            <!-- GitLab 同步 -->
+            <el-tab-pane label="GitLab" name="gitlab">
+              <div class="settings-section">
+                <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
+                  <template #title>
+                    通过 GitLab Snippet 同步数据到云端，支持自托管 GitLab
+                  </template>
+                </el-alert>
+                
+                <el-form label-position="left">
+                  <!-- 未连接状态 -->
+                  <template v-if="!syncConfig.gitlab?.token">
+                    <el-form-item label="GitLab 地址">
+                      <el-input 
+                        v-model="gitlabInstanceUrl" 
+                        placeholder="https://gitlab.com"
+                        style="max-width: 300px;"
+                      />
+                      <span class="form-hint">自托管 GitLab 请填写完整地址</span>
+                    </el-form-item>
+                    <el-form-item label="GitLab Token">
+                      <div style="display: flex; gap: 8px; flex: 1;">
+                        <el-input 
+                          v-model="gitlabTokenInput" 
+                          type="password"
+                          placeholder="输入 GitLab Personal Access Token"
+                          show-password
+                          style="flex: 1;"
+                        />
+                        <el-button 
+                          type="primary" 
+                          :loading="syncState.verifyingGitLab"
+                          @click="verifyAndConnectGitLab"
+                        >
+                          连接
+                        </el-button>
+                      </div>
+                    </el-form-item>
+                    <el-form-item>
+                      <el-link 
+                        type="primary" 
+                        :href="(gitlabInstanceUrl || 'https://gitlab.com') + '/-/user_settings/personal_access_tokens?name=MShell%20Sync&scopes=api'"
+                        target="_blank"
+                      >
+                        创建 Token (需要 api 权限)
+                      </el-link>
+                    </el-form-item>
+                  </template>
+                  
+                  <!-- 已连接状态 -->
+                  <template v-else>
+                    <el-form-item label="连接状态">
+                      <el-tag type="success">已连接</el-tag>
+                      <span style="margin-left: 8px; color: var(--text-secondary);">
+                        {{ syncConfig.gitlab.username || 'GitLab' }}
+                        <span v-if="syncConfig.gitlab.instanceUrl && syncConfig.gitlab.instanceUrl !== 'https://gitlab.com'">
+                          ({{ syncConfig.gitlab.instanceUrl }})
+                        </span>
+                      </span>
+                    </el-form-item>
+                    
+                    <el-form-item label="同步加密密码">
+                      <el-input 
+                        v-model="syncConfig.encryptionPassword" 
+                        type="password"
+                        placeholder="设置加密密码保护同步数据"
+                        show-password
+                        @change="saveSyncConfig"
+                        style="max-width: 300px;"
+                      />
+                      <span class="form-hint">必填，用于加密云端数据</span>
+                    </el-form-item>
+                    
+                    <el-form-item label="启用同步">
+                      <el-switch 
+                        v-model="syncConfig.enabled" 
+                        :disabled="!syncConfig.encryptionPassword || syncConfig.provider !== 'gitlab'"
+                        @change="onGitLabSyncToggle" 
+                      />
+                    </el-form-item>
+                    
+                    <el-form-item label="自动同步" v-if="syncConfig.enabled && syncConfig.provider === 'gitlab'">
+                      <el-switch v-model="syncConfig.autoSync" @change="saveSyncConfig" />
+                    </el-form-item>
+                    
+                    <el-form-item label="同步间隔" v-if="syncConfig.enabled && syncConfig.autoSync && syncConfig.provider === 'gitlab'">
+                      <el-select v-model="syncConfig.syncInterval" style="width: 150px" @change="saveSyncConfig">
+                        <el-option label="15 分钟" :value="15" />
+                        <el-option label="30 分钟" :value="30" />
+                        <el-option label="1 小时" :value="60" />
+                        <el-option label="2 小时" :value="120" />
+                      </el-select>
+                    </el-form-item>
+                    
+                    <el-form-item label="上次同步" v-if="syncConfig.provider === 'gitlab'">
+                      <span class="form-hint">{{ formatSyncTime(syncConfig.lastSync) }}</span>
+                    </el-form-item>
+                    
+                    <el-form-item label="Snippet 地址" v-if="syncConfig.gitlab?.snippetUrl">
+                      <el-link type="primary" :href="syncConfig.gitlab.snippetUrl" target="_blank">
+                        {{ syncConfig.gitlab.snippetUrl }}
+                      </el-link>
+                    </el-form-item>
+                    
+                    <el-form-item label="操作" v-if="syncConfig.provider === 'gitlab'">
+                      <div style="display: flex; gap: 8px;">
+                        <el-button 
+                          type="primary" 
+                          :loading="syncState.syncing"
+                          :disabled="!syncConfig.encryptionPassword"
+                          @click="doSync"
+                        >
+                          立即同步
+                        </el-button>
+                        <el-button 
+                          :loading="syncState.uploadingGitLab"
+                          :disabled="!syncConfig.encryptionPassword"
+                          @click="doUploadGitLab"
+                        >
+                          上传到云端
+                        </el-button>
+                        <el-button 
+                          :loading="syncState.downloadingGitLab"
+                          :disabled="!syncConfig.encryptionPassword || !syncConfig.gitlab?.snippetId"
+                          @click="doDownloadGitLab"
+                        >
+                          从云端下载
+                        </el-button>
+                      </div>
+                    </el-form-item>
+                    
+                    <el-form-item>
+                      <el-button type="danger" text @click="disconnectGitLab">
+                        断开 GitLab 连接
+                      </el-button>
+                    </el-form-item>
+                  </template>
+                </el-form>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+          
+          <div class="settings-section" style="margin-top: 16px;">
+            <h3>同步说明</h3>
+            <el-alert type="warning" :closable="false">
+              <template #title>
+                <ul style="margin: 0; padding-left: 16px;">
+                  <li>同步数据会加密后存储在你的私有 Gist/Snippet 中</li>
+                  <li>SSH 私钥会加密同步，请确保使用强加密密码</li>
+                  <li>请妥善保管加密密码，丢失后无法恢复云端数据</li>
+                  <li>建议定期使用本地备份功能作为额外保障</li>
+                  <li>同一时间只能启用一个同步平台</li>
+                </ul>
+              </template>
+            </el-alert>
+          </div>
+        </el-tab-pane>
+
         <!-- AI 助手 -->
         <el-tab-pane label="AI 助手" name="ai">
           <AISettingsPanel ref="aiSettingsPanelRef" />
@@ -1081,6 +1372,31 @@ const updateState = ref({
   error: ''
 })
 
+// 同步相关状态
+const syncConfig = ref({
+  enabled: false,
+  provider: 'github' as 'github' | 'gitlab' | 'webdav' | 's3',
+  autoSync: false,
+  syncInterval: 30,
+  lastSync: undefined as string | undefined,
+  encryptionPassword: '',
+  github: undefined as { token: string; gistId?: string; gistUrl?: string; username?: string } | undefined,
+  gitlab: undefined as { token: string; snippetId?: string; snippetUrl?: string; username?: string; instanceUrl?: string } | undefined
+})
+const syncState = ref({
+  verifying: false,
+  verifyingGitLab: false,
+  syncing: false,
+  uploading: false,
+  downloading: false,
+  uploadingGitLab: false,
+  downloadingGitLab: false
+})
+const syncActiveTab = ref('github')
+const githubTokenInput = ref('')
+const gitlabTokenInput = ref('')
+const gitlabInstanceUrl = ref('https://gitlab.com')
+
 // 快捷键相关状态
 const shortcuts = ref<Record<string, ShortcutConfig>>({})
 const showEditShortcutDialog = ref(false)
@@ -1144,6 +1460,7 @@ onMounted(async () => {
   loadBackupList()
   loadLockConfig()
   loadLockStatus()
+  loadSyncConfig()
   
   // 延迟加载快捷键，确保 App.vue 中的快捷键已经注册
   setTimeout(() => {
@@ -1581,6 +1898,313 @@ const formatBytes = (bytes: number) => {
   const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+// ==================== 同步相关函数 ====================
+
+const loadSyncConfig = async () => {
+  try {
+    const result = await window.electronAPI.sync?.getConfig()
+    if (result?.success && result.data) {
+      syncConfig.value = {
+        ...syncConfig.value,
+        ...result.data
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load sync config:', error)
+  }
+}
+
+const saveSyncConfig = async () => {
+  try {
+    // 转换为普通对象，移除 undefined 值
+    const configToSave = JSON.parse(JSON.stringify(syncConfig.value))
+    await window.electronAPI.sync?.updateConfig(configToSave)
+  } catch (error: any) {
+    ElMessage.error('保存同步配置失败: ' + error.message)
+  }
+}
+
+const verifyAndConnectGitHub = async () => {
+  if (!githubTokenInput.value) {
+    ElMessage.warning('请输入 GitHub Token')
+    return
+  }
+  
+  syncState.value.verifying = true
+  
+  try {
+    const result = await window.electronAPI.sync?.verifyGitHubToken(githubTokenInput.value)
+    
+    if (result?.success && result.data?.valid) {
+      // Token 有效，保存配置
+      syncConfig.value.github = {
+        token: githubTokenInput.value,
+        username: result.data.username
+      }
+      syncConfig.value.provider = 'github'
+      await saveSyncConfig()
+      
+      githubTokenInput.value = ''
+      ElMessage.success(`已连接到 GitHub (${result.data.username})`)
+    } else {
+      ElMessage.error(result?.data?.error || 'Token 验证失败')
+    }
+  } catch (error: any) {
+    ElMessage.error('连接失败: ' + error.message)
+  } finally {
+    syncState.value.verifying = false
+  }
+}
+
+const disconnectGitHub = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '断开连接后，云端数据不会被删除，但本地将不再同步。确定要断开吗？',
+      '断开 GitHub 连接',
+      { type: 'warning' }
+    )
+    
+    await window.electronAPI.sync?.disconnectGitHub()
+    syncConfig.value = {
+      enabled: false,
+      provider: 'github',
+      autoSync: false,
+      syncInterval: 30,
+      lastSync: undefined,
+      encryptionPassword: '',
+      github: undefined
+    }
+    ElMessage.success('已断开 GitHub 连接')
+  } catch {
+    // 用户取消
+  }
+}
+
+const doSync = async () => {
+  if (!syncConfig.value.encryptionPassword) {
+    ElMessage.warning('请先设置同步加密密码')
+    return
+  }
+  
+  syncState.value.syncing = true
+  
+  try {
+    const result = await window.electronAPI.sync?.sync()
+    
+    if (result?.success) {
+      const data = result.data
+      if (data.action === 'uploaded') {
+        ElMessage.success('数据已上传到云端')
+      } else if (data.action === 'downloaded') {
+        ElMessage.success('数据已从云端下载并应用')
+      } else if (data.action === 'no-change') {
+        ElMessage.info('数据已是最新，无需同步')
+      }
+      await loadSyncConfig()
+    } else {
+      ElMessage.error(result?.data?.message || '同步失败')
+    }
+  } catch (error: any) {
+    ElMessage.error('同步失败: ' + error.message)
+  } finally {
+    syncState.value.syncing = false
+  }
+}
+
+const doUpload = async () => {
+  if (!syncConfig.value.encryptionPassword) {
+    ElMessage.warning('请先设置同步加密密码')
+    return
+  }
+  
+  syncState.value.uploading = true
+  
+  try {
+    const result = await window.electronAPI.sync?.uploadToGitHub()
+    
+    if (result?.success) {
+      ElMessage.success('数据已上传到云端')
+      await loadSyncConfig()
+    } else {
+      ElMessage.error(result?.data?.message || '上传失败')
+    }
+  } catch (error: any) {
+    ElMessage.error('上传失败: ' + error.message)
+  } finally {
+    syncState.value.uploading = false
+  }
+}
+
+const doDownload = async () => {
+  if (!syncConfig.value.encryptionPassword) {
+    ElMessage.warning('请先设置同步加密密码')
+    return
+  }
+  
+  try {
+    await ElMessageBox.confirm(
+      '从云端下载将覆盖本地数据，确定要继续吗？',
+      '从云端下载',
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  
+  syncState.value.downloading = true
+  
+  try {
+    const result = await window.electronAPI.sync?.downloadFromGitHub()
+    
+    if (result?.success) {
+      ElMessage.success('数据已从云端下载并应用')
+      await loadSyncConfig()
+      // 重新加载设置
+      await loadSettings()
+    } else {
+      ElMessage.error(result?.data?.message || '下载失败')
+    }
+  } catch (error: any) {
+    ElMessage.error('下载失败: ' + error.message)
+  } finally {
+    syncState.value.downloading = false
+  }
+}
+
+const formatSyncTime = (time?: string) => {
+  if (!time) return '从未同步'
+  return new Date(time).toLocaleString()
+}
+
+// GitHub 同步开关
+const onGitHubSyncToggle = async () => {
+  if (syncConfig.value.enabled) {
+    syncConfig.value.provider = 'github'
+  }
+  await saveSyncConfig()
+}
+
+// GitLab 同步开关
+const onGitLabSyncToggle = async () => {
+  if (syncConfig.value.enabled) {
+    syncConfig.value.provider = 'gitlab'
+  }
+  await saveSyncConfig()
+}
+
+// ==================== GitLab 同步函数 ====================
+
+const verifyAndConnectGitLab = async () => {
+  if (!gitlabTokenInput.value) {
+    ElMessage.warning('请输入 GitLab Token')
+    return
+  }
+  
+  syncState.value.verifyingGitLab = true
+  
+  try {
+    const instanceUrl = gitlabInstanceUrl.value || 'https://gitlab.com'
+    const result = await window.electronAPI.sync?.verifyGitLabToken(gitlabTokenInput.value, instanceUrl)
+    
+    if (result?.success && result.data?.valid) {
+      syncConfig.value.gitlab = {
+        token: gitlabTokenInput.value,
+        username: result.data.username,
+        instanceUrl: instanceUrl
+      }
+      await saveSyncConfig()
+      
+      gitlabTokenInput.value = ''
+      ElMessage.success(`已连接到 GitLab (${result.data.username})`)
+    } else {
+      ElMessage.error(result?.data?.error || 'Token 验证失败')
+    }
+  } catch (error: any) {
+    ElMessage.error('连接失败: ' + error.message)
+  } finally {
+    syncState.value.verifyingGitLab = false
+  }
+}
+
+const disconnectGitLab = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '断开连接后，云端数据不会被删除，但本地将不再同步。确定要断开吗？',
+      '断开 GitLab 连接',
+      { type: 'warning' }
+    )
+    
+    await window.electronAPI.sync?.disconnectGitLab()
+    syncConfig.value.gitlab = undefined
+    if (syncConfig.value.provider === 'gitlab') {
+      syncConfig.value.enabled = false
+      syncConfig.value.provider = 'github'
+    }
+    ElMessage.success('已断开 GitLab 连接')
+  } catch {
+    // 用户取消
+  }
+}
+
+const doUploadGitLab = async () => {
+  if (!syncConfig.value.encryptionPassword) {
+    ElMessage.warning('请先设置同步加密密码')
+    return
+  }
+  
+  syncState.value.uploadingGitLab = true
+  
+  try {
+    const result = await window.electronAPI.sync?.uploadToGitLab()
+    
+    if (result?.success) {
+      ElMessage.success('数据已上传到 GitLab')
+      await loadSyncConfig()
+    } else {
+      ElMessage.error(result?.data?.message || '上传失败')
+    }
+  } catch (error: any) {
+    ElMessage.error('上传失败: ' + error.message)
+  } finally {
+    syncState.value.uploadingGitLab = false
+  }
+}
+
+const doDownloadGitLab = async () => {
+  if (!syncConfig.value.encryptionPassword) {
+    ElMessage.warning('请先设置同步加密密码')
+    return
+  }
+  
+  try {
+    await ElMessageBox.confirm(
+      '从云端下载将覆盖本地数据，确定要继续吗？',
+      '从云端下载',
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  
+  syncState.value.downloadingGitLab = true
+  
+  try {
+    const result = await window.electronAPI.sync?.downloadFromGitLab()
+    
+    if (result?.success) {
+      ElMessage.success('数据已从 GitLab 下载并应用')
+      await loadSyncConfig()
+      await loadSettings()
+    } else {
+      ElMessage.error(result?.data?.message || '下载失败')
+    }
+  } catch (error: any) {
+    ElMessage.error('下载失败: ' + error.message)
+  } finally {
+    syncState.value.downloadingGitLab = false
+  }
 }
 
 // 主题相关函数
@@ -2197,6 +2821,20 @@ const testShortcuts = () => {
   height: 100%;
   background: var(--bg-main);
   transition: background-color var(--transition-normal);
+}
+
+/* 同步子标签页样式 */
+.sync-tabs {
+  margin-top: -8px;
+}
+
+.sync-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
+.sync-tabs :deep(.el-tabs__item) {
+  font-size: var(--text-sm);
+  padding: 0 16px;
 }
 
 /* 头部 */

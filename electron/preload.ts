@@ -582,6 +582,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onError: (callback: (error: any) => void) => {
       ipcRenderer.on('update:error', (_event, error) => callback(error))
     }
+  },
+
+  // Sync operations
+  sync: {
+    getConfig: () => ipcRenderer.invoke('sync:getConfig'),
+    updateConfig: (updates: any) => ipcRenderer.invoke('sync:updateConfig', updates),
+    verifyGitHubToken: (token: string) => ipcRenderer.invoke('sync:verifyGitHubToken', token),
+    uploadToGitHub: () => ipcRenderer.invoke('sync:uploadToGitHub'),
+    downloadFromGitHub: () => ipcRenderer.invoke('sync:downloadFromGitHub'),
+    disconnectGitHub: () => ipcRenderer.invoke('sync:disconnectGitHub'),
+    verifyGitLabToken: (token: string, instanceUrl?: string) => ipcRenderer.invoke('sync:verifyGitLabToken', token, instanceUrl),
+    uploadToGitLab: () => ipcRenderer.invoke('sync:uploadToGitLab'),
+    downloadFromGitLab: () => ipcRenderer.invoke('sync:downloadFromGitLab'),
+    disconnectGitLab: () => ipcRenderer.invoke('sync:disconnectGitLab'),
+    sync: () => ipcRenderer.invoke('sync:sync'),
+    getStatus: () => ipcRenderer.invoke('sync:getStatus')
   }
 })
 
