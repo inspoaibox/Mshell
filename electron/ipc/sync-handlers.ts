@@ -34,6 +34,16 @@ export function registerSyncHandlers(): void {
     }
   })
 
+  // 查找已存在的 GitHub Gist
+  ipcMain.handle('sync:findExistingGist', async (_event, token: string) => {
+    try {
+      const result = await syncManager.findExistingGist(token)
+      return { success: true, data: result }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
   // 上传到 GitHub
   ipcMain.handle('sync:uploadToGitHub', async () => {
     try {
@@ -68,6 +78,16 @@ export function registerSyncHandlers(): void {
   ipcMain.handle('sync:verifyGitLabToken', async (_event, token: string, instanceUrl?: string) => {
     try {
       const result = await syncManager.verifyGitLabToken(token, instanceUrl)
+      return { success: true, data: result }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 查找已存在的 GitLab Snippet
+  ipcMain.handle('sync:findExistingSnippet', async (_event, token: string, instanceUrl?: string) => {
+    try {
+      const result = await syncManager.findExistingSnippet(token, instanceUrl)
       return { success: true, data: result }
     } catch (error: any) {
       return { success: false, error: error.message }

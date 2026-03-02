@@ -44,6 +44,7 @@ export interface BackupData {
   auditLogs?: any[] // 审计日志
   transferRecords?: any[] // 传输记录
   lockConfig?: any // 锁定配置（不包含密码）
+  quickCommands?: any[] // 快捷命令
 }
 
 /**
@@ -216,6 +217,9 @@ export class BackupManager {
    */
   async createBackup(password: string, filePath?: string, isAutoBackup: boolean = false): Promise<string> {
     try {
+      // 动态导入 quickCommandManager
+      const { quickCommandManager } = await import('./QuickCommandManager')
+      
       // 收集所有数据
       const backupData: BackupData = {
         version: '0.2.0', // 升级版本号以支持更多数据类型
@@ -238,7 +242,8 @@ export class BackupManager {
         connectionStats: connectionStatsManager.getAll(), // 连接统计
         auditLogs: auditLogManager.getAll(), // 审计日志
         transferRecords: transferRecordManager.getAllRecords(), // 传输记录
-        lockConfig: sessionLockManager.getConfig() // 锁定配置（不包含密码）
+        lockConfig: sessionLockManager.getConfig(), // 锁定配置（不包含密码）
+        quickCommands: quickCommandManager.getAll() // 快捷命令
       }
 
       // 序列化数据
@@ -469,6 +474,7 @@ export class BackupManager {
     restoreAuditLogs?: boolean
     restoreTransferRecords?: boolean
     restoreLockConfig?: boolean
+    restoreQuickCommands?: boolean
   }): Promise<void> {
     try {
       // 恢复会话
@@ -783,6 +789,37 @@ export class BackupManager {
           logger.logInfo('system', 'Lock config restored (password not restored for security)')
         } catch (error) {
           logger.logError('system', 'Failed to restore lock config', error as Error)
+        }
+      }
+
+      // 恢复快捷命令
+      if (options.restoreQuickCommands && backupData.quickCommands) {
+        try {
+          const { quickCommandManager } = await import('./QuickCommandManager')
+          const currentCommands = quickCommandManager.getAll()
+          
+          for (const cmd of backupData.quickCommands) {
+            const existing = currentCommands.find(c => c.id === cmd.id || c.name === cmd.name)
+            if (existing) {
+              await quickCommandManager.update(existing.id, {
+                command: cmd.command,
+                description: cmd.description || '',
+                category: cmd.category || '',
+                tags: cmd.tags || []
+              })
+            } else {
+              await quickCommandManager.create({
+                name: cmd.name,
+                command: cmd.command,
+                description: cmd.description || '',
+                category: cmd.category || '',
+                tags: cmd.tags || []
+              })
+            }
+          }
+          logger.logInfo('system', `Quick commands restored: ${backupData.quickCommands.length} records`)
+        } catch (error) {
+          logger.logError('system', 'Failed to restore quick commands', error as Error)
         }
       }
 

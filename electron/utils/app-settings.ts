@@ -2,12 +2,22 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
 
+// 快捷键配置
+export interface ShortcutConfig {
+  key: string  // 空字符串表示未配置/已清除
+  ctrl?: boolean
+  alt?: boolean
+  shift?: boolean
+  description: string
+}
+
 export interface AppSettings {
   general: {
     language: 'zh-CN' | 'en-US'
     theme: 'light' | 'dark' | 'auto'
     startWithSystem: boolean
     minimizeToTray: boolean
+    closeToTray: boolean
   }
   terminal: {
     fontSize: number
@@ -38,6 +48,8 @@ export interface AppSettings {
     autoCheck: boolean
     autoDownload: boolean
   }
+  // 全局快捷键配置
+  shortcuts?: Record<string, ShortcutConfig>
 }
 
 class AppSettingsManager {
@@ -57,7 +69,8 @@ class AppSettingsManager {
         language: 'zh-CN',
         theme: 'dark',
         startWithSystem: false,
-        minimizeToTray: true
+        minimizeToTray: false,
+        closeToTray: false
       },
       terminal: {
         fontSize: 14,
@@ -130,9 +143,43 @@ class AppSettingsManager {
       sftp: { ...this.settings.sftp, ...updates.sftp },
       ssh: { ...this.settings.ssh, ...updates.ssh },
       security: { ...this.settings.security, ...updates.security },
-      updates: { ...this.settings.updates, ...updates.updates }
+      updates: { ...this.settings.updates, ...updates.updates },
+      shortcuts: updates.shortcuts !== undefined ? updates.shortcuts : this.settings.shortcuts
     }
     await this.save()
+  }
+
+  /**
+   * 获取快捷键配置
+   * @param id 快捷键 ID
+   * @returns 快捷键配置，如果未配置或已清除返回 null
+   */
+  getShortcut(id: string): ShortcutConfig | null {
+    const shortcut = this.settings.shortcuts?.[id]
+    // 如果快捷键不存在或 key 为空，返回 null
+    if (!shortcut || !shortcut.key) {
+      return null
+    }
+    return shortcut
+  }
+
+  /**
+   * 检查快捷键是否匹配
+   * @param id 快捷键 ID
+   * @param key 按键
+   * @param ctrl Ctrl 键
+   * @param alt Alt 键
+   * @param shift Shift 键
+   * @returns 是否匹配
+   */
+  matchShortcut(id: string, key: string, ctrl: boolean, alt: boolean, shift: boolean): boolean {
+    const shortcut = this.getShortcut(id)
+    if (!shortcut) return false
+    
+    return shortcut.key.toLowerCase() === key.toLowerCase() &&
+           !!shortcut.ctrl === ctrl &&
+           !!shortcut.alt === alt &&
+           !!shortcut.shift === shift
   }
 
   async resetToDefaults(): Promise<void> {

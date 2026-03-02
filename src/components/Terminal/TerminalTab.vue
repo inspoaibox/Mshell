@@ -9,7 +9,39 @@
         <span class="status-text">{{ connectionStatus }}</span>
       </div>
       <div class="header-actions">
-        <el-tooltip content="字体" placement="bottom">
+        <!-- 工具栏设置 -->
+        <el-popover
+          placement="bottom-start"
+          :width="200"
+          trigger="click"
+          popper-class="toolbar-settings-popover"
+        >
+          <template #reference>
+            <el-button
+              type="primary"
+              link
+              :icon="Setting"
+              class="action-btn"
+            />
+          </template>
+          <div class="toolbar-settings">
+            <div class="settings-title">显示工具</div>
+            <div class="settings-list">
+              <el-checkbox v-model="toolbarConfig.font" size="small">字体</el-checkbox>
+              <el-checkbox v-model="toolbarConfig.theme" size="small">主题</el-checkbox>
+              <el-checkbox v-model="toolbarConfig.snippet" size="small">Snippets</el-checkbox>
+              <el-checkbox v-model="toolbarConfig.search" size="small">搜索</el-checkbox>
+              <el-checkbox v-model="toolbarConfig.history" size="small">命令历史</el-checkbox>
+              <el-checkbox v-model="toolbarConfig.monitor" size="small">监控</el-checkbox>
+              <el-checkbox v-model="toolbarConfig.file" size="small">文件管理</el-checkbox>
+              <el-checkbox v-model="toolbarConfig.ai" size="small">AI 助手</el-checkbox>
+              <el-checkbox v-model="toolbarConfig.quickCommand" size="small">快捷命令</el-checkbox>
+            </div>
+          </div>
+        </el-popover>
+
+        <!-- 字体 -->
+        <el-tooltip v-if="toolbarConfig.font" content="字体" placement="bottom">
           <el-dropdown @command="handleFontChange" trigger="click">
             <el-button
               type="primary"
@@ -32,7 +64,9 @@
             </template>
           </el-dropdown>
         </el-tooltip>
-        <el-tooltip content="主题" placement="bottom">
+
+        <!-- 主题 -->
+        <el-tooltip v-if="toolbarConfig.theme" content="主题" placement="bottom">
           <el-dropdown @command="handleThemeChange" trigger="click">
             <el-button
               type="primary"
@@ -54,7 +88,9 @@
             </template>
           </el-dropdown>
         </el-tooltip>
-        <el-tooltip content="Snippets" placement="bottom">
+
+        <!-- Snippets -->
+        <el-tooltip v-if="toolbarConfig.snippet" content="Snippets" placement="bottom">
           <el-button
             type="primary"
             link
@@ -64,7 +100,9 @@
             :class="{ 'is-active': showSnippetDialog }"
           />
         </el-tooltip>
-        <el-tooltip content="Search" placement="bottom">
+
+        <!-- Search -->
+        <el-tooltip v-if="toolbarConfig.search" content="Search" placement="bottom">
           <el-button
             type="primary"
             link
@@ -73,7 +111,9 @@
             class="action-btn"
           />
         </el-tooltip>
-        <el-tooltip content="命令历史" placement="bottom">
+
+        <!-- 命令历史 -->
+        <el-tooltip v-if="toolbarConfig.history" content="命令历史" placement="bottom">
           <el-button
             type="primary"
             link
@@ -83,7 +123,9 @@
             :class="{ 'is-active': showCommandHistory }"
           />
         </el-tooltip>
-        <el-tooltip :content="showMonitor ? '隐藏监控' : '显示监控'" placement="bottom">
+
+        <!-- 监控 -->
+        <el-tooltip v-if="toolbarConfig.monitor" :content="showMonitor ? '隐藏监控' : '显示监控'" placement="bottom">
           <el-button
             type="primary"
             link
@@ -93,7 +135,9 @@
             :class="{ 'is-active': showMonitor }"
           />
         </el-tooltip>
-        <el-tooltip :content="showFilePanel ? '关闭文件' : '文件管理'" placement="bottom">
+
+        <!-- 文件管理 -->
+        <el-tooltip v-if="toolbarConfig.file" :content="showFilePanel ? '关闭文件' : '文件管理'" placement="bottom">
           <el-button
             type="primary"
             link
@@ -103,7 +147,9 @@
             :class="{ 'is-active': showFilePanel }"
           />
         </el-tooltip>
-        <el-tooltip :content="showTerminalAI ? '关闭 AI 助手' : 'AI 助手'" placement="bottom">
+
+        <!-- AI 助手 -->
+        <el-tooltip v-if="toolbarConfig.ai" :content="showTerminalAI ? '关闭 AI 助手' : 'AI 助手'" placement="bottom">
           <el-button
             type="primary"
             link
@@ -111,6 +157,18 @@
             @click="showTerminalAI = !showTerminalAI"
             class="action-btn"
             :class="{ 'is-active': showTerminalAI }"
+          />
+        </el-tooltip>
+
+        <!-- 快捷命令 -->
+        <el-tooltip v-if="toolbarConfig.quickCommand" :content="showQuickCommand ? '关闭快捷命令' : '快捷命令'" placement="bottom">
+          <el-button
+            type="primary"
+            link
+            :icon="Promotion"
+            @click="showQuickCommand = !showQuickCommand"
+            class="action-btn"
+            :class="{ 'is-active': showQuickCommand }"
           />
         </el-tooltip>
       </div>
@@ -161,7 +219,7 @@
     </transition>
     
     <div class="terminal-body">
-      <div class="terminal-content" :class="{ 'with-monitor': showMonitor, 'with-history': showCommandHistory, 'with-ai': showTerminalAI, 'with-file': showFilePanel, 'with-snippet': showSnippetDialog }">
+      <div class="terminal-content" :class="{ 'with-monitor': showMonitor, 'with-history': showCommandHistory, 'with-ai': showTerminalAI, 'with-file': showFilePanel, 'with-snippet': showSnippetDialog, 'with-quick-command': showQuickCommand }">
         <TerminalView
           v-if="isConnected"
           :connection-id="connectionId"
@@ -262,6 +320,16 @@
             :current-dir="currentWorkingDir"
             @close="showFilePanel = false"
             @request-current-dir="updateCurrentWorkingDir"
+          />
+        </div>
+      </transition>
+      
+      <!-- 快捷命令面板 -->
+      <transition name="slide-left">
+        <div v-if="showQuickCommand" class="quick-command-sidebar">
+          <QuickCommandPanel
+            :connection-id="connectionId"
+            @close="showQuickCommand = false"
           />
         </div>
       </transition>
@@ -381,7 +449,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { Close, Loading, Search, Document, Brush, Monitor, Clock, ChatDotRound, CircleClose, FolderOpened } from '@element-plus/icons-vue'
+import { Close, Loading, Search, Document, Brush, Monitor, Clock, ChatDotRound, CircleClose, FolderOpened, Promotion, Setting } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TerminalView from './TerminalView.vue'
 import TerminalSearch from './TerminalSearch.vue'
@@ -390,6 +458,7 @@ import CommandHistoryPanel from './CommandHistoryPanel.vue'
 import ServerMonitorPanel from '../Monitor/ServerMonitorPanel.vue'
 import TerminalAIChatPanel from '../AI/TerminalAIChatPanel.vue'
 import TerminalFilePanel from './TerminalFilePanel.vue'
+import QuickCommandPanel from './QuickCommandPanel.vue'
 import GhostText from './GhostText.vue'
 import AICommandSuggest from './AICommandSuggest.vue'
 import CommandExplain from './CommandExplain.vue'
@@ -458,6 +527,46 @@ const showMonitor = ref(false)
 const showCommandHistory = ref(false)
 const showTerminalAI = ref(false)
 const showFilePanel = ref(false)
+const showQuickCommand = ref(false)
+
+// 工具栏配置（控制显示/隐藏）
+const toolbarConfig = ref({
+  font: true,
+  theme: true,
+  snippet: true,
+  search: true,
+  history: true,
+  monitor: true,
+  file: true,
+  ai: true,
+  quickCommand: true
+})
+
+// 加载工具栏配置
+const loadToolbarConfig = () => {
+  try {
+    const saved = localStorage.getItem('terminal-toolbar-config')
+    if (saved) {
+      const config = JSON.parse(saved)
+      toolbarConfig.value = { ...toolbarConfig.value, ...config }
+    }
+  } catch (error) {
+    console.error('Failed to load toolbar config:', error)
+  }
+}
+
+// 保存工具栏配置
+const saveToolbarConfig = () => {
+  try {
+    localStorage.setItem('terminal-toolbar-config', JSON.stringify(toolbarConfig.value))
+  } catch (error) {
+    console.error('Failed to save toolbar config:', error)
+  }
+}
+
+// 监听配置变化并保存
+watch(toolbarConfig, saveToolbarConfig, { deep: true })
+
 const snippetSearch = ref('')
 const filterCategory = ref('')
 const filterTags = ref<string[]>([])
@@ -764,6 +873,9 @@ const handleManualReconnect = async () => {
 onMounted(async () => {
   // Load snippets
   loadSnippets()
+  
+  // 加载工具栏配置
+  loadToolbarConfig()
   
   // 获取 appStore 用于检查当前激活的标签页
   const appStore = useAppStore()
@@ -1754,6 +1866,36 @@ defineExpose({
   align-items: center;
 }
 
+/* 工具栏设置弹窗样式 */
+.toolbar-settings {
+  padding: 4px 0;
+}
+
+.toolbar-settings .settings-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 0 4px 8px;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 8px;
+}
+
+.toolbar-settings .settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toolbar-settings .settings-list :deep(.el-checkbox) {
+  height: 24px;
+  margin-right: 0;
+}
+
+.toolbar-settings .settings-list :deep(.el-checkbox__label) {
+  font-size: var(--text-xs);
+  padding-left: 6px;
+}
+
 /* 确保下拉菜单和按钮宽度一致 */
 .header-actions :deep(.el-dropdown) {
   display: inline-flex;
@@ -1828,6 +1970,10 @@ defineExpose({
   flex: 1;
 }
 
+.terminal-content.with-quick-command {
+  flex: 1;
+}
+
 .history-sidebar {
   width: 480px;
   background: var(--bg-main);
@@ -1857,6 +2003,16 @@ defineExpose({
 
 .file-sidebar {
   width: 320px;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.quick-command-sidebar {
+  width: 360px;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border-color);
   flex-shrink: 0;

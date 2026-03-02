@@ -1,5 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { promises as fs } from 'fs'
+import { createPrivateKey } from 'crypto'
 import { sshConnectionManager, SSHConnectionOptions } from '../managers/SSHConnectionManager'
 import { logger } from '../utils/logger'
 import { knownHostsManager } from '../utils/known-hosts'
@@ -7,6 +8,63 @@ import { auditLogManager, AuditAction } from '../managers/AuditLogManager'
 import { ProxyHelper } from '../utils/proxy'
 import { ProxyJumpHelper } from '../utils/proxy-jump'
 import type { ProxyJumpConfig, ProxyConfig } from '../../src/types/session'
+
+/**
+ * 将 PKCS8 格式的私钥转换为 ssh2 兼容的格式
+ * ssh2 v1.x 不支持 PKCS8 格式的 ed25519/ecdsa 密钥
+ * 需要转换为传统 PEM 格式（RSA->pkcs1, EC->sec1）
+ * 对于 ed25519，Node 18 无法导出为传统格式，保持 PKCS8 DER 让 ssh2 尝试解析
+ */
+function convertPrivateKeyForSSH2(keyBuffer: Buffer, passphrase?: string): Buffer {
+  const keyStr = keyBuffer.toString('utf-8')
+  
+  // 如果不是 PKCS8 格式，不需要转换
+  if (!keyStr.includes('BEGIN PRIVATE KEY') && !keyStr.includes('BEGIN ENCRYPTED PRIVATE KEY')) {
+    return keyBuffer
+  }
+
+  try {
+    // 解析 PKCS8 密钥
+    const keyObj = createPrivateKey(
+      passphrase
+        ? { key: keyBuffer, passphrase, format: 'pem' }
+        : { key: keyBuffer, format: 'pem' }
+    )
+
+    const keyType = keyObj.asymmetricKeyType
+
+    if (keyType === 'rsa') {
+      // RSA: 转换为 pkcs1 传统格式 (BEGIN RSA PRIVATE KEY)
+      const exported = passphrase
+        ? keyObj.export({ type: 'pkcs1', format: 'pem', cipher: 'aes-256-cbc', passphrase } as any)
+        : keyObj.export({ type: 'pkcs1', format: 'pem' })
+      return Buffer.from(exported as string)
+    } else if (keyType === 'ec') {
+      // ECDSA: 转换为 sec1 传统格式 (BEGIN EC PRIVATE KEY)
+      const exported = passphrase
+        ? keyObj.export({ type: 'sec1', format: 'pem', cipher: 'aes-256-cbc', passphrase } as any)
+        : keyObj.export({ type: 'sec1', format: 'pem' })
+      return Buffer.from(exported as string)
+    } else if (keyType === 'ed25519' || keyType === 'ed448') {
+      // ed25519/ed448: Node 18 不支持导出为传统格式或 OpenSSH 格式
+      // ssh2 v1.x 也不支持 PKCS8 的 ed25519
+      // 唯一的办法是用 ssh2 自带的 parseKey 尝试，或者提示用户使用 OpenSSH 格式的密钥
+      // 这里我们尝试导出为未加密的 PKCS8 PEM 让 ssh2 尝试解析
+      // 如果失败，会在上层捕获并给出友好提示
+      if (passphrase) {
+        // 去掉加密，导出为未加密的 PKCS8（ssh2 对未加密的 PKCS8 ed25519 可能支持）
+        const exported = keyObj.export({ type: 'pkcs8', format: 'pem' })
+        return Buffer.from(exported as string)
+      }
+      return keyBuffer
+    }
+  } catch (error: any) {
+    logger.logError('ssh-key', `Failed to convert private key format: ${error.message}`, error)
+  }
+
+  // 转换失败，返回原始密钥
+  return keyBuffer
+}
 
 /**
  * 递归处理跳板机配置中的私钥路径
@@ -47,7 +105,10 @@ export function registerSSHHandlers() {
         try {
           const { sshKeyManager } = await import('../managers/SSHKeyManager')
           const privateKeyContent = sshKeyManager.readPrivateKey(options.privateKeyId)
-          privateKeyBuffer = Buffer.from(privateKeyContent)
+          privateKeyBuffer = convertPrivateKeyForSSH2(
+            Buffer.from(privateKeyContent),
+            options.passphrase
+          )
         } catch (error: any) {
           logger.logError('connection', `Failed to read private key from key manager: ${options.privateKeyId}`, error)
           return { success: false, error: `无法读取SSH密钥: ${error.message}` }
@@ -56,11 +117,15 @@ export function registerSSHHandlers() {
         // 判断是私钥内容还是文件路径
         if (options.privateKey.includes('PRIVATE KEY') || options.privateKey.includes('OPENSSH PRIVATE KEY')) {
           // 是私钥内容
-          privateKeyBuffer = Buffer.from(options.privateKey)
+          privateKeyBuffer = convertPrivateKeyForSSH2(
+            Buffer.from(options.privateKey),
+            options.passphrase
+          )
         } else {
           // 是文件路径，读取文件内容
           try {
-            privateKeyBuffer = await fs.readFile(options.privateKey)
+            const rawKey = await fs.readFile(options.privateKey)
+            privateKeyBuffer = convertPrivateKeyForSSH2(rawKey, options.passphrase)
           } catch (error: any) {
             logger.logError('connection', `Failed to read private key file: ${options.privateKey}`, error)
             return { success: false, error: `无法读取密钥文件: ${error.message}` }

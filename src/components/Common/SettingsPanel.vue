@@ -466,7 +466,7 @@
               <div v-for="(shortcut, id) in shortcuts" :key="id" class="shortcut-item">
                 <div class="shortcut-info">
                   <span class="shortcut-name">{{ shortcut.description }}</span>
-                  <span class="shortcut-key">{{ formatShortcutKey(shortcut) }}</span>
+                  <span class="shortcut-key" :class="{ 'not-configured': !shortcut.key }">{{ formatShortcutKey(shortcut) }}</span>
                 </div>
                 <div class="shortcut-actions">
                   <el-button size="small" @click="editShortcut(id, shortcut)">
@@ -1272,7 +1272,7 @@ const currentTheme = ref('dark')
 const settings = ref({
   general: {
     startWithSystem: false,
-    minimizeToTray: true,
+    minimizeToTray: false,
     closeToTray: false,
     language: 'zh-CN',
     theme: 'dark' as 'light' | 'dark' | 'auto'
@@ -1938,16 +1938,26 @@ const verifyAndConnectGitHub = async () => {
     const result = await window.electronAPI.sync?.verifyGitHubToken(githubTokenInput.value)
     
     if (result?.success && result.data?.valid) {
-      // Token 有效，保存配置
+      // Token 有效，查找已存在的 Gist
+      const existingGist = await window.electronAPI.sync?.findExistingGist(githubTokenInput.value)
+      
+      // 保存配置
       syncConfig.value.github = {
         token: githubTokenInput.value,
-        username: result.data.username
+        username: result.data.username,
+        gistId: existingGist?.data?.gistId,
+        gistUrl: existingGist?.data?.gistUrl
       }
       syncConfig.value.provider = 'github'
       await saveSyncConfig()
       
       githubTokenInput.value = ''
-      ElMessage.success(`已连接到 GitHub (${result.data.username})`)
+      
+      if (existingGist?.data?.found) {
+        ElMessage.success(`已连接到 GitHub (${result.data.username})，找到已有的同步数据`)
+      } else {
+        ElMessage.success(`已连接到 GitHub (${result.data.username})`)
+      }
     } else {
       ElMessage.error(result?.data?.error || 'Token 验证失败')
     }
@@ -2109,15 +2119,25 @@ const verifyAndConnectGitLab = async () => {
     const result = await window.electronAPI.sync?.verifyGitLabToken(gitlabTokenInput.value, instanceUrl)
     
     if (result?.success && result.data?.valid) {
+      // Token 有效，查找已存在的 Snippet
+      const existingSnippet = await window.electronAPI.sync?.findExistingSnippet(gitlabTokenInput.value, instanceUrl)
+      
       syncConfig.value.gitlab = {
         token: gitlabTokenInput.value,
         username: result.data.username,
-        instanceUrl: instanceUrl
+        instanceUrl: instanceUrl,
+        snippetId: existingSnippet?.data?.snippetId,
+        snippetUrl: existingSnippet?.data?.snippetUrl
       }
       await saveSyncConfig()
       
       gitlabTokenInput.value = ''
-      ElMessage.success(`已连接到 GitLab (${result.data.username})`)
+      
+      if (existingSnippet?.data?.found) {
+        ElMessage.success(`已连接到 GitLab (${result.data.username})，找到已有的同步数据`)
+      } else {
+        ElMessage.success(`已连接到 GitLab (${result.data.username})`)
+      }
     } else {
       ElMessage.error(result?.data?.error || 'Token 验证失败')
     }
@@ -2242,11 +2262,26 @@ const loadShortcuts = () => {
   const allShortcuts = keyboardShortcutManager.getAll()
   console.log('[SettingsPanel] Shortcuts from manager:', allShortcuts.size)
   
+  // 获取保存的快捷键配置
+  const savedShortcuts = (settings.value as any).shortcuts || {}
+  console.log('[SettingsPanel] Saved shortcuts:', Object.keys(savedShortcuts).length)
+  
   if (allShortcuts.size > 0) {
-    // 如果管理器中有快捷键，使用它们
+    // 如果管理器中有快捷键，使用它们，但合并保存的配置
     const shortcutsObj: Record<string, ShortcutConfig> = {}
     allShortcuts.forEach((config, id) => {
-      shortcutsObj[id] = config
+      // 如果有保存的配置，使用保存的配置
+      if (savedShortcuts[id]) {
+        shortcutsObj[id] = {
+          ...config,
+          key: savedShortcuts[id].key,
+          ctrl: savedShortcuts[id].ctrl,
+          alt: savedShortcuts[id].alt,
+          shift: savedShortcuts[id].shift
+        }
+      } else {
+        shortcutsObj[id] = config
+      }
     })
     shortcuts.value = shortcutsObj
     console.log('[SettingsPanel] Loaded shortcuts from manager:', Object.keys(shortcutsObj).length)
@@ -2256,13 +2291,21 @@ const loadShortcuts = () => {
     const shortcutsObj: Record<string, ShortcutConfig> = {}
     
     for (const [id, config] of Object.entries(defaultShortcuts)) {
+      // 如果有保存的配置，使用保存的配置
+      const savedConfig = savedShortcuts[id]
       const fullConfig: ShortcutConfig = {
         ...config,
+        key: savedConfig?.key !== undefined ? savedConfig.key : config.key,
+        ctrl: savedConfig?.ctrl !== undefined ? savedConfig.ctrl : config.ctrl,
+        alt: savedConfig?.alt !== undefined ? savedConfig.alt : config.alt,
+        shift: savedConfig?.shift !== undefined ? savedConfig.shift : config.shift,
         action: () => {} // 占位 action，实际的 action 在 App.vue 中定义
       }
       
-      // 注册到管理器
-      keyboardShortcutManager.register(id, fullConfig)
+      // 只有当快捷键有效时才注册到管理器
+      if (fullConfig.key) {
+        keyboardShortcutManager.register(id, fullConfig)
+      }
       shortcutsObj[id] = fullConfig
     }
     
@@ -2274,6 +2317,10 @@ const loadShortcuts = () => {
 }
 
 const formatShortcutKey = (shortcut: ShortcutConfig): string => {
+  // 如果 key 为空，显示"未配置"
+  if (!shortcut.key) {
+    return '未配置'
+  }
   const parts: string[] = []
   if (shortcut.ctrl) parts.push('Ctrl')
   if (shortcut.alt) parts.push('Alt')
@@ -2356,6 +2403,9 @@ const checkShortcutConflict = () => {
   for (const [id, shortcut] of Object.entries(shortcuts.value)) {
     if (id === editingShortcutId.value) continue
     
+    // 跳过已清除的快捷键
+    if (!shortcut.key) continue
+    
     if (
       shortcut.key.toLowerCase() === newConfig.key.toLowerCase() &&
       !!shortcut.ctrl === newConfig.ctrl &&
@@ -2371,11 +2421,7 @@ const checkShortcutConflict = () => {
 }
 
 const saveShortcut = () => {
-  if (!editingShortcutKey.value) {
-    ElMessage.warning('请设置快捷键')
-    return
-  }
-  
+  // 允许保存空的快捷键（表示清除）
   if (shortcutConflict.value) {
     ElMessage.warning('快捷键冲突，请选择其他组合')
     return
@@ -2383,14 +2429,19 @@ const saveShortcut = () => {
   
   const updatedConfig: ShortcutConfig = {
     ...editingShortcut.value,
-    key: editingShortcutKey.value,
+    key: editingShortcutKey.value, // 可以为空，表示清除
     ctrl: editingModifiers.value.includes('ctrl'),
     alt: editingModifiers.value.includes('alt'),
     shift: editingModifiers.value.includes('shift')
   }
   
   // 更新快捷键管理器
-  keyboardShortcutManager.register(editingShortcutId.value, updatedConfig)
+  if (editingShortcutKey.value) {
+    keyboardShortcutManager.register(editingShortcutId.value, updatedConfig)
+  } else {
+    // 如果清除了快捷键，从管理器中注销
+    keyboardShortcutManager.unregister(editingShortcutId.value)
+  }
   
   // 更新本地显示
   shortcuts.value[editingShortcutId.value] = updatedConfig
@@ -2398,7 +2449,8 @@ const saveShortcut = () => {
   // 保存到设置
   saveShortcutSettings()
   
-  ElMessage.success('快捷键已更新')
+  const message = editingShortcutKey.value ? '快捷键已更新' : '快捷键已清除'
+  ElMessage.success(message)
   showEditShortcutDialog.value = false
 }
 
@@ -3103,6 +3155,13 @@ const testShortcuts = () => {
   border-radius: var(--radius-sm);
   display: inline-block;
   width: fit-content;
+}
+
+.shortcut-key.not-configured {
+  color: var(--text-tertiary);
+  font-style: italic;
+  background: transparent;
+  border: 1px dashed var(--border-color);
 }
 
 .shortcut-actions {

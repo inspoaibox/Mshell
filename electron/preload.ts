@@ -589,15 +589,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getConfig: () => ipcRenderer.invoke('sync:getConfig'),
     updateConfig: (updates: any) => ipcRenderer.invoke('sync:updateConfig', updates),
     verifyGitHubToken: (token: string) => ipcRenderer.invoke('sync:verifyGitHubToken', token),
+    findExistingGist: (token: string) => ipcRenderer.invoke('sync:findExistingGist', token),
     uploadToGitHub: () => ipcRenderer.invoke('sync:uploadToGitHub'),
     downloadFromGitHub: () => ipcRenderer.invoke('sync:downloadFromGitHub'),
     disconnectGitHub: () => ipcRenderer.invoke('sync:disconnectGitHub'),
     verifyGitLabToken: (token: string, instanceUrl?: string) => ipcRenderer.invoke('sync:verifyGitLabToken', token, instanceUrl),
+    findExistingSnippet: (token: string, instanceUrl?: string) => ipcRenderer.invoke('sync:findExistingSnippet', token, instanceUrl),
     uploadToGitLab: () => ipcRenderer.invoke('sync:uploadToGitLab'),
     downloadFromGitLab: () => ipcRenderer.invoke('sync:downloadFromGitLab'),
     disconnectGitLab: () => ipcRenderer.invoke('sync:disconnectGitLab'),
     sync: () => ipcRenderer.invoke('sync:sync'),
     getStatus: () => ipcRenderer.invoke('sync:getStatus')
+  },
+
+  // Quick Command operations
+  quickCommand: {
+    getAll: () => ipcRenderer.invoke('quickCommand:getAll'),
+    get: (id: string) => ipcRenderer.invoke('quickCommand:get', id),
+    create: (data: any) => ipcRenderer.invoke('quickCommand:create', data),
+    update: (id: string, updates: any) => ipcRenderer.invoke('quickCommand:update', id, updates),
+    delete: (id: string) => ipcRenderer.invoke('quickCommand:delete', id),
+    incrementUsage: (id: string) => ipcRenderer.invoke('quickCommand:incrementUsage', id),
+    getByCategory: (category: string) => ipcRenderer.invoke('quickCommand:getByCategory', category),
+    search: (query: string) => ipcRenderer.invoke('quickCommand:search', query),
+    getAllCategories: () => ipcRenderer.invoke('quickCommand:getAllCategories'),
+    getAllTags: () => ipcRenderer.invoke('quickCommand:getAllTags'),
+    getRecent: (limit?: number) => ipcRenderer.invoke('quickCommand:getRecent', limit),
+    getFrequent: (limit?: number) => ipcRenderer.invoke('quickCommand:getFrequent', limit),
+    export: (filePath: string) => ipcRenderer.invoke('quickCommand:export', filePath),
+    import: (filePath: string) => ipcRenderer.invoke('quickCommand:import', filePath)
   }
 })
 

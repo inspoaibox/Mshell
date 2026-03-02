@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from '
 import { join } from 'path'
 import { app } from 'electron'
 import { generateKeyPairSync } from 'crypto'
+import { utils as ssh2Utils } from 'ssh2'
 
 /**
  * SSH 密钥信息
@@ -90,6 +91,8 @@ export class SSHKeyManager {
 
   /**
    * 生成密钥对
+   * 优先使用 ssh2 的 generateKeyPair 生成 OpenSSH 格式密钥，确保兼容性
+   * 如果 ssh2 生成失败，回退到 Node.js crypto（RSA->pkcs1, ECDSA->sec1）
    */
   generateKeyPair(options: KeyGenerationOptions): SSHKey {
     const id = `key_${Date.now()}_${Math.random().toString(36).substring(7)}`
@@ -100,51 +103,16 @@ export class SSHKeyManager {
       let publicKey: string
       let privateKey: string
 
-      // 构建私钥编码选项，只有在有密码时才添加加密相关属性
-      const privateKeyEncodingBase = {
-        type: 'pkcs8' as const,
-        format: 'pem' as const
-      }
-      const privateKeyEncoding = options.passphrase 
-        ? { ...privateKeyEncodingBase, cipher: 'aes-256-cbc' as const, passphrase: options.passphrase }
-        : privateKeyEncodingBase
-
-      if (options.type === 'rsa') {
-        const bits = options.bits || 2048
-        const { publicKey: pubKey, privateKey: privKey } = generateKeyPairSync('rsa', {
-          modulusLength: bits,
-          publicKeyEncoding: {
-            type: 'spki',
-            format: 'pem'
-          },
-          privateKeyEncoding
-        })
-        publicKey = pubKey
-        privateKey = privKey
-      } else if (options.type === 'ed25519') {
-        const { publicKey: pubKey, privateKey: privKey } = generateKeyPairSync('ed25519', {
-          publicKeyEncoding: {
-            type: 'spki',
-            format: 'pem'
-          },
-          privateKeyEncoding
-        })
-        publicKey = pubKey
-        privateKey = privKey
-      } else if (options.type === 'ecdsa') {
-        const namedCurve = options.bits === 384 ? 'secp384r1' : options.bits === 521 ? 'secp521r1' : 'prime256v1'
-        const { publicKey: pubKey, privateKey: privKey } = generateKeyPairSync('ec', {
-          namedCurve,
-          publicKeyEncoding: {
-            type: 'spki',
-            format: 'pem'
-          },
-          privateKeyEncoding
-        })
-        publicKey = pubKey
-        privateKey = privKey
+      // 尝试使用 ssh2 的 generateKeyPair（同步包装）
+      const ssh2Result = this.generateWithSSH2(options)
+      if (ssh2Result) {
+        publicKey = ssh2Result.publicKey
+        privateKey = ssh2Result.privateKey
       } else {
-        throw new Error(`Unsupported key type: ${options.type}`)
+        // 回退到 Node.js crypto
+        const cryptoResult = this.generateWithCrypto(options)
+        publicKey = cryptoResult.publicKey
+        privateKey = cryptoResult.privateKey
       }
 
       // 保存密钥文件
@@ -182,6 +150,100 @@ export class SSHKeyManager {
       
       throw error
     }
+  }
+
+  /**
+   * 使用 ssh2 的 generateKeyPair 生成密钥（同步包装）
+   * 生成的密钥为 OpenSSH 格式，ssh2 完全兼容
+   */
+  private generateWithSSH2(options: KeyGenerationOptions): { publicKey: string; privateKey: string } | null {
+    try {
+      let result: { publicKey: string; privateKey: string } | null = null
+      let error: Error | null = null
+      let done = false
+
+      const genOpts: any = {}
+      if (options.type === 'rsa') {
+        genOpts.bits = options.bits || 2048
+      } else if (options.type === 'ecdsa') {
+        genOpts.bits = options.bits || 256
+      }
+      if (options.passphrase) {
+        genOpts.passphrase = options.passphrase
+        genOpts.cipher = 'aes-256-cbc'
+      }
+      if (options.comment) {
+        genOpts.comment = options.comment
+      }
+
+      ssh2Utils.generateKeyPair(options.type, genOpts, (err: Error | null, keys: any) => {
+        if (err) {
+          error = err
+        } else {
+          result = {
+            privateKey: keys.private,
+            publicKey: keys.public
+          }
+        }
+        done = true
+      })
+
+      // ssh2 的 generateKeyPair 在某些情况下是同步回调的
+      // 如果不是同步的，我们回退到 crypto
+      if (!done) {
+        return null
+      }
+      if (error) {
+        console.error('ssh2 generateKeyPair failed:', error)
+        return null
+      }
+      return result
+    } catch (err) {
+      console.error('ssh2 generateKeyPair error:', err)
+      return null
+    }
+  }
+
+  /**
+   * 使用 Node.js crypto 生成密钥（回退方案）
+   * RSA 使用 pkcs1 格式，ECDSA 使用 sec1 格式，ed25519 使用 pkcs8 格式
+   */
+  private generateWithCrypto(options: KeyGenerationOptions): { publicKey: string; privateKey: string } {
+    if (options.type === 'rsa') {
+      const bits = options.bits || 2048
+      const privateKeyEncoding = options.passphrase
+        ? { type: 'pkcs1' as const, format: 'pem' as const, cipher: 'aes-256-cbc' as const, passphrase: options.passphrase }
+        : { type: 'pkcs1' as const, format: 'pem' as const }
+      const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+        modulusLength: bits,
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+        privateKeyEncoding
+      })
+      return { publicKey, privateKey }
+    } else if (options.type === 'ed25519') {
+      // Node 18 只能输出 pkcs8 格式的 ed25519，ssh2 可能不支持
+      // 连接时会通过 convertPrivateKeyForSSH2 尝试处理
+      const privateKeyEncoding = options.passphrase
+        ? { type: 'pkcs8' as const, format: 'pem' as const, cipher: 'aes-256-cbc' as const, passphrase: options.passphrase }
+        : { type: 'pkcs8' as const, format: 'pem' as const }
+      const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+        privateKeyEncoding
+      })
+      return { publicKey, privateKey }
+    } else if (options.type === 'ecdsa') {
+      const namedCurve = options.bits === 384 ? 'secp384r1' : options.bits === 521 ? 'secp521r1' : 'prime256v1'
+      const privateKeyEncoding = options.passphrase
+        ? { type: 'sec1' as const, format: 'pem' as const, cipher: 'aes-256-cbc' as const, passphrase: options.passphrase }
+        : { type: 'sec1' as const, format: 'pem' as const }
+      const { publicKey, privateKey } = generateKeyPairSync('ec', {
+        namedCurve,
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+        privateKeyEncoding
+      })
+      return { publicKey, privateKey }
+    }
+    throw new Error(`Unsupported key type: ${options.type}`)
   }
 
   /**
@@ -481,12 +543,32 @@ export class SSHKeyManager {
    * 检测密钥类型
    */
   private detectKeyType(privateKey: string): 'rsa' | 'ed25519' | 'ecdsa' {
-    if (privateKey.includes('RSA PRIVATE KEY') || privateKey.includes('BEGIN PRIVATE KEY')) {
+    // 传统格式可以直接从头部判断
+    if (privateKey.includes('RSA PRIVATE KEY')) {
       return 'rsa'
-    } else if (privateKey.includes('ED25519')) {
-      return 'ed25519'
     } else if (privateKey.includes('EC PRIVATE KEY')) {
       return 'ecdsa'
+    } else if (privateKey.includes('OPENSSH PRIVATE KEY')) {
+      // OpenSSH 格式需要解析内容，这里简单通过内容特征判断
+      if (privateKey.includes('ed25519') || privateKey.includes('ED25519')) {
+        return 'ed25519'
+      } else if (privateKey.includes('ecdsa')) {
+        return 'ecdsa'
+      }
+      return 'rsa' // OpenSSH 格式默认猜测 RSA
+    } else if (privateKey.includes('BEGIN PRIVATE KEY') || privateKey.includes('BEGIN ENCRYPTED PRIVATE KEY')) {
+      // PKCS8 通用格式，尝试用 crypto 解析来判断实际类型
+      try {
+        const { createPrivateKey } = require('crypto')
+        const keyObj = createPrivateKey({ key: privateKey, format: 'pem' })
+        const asymType = keyObj.asymmetricKeyType
+        if (asymType === 'ec') return 'ecdsa'
+        if (asymType === 'ed25519') return 'ed25519'
+        if (asymType === 'rsa') return 'rsa'
+      } catch {
+        // 可能是加密的 PKCS8，无法不带密码解析，默认 rsa
+      }
+      return 'rsa'
     }
     return 'rsa' // 默认
   }

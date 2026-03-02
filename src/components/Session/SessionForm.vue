@@ -787,12 +787,17 @@ const handleSave = async () => {
           sessionData.passphrase = form.passphrase || undefined
         }
         // 跳板机配置 - 转换为普通对象以便 IPC 传输
+        // 使用 null 而非 undefined，因为 IPC 和 JSON.stringify 会丢弃 undefined
         if (form.proxyJump) {
           sessionData.proxyJump = JSON.parse(JSON.stringify(form.proxyJump))
+        } else {
+          (sessionData as any).proxyJump = null
         }
         // 代理配置 - 转换为普通对象以便 IPC 传输
         if (form.proxy) {
           sessionData.proxy = JSON.parse(JSON.stringify(form.proxy))
+        } else {
+          (sessionData as any).proxy = null
         }
       } else if (form.type === 'rdp') {
         // RDP 特有配置

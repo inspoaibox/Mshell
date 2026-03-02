@@ -317,6 +317,14 @@ export class SessionManager {
       updatedAt: new Date()
     }
 
+    // 处理 null 值：前端用 null 表示"清除此字段"
+    // JSON 序列化和 IPC 传输会丢弃 undefined，所以前端用 null 代替
+    for (const key of Object.keys(updated) as (keyof SessionConfig)[]) {
+      if ((updated as any)[key] === null) {
+        delete (updated as any)[key]
+      }
+    }
+
     this.sessions.set(id, updated)
     await this.saveSessions()
   }

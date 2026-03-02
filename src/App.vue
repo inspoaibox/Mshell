@@ -710,11 +710,42 @@ function setupMainProcessShortcuts() {
 /**
  * 设置键盘快捷键
  */
-function setupKeyboardShortcuts() {
+async function setupKeyboardShortcuts() {
   console.log('[App] Setting up keyboard shortcuts...')
   
+  // 获取保存的快捷键配置
+  let savedShortcuts: Record<string, any> = {}
+  try {
+    const settings = await window.electronAPI.settings.get()
+    savedShortcuts = settings.shortcuts || {}
+    console.log('[App] Loaded saved shortcuts:', Object.keys(savedShortcuts).length)
+  } catch (error) {
+    console.error('[App] Failed to load saved shortcuts:', error)
+  }
+  
+  // 辅助函数：注册快捷键，考虑保存的配置
+  const registerShortcut = (id: string, defaultConfig: { key: string, ctrl?: boolean, alt?: boolean, shift?: boolean, description: string, action: () => void }) => {
+    const saved = savedShortcuts[id]
+    
+    // 如果保存的配置中 key 为空，表示用户清除了该快捷键，不注册
+    if (saved && !saved.key) {
+      console.log(`[App] Shortcut ${id} is cleared, skipping registration`)
+      return
+    }
+    
+    const config = {
+      ...defaultConfig,
+      key: saved?.key || defaultConfig.key,
+      ctrl: saved?.ctrl !== undefined ? saved.ctrl : defaultConfig.ctrl,
+      alt: saved?.alt !== undefined ? saved.alt : defaultConfig.alt,
+      shift: saved?.shift !== undefined ? saved.shift : defaultConfig.shift
+    }
+    
+    keyboardShortcutManager.register(id, config)
+  }
+  
   // Ctrl+N: 新建会话
-  keyboardShortcutManager.register('new-session', {
+  registerShortcut('new-session', {
     key: 'n',
     ctrl: true,
     description: '新建会话',
@@ -725,7 +756,7 @@ function setupKeyboardShortcuts() {
   })
 
   // Ctrl+T: 快速连接
-  keyboardShortcutManager.register('quick-connect', {
+  registerShortcut('quick-connect', {
     key: 't',
     ctrl: true,
     description: '快速连接',
@@ -736,7 +767,7 @@ function setupKeyboardShortcuts() {
   })
 
   // Ctrl+W: 关闭当前标签
-  keyboardShortcutManager.register('close-tab', {
+  registerShortcut('close-tab', {
     key: 'w',
     ctrl: true,
     description: '关闭当前标签',
@@ -749,7 +780,7 @@ function setupKeyboardShortcuts() {
   })
 
   // Ctrl+Tab: 下一个标签
-  keyboardShortcutManager.register('next-tab', {
+  registerShortcut('next-tab', {
     key: 'Tab',
     ctrl: true,
     description: '下一个标签',
@@ -760,7 +791,7 @@ function setupKeyboardShortcuts() {
   })
 
   // Ctrl+Shift+Tab: 上一个标签
-  keyboardShortcutManager.register('prev-tab', {
+  registerShortcut('prev-tab', {
     key: 'Tab',
     ctrl: true,
     shift: true,
@@ -772,7 +803,7 @@ function setupKeyboardShortcuts() {
   })
 
   // Ctrl+F: 搜索会话
-  keyboardShortcutManager.register('search-sessions', {
+  registerShortcut('search-sessions', {
     key: 'f',
     ctrl: true,
     description: '搜索会话',
@@ -790,7 +821,7 @@ function setupKeyboardShortcuts() {
   })
 
   // Ctrl+,: 打开设置
-  keyboardShortcutManager.register('open-settings', {
+  registerShortcut('open-settings', {
     key: ',',
     ctrl: true,
     description: '打开设置',
@@ -801,7 +832,7 @@ function setupKeyboardShortcuts() {
   })
 
   // Ctrl+Alt+L: 锁定会话
-  keyboardShortcutManager.register('lock-session', {
+  registerShortcut('lock-session', {
     key: 'l',
     ctrl: true,
     alt: true,
@@ -823,7 +854,7 @@ function setupKeyboardShortcuts() {
 
   // Ctrl+1~9: 切换到指定标签
   for (let i = 1; i <= 9; i++) {
-    keyboardShortcutManager.register(`switch-tab-${i}`, {
+    registerShortcut(`switch-tab-${i}`, {
       key: i.toString(),
       ctrl: true,
       description: `切换到第 ${i} 个标签`,
@@ -837,7 +868,7 @@ function setupKeyboardShortcuts() {
   }
   
   // Ctrl+G: 切换分屏视图
-  keyboardShortcutManager.register('toggle-split-view', {
+  registerShortcut('toggle-split-view', {
     key: 'g',
     ctrl: true,
     description: '切换分屏视图',
@@ -848,7 +879,7 @@ function setupKeyboardShortcuts() {
   })
   
   // Ctrl+\\: 切换会话列表显示
-  keyboardShortcutManager.register('toggle-session-list', {
+  registerShortcut('toggle-session-list', {
     key: '\\',
     ctrl: true,
     description: '切换会话列表',
@@ -859,7 +890,7 @@ function setupKeyboardShortcuts() {
   })
   
   // Ctrl+B: 切换广播模式
-  keyboardShortcutManager.register('toggle-broadcast', {
+  registerShortcut('toggle-broadcast', {
     key: 'b',
     ctrl: true,
     description: '切换广播模式',
@@ -872,7 +903,7 @@ function setupKeyboardShortcuts() {
   })
   
   // Alt+方向键: 在分屏面板间切换焦点
-  keyboardShortcutManager.register('focus-pane-left', {
+  registerShortcut('focus-pane-left', {
     key: 'ArrowLeft',
     alt: true,
     description: '切换到左侧面板',
@@ -883,7 +914,7 @@ function setupKeyboardShortcuts() {
     }
   })
   
-  keyboardShortcutManager.register('focus-pane-right', {
+  registerShortcut('focus-pane-right', {
     key: 'ArrowRight',
     alt: true,
     description: '切换到右侧面板',
@@ -894,7 +925,7 @@ function setupKeyboardShortcuts() {
     }
   })
   
-  keyboardShortcutManager.register('focus-pane-up', {
+  registerShortcut('focus-pane-up', {
     key: 'ArrowUp',
     alt: true,
     description: '切换到上方面板',
@@ -905,7 +936,7 @@ function setupKeyboardShortcuts() {
     }
   })
   
-  keyboardShortcutManager.register('focus-pane-down', {
+  registerShortcut('focus-pane-down', {
     key: 'ArrowDown',
     alt: true,
     description: '切换到下方面板',
@@ -917,7 +948,7 @@ function setupKeyboardShortcuts() {
   })
   
   // Alt+]: 下一个分屏面板
-  keyboardShortcutManager.register('focus-next-pane', {
+  registerShortcut('focus-next-pane', {
     key: ']',
     alt: true,
     description: '下一个分屏面板',
@@ -929,7 +960,7 @@ function setupKeyboardShortcuts() {
   })
   
   // Alt+[: 上一个分屏面板
-  keyboardShortcutManager.register('focus-prev-pane', {
+  registerShortcut('focus-prev-pane', {
     key: '[',
     alt: true,
     description: '上一个分屏面板',

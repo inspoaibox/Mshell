@@ -7,6 +7,7 @@ export interface AppSettings {
     theme: 'light' | 'dark' | 'auto'
     startWithSystem: boolean
     minimizeToTray: boolean
+    closeToTray: boolean
   }
   terminal: {
     defaultFontSize: number
@@ -36,7 +37,8 @@ export const useSettingsStore = defineStore('settings', () => {
       language: 'zh-CN',
       theme: 'auto',
       startWithSystem: false,
-      minimizeToTray: true
+      minimizeToTray: false,
+      closeToTray: false
     },
     terminal: {
       defaultFontSize: 14,

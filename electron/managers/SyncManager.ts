@@ -205,6 +205,9 @@ export class SyncManager {
       // 终端 AI 聊天历史不存在
     }
 
+    // 收集快捷命令
+    const { quickCommandManager } = await import('./QuickCommandManager')
+
     // 收集 SSH 密钥（包含私钥内容）
     const sshKeysWithContent = await this.collectSSHKeysWithPrivateKeys(sshKeyManager)
 
@@ -224,7 +227,8 @@ export class SyncManager {
       settings: appSettingsManager.getSettings(),
       aiConfig, // AI 配置（API Key 等）
       aiChatHistory, // AI 全局聊天历史
-      aiTerminalChatHistory // 终端 AI 聊天历史
+      aiTerminalChatHistory, // 终端 AI 聊天历史
+      quickCommands: quickCommandManager.getAll() // 快捷命令
     }
   }
 
@@ -345,6 +349,47 @@ export class SyncManager {
   }
 
   /**
+   * 查找已存在的 MShell 同步 Gist
+   * 用于在新设备上恢复同步
+   */
+  async findExistingGist(token: string): Promise<{ found: boolean; gistId?: string; gistUrl?: string; error?: string }> {
+    try {
+      const cleanToken = token.trim().replace(/[\r\n]/g, '')
+      
+      // 获取用户的所有 Gist
+      const response = await axios.get('https://api.github.com/gists', {
+        headers: {
+          'Authorization': `token ${cleanToken}`,
+          'Accept': 'application/vnd.github.v3+json'
+        },
+        params: {
+          per_page: 100 // 获取最多 100 个 Gist
+        }
+      })
+      
+      // 查找包含 mshell-sync.json 文件的 Gist
+      for (const gist of response.data) {
+        if (gist.files && gist.files['mshell-sync.json']) {
+          console.log('[SyncManager] Found existing MShell Gist:', gist.id)
+          return {
+            found: true,
+            gistId: gist.id,
+            gistUrl: gist.html_url
+          }
+        }
+      }
+      
+      return { found: false }
+    } catch (error: any) {
+      console.error('[SyncManager] Error finding existing Gist:', error)
+      return {
+        found: false,
+        error: error.response?.status === 401 ? 'Token 无效或已过期' : error.message
+      }
+    }
+  }
+
+  /**
    * 创建 GitHub Gist
    */
   private async createGist(token: string, content: string): Promise<{ id: string; url: string }> {
@@ -447,6 +492,49 @@ export class SyncManager {
     } catch (error: any) {
       return {
         valid: false,
+        error: error.response?.status === 401 ? 'Token 无效或已过期' : error.message
+      }
+    }
+  }
+
+  /**
+   * 查找已存在的 MShell 同步 Snippet
+   * 用于在新设备上恢复同步
+   */
+  async findExistingSnippet(token: string, instanceUrl?: string): Promise<{ found: boolean; snippetId?: string; snippetUrl?: string; error?: string }> {
+    try {
+      const cleanToken = token.trim().replace(/[\r\n]/g, '')
+      const baseUrl = (instanceUrl || 'https://gitlab.com').trim()
+      
+      // 获取用户的所有 Snippet
+      const response = await axios.get(`${baseUrl}/api/v4/snippets`, {
+        headers: {
+          'PRIVATE-TOKEN': cleanToken
+        },
+        params: {
+          per_page: 100
+        }
+      })
+      
+      // 查找包含 mshell-sync.json 文件的 Snippet
+      for (const snippet of response.data) {
+        // 检查标题或文件名
+        if (snippet.title?.includes('MShell Sync Data') || 
+            snippet.files?.some((f: any) => f.path === 'mshell-sync.json')) {
+          console.log('[SyncManager] Found existing MShell Snippet:', snippet.id)
+          return {
+            found: true,
+            snippetId: String(snippet.id),
+            snippetUrl: snippet.web_url
+          }
+        }
+      }
+      
+      return { found: false }
+    } catch (error: any) {
+      console.error('[SyncManager] Error finding existing Snippet:', error)
+      return {
+        found: false,
         error: error.response?.status === 401 ? 'Token 无效或已过期' : error.message
       }
     }
@@ -643,7 +731,8 @@ export class SyncManager {
         restoreScheduledTasks: true,
         restoreWorkflows: true,
         restoreAIConfig: true, // 恢复 AI 配置
-        restoreAIChatHistory: true // 恢复 AI 聊天历史（全局 + 终端）
+        restoreAIChatHistory: true, // 恢复 AI 聊天历史（全局 + 终端）
+        restoreQuickCommands: true // 恢复快捷命令
       })
       
       // 更新同步状态
@@ -859,7 +948,8 @@ export class SyncManager {
         restoreScheduledTasks: true,
         restoreWorkflows: true,
         restoreAIConfig: true, // 恢复 AI 配置
-        restoreAIChatHistory: true // 恢复 AI 聊天历史（全局 + 终端）
+        restoreAIChatHistory: true, // 恢复 AI 聊天历史（全局 + 终端）
+        restoreQuickCommands: true // 恢复快捷命令
       })
       
       // 更新同步状态
