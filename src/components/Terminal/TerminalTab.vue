@@ -1911,6 +1911,7 @@ defineExpose({
   height: 20px !important;
   width: 20px !important;
   min-width: 20px !important;
+  color: var(--text-secondary) !important;
 }
 
 .action-btn {
@@ -1919,18 +1920,18 @@ defineExpose({
   width: 20px !important;
   min-width: 20px !important;
   border-radius: 4px;
-  color: var(--text-secondary);
+  color: var(--text-secondary) !important;
   transition: all 0.2s;
 }
 
 .action-btn:hover {
   background-color: var(--bg-tertiary);
-  color: var(--primary-color);
+  color: var(--primary-color) !important;
 }
 
 .action-btn.is-active {
   background-color: rgba(14, 165, 233, 0.15);
-  color: var(--primary-color);
+  color: var(--primary-color) !important;
 }
 
 .font-btn {

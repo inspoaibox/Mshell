@@ -114,7 +114,7 @@ const handleMenuSelect = (index: string) => {
 
 <style scoped>
 .sidebar {
-  width: 72px;
+  width: 52px;
   height: 100%;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
@@ -149,11 +149,11 @@ const handleMenuSelect = (index: string) => {
 
 /* Logo区域 */
 .sidebar-header {
-  height: 72px;
+  height: 52px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm);
   border-bottom: 1px solid var(--border-light);
   flex-shrink: 0;
 }
@@ -163,8 +163,8 @@ const handleMenuSelect = (index: string) => {
 }
 
 .logo-icon {
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
   background: transparent;
   border-radius: var(--radius-lg);
   display: flex;
@@ -223,8 +223,8 @@ const handleMenuSelect = (index: string) => {
 }
 
 .nav-item {
-  width: 48px;
-  height: 48px;
+  width: 38px;
+  height: 38px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -322,12 +322,12 @@ const handleMenuSelect = (index: string) => {
 /* 响应式 */
 @media (max-height: 600px) {
   .sidebar-header {
-    height: 60px;
+    height: 48px;
   }
   
   .logo-icon {
-    width: 36px;
-    height: 36px;
+    width: 30px;
+    height: 30px;
   }
   
   .logo-image {
@@ -335,8 +335,8 @@ const handleMenuSelect = (index: string) => {
   }
   
   .nav-item {
-    width: 48px;
-    height: 48px;
+    width: 36px;
+    height: 36px;
   }
 }
 </style>
