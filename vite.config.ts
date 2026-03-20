@@ -18,7 +18,13 @@ export default defineConfig({
                 'ssh2',
                 'ssh2-sftp-client',
                 '@aws-sdk/client-s3',
-                'aws-sdk'
+                'aws-sdk',
+                'archiver',
+                'unzipper',
+                'tar',
+                'node-cron',
+                'ws',
+                'axios'
               ]
             }
           }

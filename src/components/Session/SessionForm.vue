@@ -85,14 +85,21 @@
         </el-form-item>
 
         <el-form-item
-          v-if="form.authType === 'privateKey' && form.privateKeyPath"
+          v-if="form.authType === 'privateKey'"
           label="本地私钥"
         >
-          <el-input v-model="form.privateKeyPath" readonly>
-            <template #append>
-              <el-button @click="form.privateKeyPath = ''; form.privateKeyId = ''">清除</el-button>
-            </template>
-          </el-input>
+          <template v-if="form.privateKeyPath">
+            <el-input v-model="form.privateKeyPath" readonly>
+              <template #append>
+                <el-button @click="form.privateKeyPath = ''; form.privateKeyId = ''">清除</el-button>
+              </template>
+            </el-input>
+          </template>
+          <template v-else>
+            <el-button @click="handleSelectLocalKeyFile" style="width: 100%;">
+              选择本地私钥文件
+            </el-button>
+          </template>
         </el-form-item>
 
         <el-form-item
@@ -779,10 +786,17 @@ const handleSave = async () => {
           sessionData.password = form.password
         } else {
           // 优先使用SSH密钥ID，其次使用本地文件路径
+          // 使用 null 显式清除另一个字段，防止旧值在 merge 时被保留
           if (form.privateKeyId) {
             sessionData.privateKeyId = form.privateKeyId
+            ;(sessionData as any).privateKeyPath = null
           } else if (form.privateKeyPath) {
             sessionData.privateKeyPath = form.privateKeyPath
+            ;(sessionData as any).privateKeyId = null
+          } else {
+            // 两个都没选，都清除
+            ;(sessionData as any).privateKeyId = null
+            ;(sessionData as any).privateKeyPath = null
           }
           sessionData.passphrase = form.passphrase || undefined
         }

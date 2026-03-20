@@ -125,7 +125,14 @@ onMounted(() => {
       console.log(`[TerminalView:onData] connectionId=${props.connectionId}, data="${data.replace(/[\r\n]/g, '\\n')}", inputCallback=${inst?.inputCallback ? 'SET' : 'NULL'}`)
       
       // 更新当前行缓冲（用于自动补全）
-      if (data === '\r' || data === '\n') {
+      // 注意：当 echoEnabled=false（密码输入模式）时，不更新缓冲，避免密码被记录或触发补全
+      if (inst?.echoEnabled === false) {
+        // 密码输入模式：只处理 Enter（清空缓冲），不记录字符
+        if (data === '\r' || data === '\n') {
+          currentCommand = ''
+          currentLineBuffer = ''
+        }
+      } else if (data === '\r' || data === '\n') {
         // 回车键 - 命令执行
         if (currentCommand.trim()) {
           commandStartTime = Date.now()
@@ -157,8 +164,9 @@ onMounted(() => {
       }
       
       // 通过回调引用发射输入事件（解决闭包陷阱）
-      console.log(`[TerminalView:onData] currentLineBuffer="${currentLineBuffer}", will call inputCallback: ${!!(currentLineBuffer && inst?.inputCallback)}`)
-      if (currentLineBuffer && inst?.inputCallback) {
+      // 仅在终端处于正常回显模式时触发补全（密码输入时 echoEnabled=false，禁用补全）
+      console.log(`[TerminalView:onData] currentLineBuffer="${currentLineBuffer}", will call inputCallback: ${!!(currentLineBuffer && inst?.inputCallback && inst?.echoEnabled !== false)}`)
+      if (currentLineBuffer && inst?.inputCallback && inst?.echoEnabled !== false) {
         inst.inputCallback(data, currentLineBuffer)
         
         // 发射光标位置（用于定位补全弹窗）
@@ -166,45 +174,44 @@ onMounted(() => {
           try {
             const rect = terminalContainer.value.getBoundingClientRect()
             
-            // 确保容器有有效尺寸
+            // 确保容器有有效尺寸，无效时跳过光标位置更新但不中断后续逻辑
             if (rect.width <= 0 || rect.height <= 0) {
               console.warn('[TerminalView] Container has invalid size, skipping cursor position update')
-              return
-            }
-            
-            // 获取终端的实际单元格尺寸
-            // xterm.js 内部使用 _core._renderService.dimensions
-            const core = (terminal as any)._core
-            let cellWidth = 9
-            let cellHeight = 20
-            
-            if (core?._renderService?.dimensions) {
-              const dims = core._renderService.dimensions
-              cellWidth = dims.css.cell.width || dims.actualCellWidth || cellWidth
-              cellHeight = dims.css.cell.height || dims.actualCellHeight || cellHeight
             } else {
-              // 回退：使用字体大小估算
-              const fontSize = terminal.options.fontSize || 14
-              cellWidth = fontSize * 0.6
-              cellHeight = fontSize * 1.2
-            }
-            
-            // 获取光标位置
-            const cursorX = terminal.buffer.active.cursorX
-            const cursorY = terminal.buffer.active.cursorY
-            
-            // 计算光标在视口中的绝对位置
-            const padding = 4 // 终端内边距（xterm 默认较小）
-            
-            // 计算位置
-            const x = rect.left + padding + cursorX * cellWidth
-            const y = rect.top + padding + cursorY * cellHeight
-            
-            // 验证位置是否合理（在屏幕范围内）
-            if (x >= 0 && y >= 0 && x < window.innerWidth + 100 && y < window.innerHeight + 100) {
-              inst.cursorCallback({ x, y })
-            } else {
-              console.warn('[TerminalView] Cursor position out of bounds:', { x, y, cursorX, cursorY })
+              // 获取终端的实际单元格尺寸
+              // xterm.js 内部使用 _core._renderService.dimensions
+              const core = (terminal as any)._core
+              let cellWidth = 9
+              let cellHeight = 20
+              
+              if (core?._renderService?.dimensions) {
+                const dims = core._renderService.dimensions
+                cellWidth = dims.css.cell.width || dims.actualCellWidth || cellWidth
+                cellHeight = dims.css.cell.height || dims.actualCellHeight || cellHeight
+              } else {
+                // 回退：使用字体大小估算
+                const fontSize = terminal.options.fontSize || 14
+                cellWidth = fontSize * 0.6
+                cellHeight = fontSize * 1.2
+              }
+              
+              // 获取光标位置
+              const cursorX = terminal.buffer.active.cursorX
+              const cursorY = terminal.buffer.active.cursorY
+              
+              // 计算光标在视口中的绝对位置
+              const padding = 4 // 终端内边距（xterm 默认较小）
+              
+              // 计算位置
+              const x = rect.left + padding + cursorX * cellWidth
+              const y = rect.top + padding + cursorY * cellHeight
+              
+              // 验证位置是否合理（在屏幕范围内）
+              if (x >= 0 && y >= 0 && x < window.innerWidth + 100 && y < window.innerHeight + 100) {
+                inst.cursorCallback({ x, y })
+              } else {
+                console.warn('[TerminalView] Cursor position out of bounds:', { x, y, cursorX, cursorY })
+              }
             }
           } catch (e) {
             console.error('[TerminalView] Error calculating cursor position:', e)
@@ -309,10 +316,14 @@ onMounted(() => {
       } else if (result === 'paste') {
         const text = await navigator.clipboard.readText()
         if (text) {
-          // 使用 bracketed paste mode 包裹粘贴内容
-          // 这样 vim/nano 等编辑器能正确识别粘贴的文本
-          const bracketedText = `\x1b[200~${text}\x1b[201~`
-          window.electronAPI.ssh.write(props.connectionId, bracketedText)
+          // 统一换行符：将 \r\n 和单独的 \n 都转为 \r（SSH 终端标准）
+          const normalizedText = text.replace(/\r\n/g, '\r').replace(/\n/g, '\r')
+          // 只在远端启用了 bracketed paste mode 时才包裹序列
+          const inst = terminalManager.get(props.connectionId)
+          const pasteText = inst?.bracketedPasteEnabled
+            ? `\x1b[200~${normalizedText}\x1b[201~`
+            : normalizedText
+          window.electronAPI.ssh.write(props.connectionId, pasteText)
           recordPastedCommands(text)
         }
       } else if (result === 'selectAll') {

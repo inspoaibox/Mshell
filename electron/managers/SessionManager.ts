@@ -402,9 +402,9 @@ export class SessionManager {
   /**
    * 创建分组
    */
-  async createGroup(name: string): Promise<SessionGroup> {
+  async createGroup(name: string, id?: string): Promise<SessionGroup> {
     const newGroup: SessionGroup = {
-      id: uuidv4(),
+      id: id || uuidv4(),
       name,
       sessions: [] // Keep for compatibility but don't persist
     }

@@ -9,6 +9,7 @@ export function useLocale() {
    */
   const formatDate = (date: Date | string | number, options?: Intl.DateTimeFormatOptions): string => {
     const dateObj = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date
+    if (isNaN(dateObj.getTime())) return '-'
     
     const defaultOptions: Intl.DateTimeFormatOptions = {
       year: 'numeric',
@@ -25,6 +26,7 @@ export function useLocale() {
    */
   const formatTime = (date: Date | string | number, options?: Intl.DateTimeFormatOptions): string => {
     const dateObj = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date
+    if (isNaN(dateObj.getTime())) return '-'
     
     const defaultOptions: Intl.DateTimeFormatOptions = {
       hour: '2-digit',
@@ -41,6 +43,7 @@ export function useLocale() {
    */
   const formatDateTime = (date: Date | string | number, options?: Intl.DateTimeFormatOptions): string => {
     const dateObj = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date
+    if (isNaN(dateObj.getTime())) return '-'
     
     const defaultOptions: Intl.DateTimeFormatOptions = {
       year: 'numeric',
@@ -106,6 +109,7 @@ export function useLocale() {
    */
   const formatRelativeTime = (date: Date | string | number): string => {
     const dateObj = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date
+    if (isNaN(dateObj.getTime())) return '-'
     const now = new Date()
     const diffMs = now.getTime() - dateObj.getTime()
     const diffSecs = Math.floor(diffMs / 1000)

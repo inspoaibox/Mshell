@@ -579,7 +579,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import {
   Connection, FolderOpened, Back, FolderAdd,
@@ -754,22 +754,54 @@ const computedOctalPermission = computed(() => {
 })
 
 onMounted(async () => {
-  // 设置默认本地路径为用户目录
-  const userProfile = (window as any).electronAPI.process?.env?.USERPROFILE || 
-                      (window as any).electronAPI.process?.env?.HOME || 
-                      'C:\\'
-  localPath.value = userProfile
-  localPathInput.value = userProfile
-  
-  // 检测当前盘符
-  if (userProfile.match(/^[A-Z]:/i)) {
-    currentDrive.value = userProfile.substring(0, 2).toUpperCase()
+  try {
+    // 设置默认本地路径为用户目录
+    const userProfile = (window as any).electronAPI.process?.env?.USERPROFILE || 
+                        (window as any).electronAPI.process?.env?.HOME || 
+                        'C:\\'
+    localPath.value = userProfile
+    localPathInput.value = userProfile
+    
+    // 检测当前盘符
+    if (userProfile.match(/^[A-Z]:/i)) {
+      currentDrive.value = userProfile.substring(0, 2).toUpperCase()
+    }
+    
+    await loadSessions()
+    await loadLocalDirectory()
+    await loadIncompleteTransfers()
+    loadTransferHistory()
+  } catch (error) {
+    console.error('[SFTPPanel] Initialization error:', error)
+    ElMessage.error('文件传输面板初始化失败')
   }
-  
-  await loadSessions()
-  await loadLocalDirectory()
-  await loadIncompleteTransfers()
-  loadTransferHistory()
+
+  // 监听传输进度事件
+  window.electronAPI.sftp.onProgress((taskId: string, progress: any) => {
+    const transfer = transfers.value.find(t => t.id === taskId)
+    if (transfer) {
+      transfer.progress = progress.percentage || 0
+      transfer.speed = progress.speed || 0
+      transfer.eta = progress.eta || 0
+    }
+  })
+
+  window.electronAPI.sftp.onComplete((taskId: string) => {
+    const transfer = transfers.value.find(t => t.id === taskId)
+    if (transfer) {
+      transfer.status = 'completed'
+      transfer.progress = 100
+      transfer.endTime = new Date()
+    }
+  })
+
+  window.electronAPI.sftp.onError((taskId: string, error: string) => {
+    const transfer = transfers.value.find(t => t.id === taskId)
+    if (transfer) {
+      transfer.status = 'failed'
+      transfer.endTime = new Date()
+    }
+  })
 })
 
 const loadSessions = async () => {
@@ -1714,12 +1746,6 @@ const uploadSelected = async () => {
     ElMessage.warning(`已跳过 ${skippedFolders.length} 个文件夹`)
   }
   
-  // 准备批量上传的文件列表
-  const files = filesToUpload.map(file => ({
-    localPath: file.path,
-    remotePath: `${remotePath.value}/${file.name}`.replace(/\/+/g, '/')
-  }))
-  
   // 为每个文件创建传输记录
   const transferIds: string[] = []
   for (const file of filesToUpload) {
@@ -1737,10 +1763,17 @@ const uploadSelected = async () => {
       targetPath: `${remotePath.value}/${file.name}`.replace(/\/+/g, '/'),
       localPath: file.path,
       remotePath: `${remotePath.value}/${file.name}`.replace(/\/+/g, '/'),
-      priority: 3, // 默认优先级
+      priority: 3,
       startTime: new Date()
     })
   }
+
+  // 准备批量上传的文件列表（携带前端生成的 taskId）
+  const files = filesToUpload.map((file, index) => ({
+    localPath: file.path,
+    remotePath: `${remotePath.value}/${file.name}`.replace(/\/+/g, '/'),
+    taskId: transferIds[index]
+  }))
   
   try {
     // 使用批量上传 API
@@ -1828,13 +1861,8 @@ const downloadSelected = async () => {
     ElMessage.warning(`已跳过 ${skippedFolders.length} 个文件夹`)
   }
   
-  // 准备批量下载的文件列表
   const separator = localPath.value.endsWith('\\') ? '' : '\\'
-  const files = filesToDownload.map(file => ({
-    remotePath: file.path,
-    localPath: localPath.value + separator + file.name
-  }))
-  
+
   // 为每个文件创建传输记录
   const transferIds: string[] = []
   for (const file of filesToDownload) {
@@ -1854,10 +1882,17 @@ const downloadSelected = async () => {
       targetPath: localFilePath,
       localPath: localFilePath,
       remotePath: file.path,
-      priority: 3, // 默认优先级
+      priority: 3,
       startTime: new Date()
     })
   }
+
+  // 准备批量下载的文件列表（携带前端生成的 taskId）
+  const files = filesToDownload.map((file, index) => ({
+    remotePath: file.path,
+    localPath: localPath.value + separator + file.name,
+    taskId: transferIds[index]
+  }))
   
   try {
     // 使用批量下载 API
@@ -2324,7 +2359,10 @@ const formatDuration = (ms: number): string => {
 }
 
 const formatHistoryTime = (date: Date): string => {
-  return date.toLocaleString('zh-CN', {
+  if (!date) return '-'
+  const d = date instanceof Date ? date : new Date(date)
+  if (isNaN(d.getTime())) return '-'
+  return d.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -2340,7 +2378,9 @@ const formatSize = ({ size }: { size: number }) => {
 
 const formatTime = ({ modifyTime }: { modifyTime: Date }) => {
   if (!modifyTime) return '-'
-  return formatDateTime(modifyTime)
+  const d = modifyTime instanceof Date ? modifyTime : new Date(modifyTime)
+  if (isNaN(d.getTime())) return '-'
+  return formatDateTime(d)
 }
 
 const formatPermissions = (permissions: number | undefined) => {

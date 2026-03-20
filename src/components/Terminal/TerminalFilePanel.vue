@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="terminal-file-panel">
     <div class="panel-header">
       <div class="header-title">
@@ -194,14 +194,56 @@
     </el-dialog>
     
     <!-- 编辑对话框 -->
-    <el-dialog v-model="showEditDialog" title="编辑文件" width="800px" append-to-body>
+    <el-dialog v-model="showEditDialog" title="编辑文件" width="860px" append-to-body @closed="searchText = ''; replaceText = ''">
       <div class="edit-content">
+        <!-- 搜索替换工具栏（常驻） -->
+        <div class="search-replace-bar">
+          <div class="search-row">
+            <el-input
+              v-model="searchText"
+              placeholder="搜索"
+              size="small"
+              clearable
+              class="search-input"
+              @keyup.enter="findNext"
+              @keyup.shift.enter.prevent="findPrev"
+            >
+              <template #suffix>
+                <span class="match-info">{{ searchMatchInfo }}</span>
+              </template>
+            </el-input>
+            <el-tooltip content="区分大小写">
+              <el-button
+                size="small"
+                :type="searchMatchCase ? 'primary' : ''"
+                @click="searchMatchCase = !searchMatchCase"
+                class="case-btn"
+              >Aa</el-button>
+            </el-tooltip>
+            <el-button size="small" :icon="ArrowUp" @click="findPrev" :disabled="searchMatches.length === 0" />
+            <el-button size="small" :icon="ArrowDown" @click="findNext" :disabled="searchMatches.length === 0" />
+          </div>
+          <div class="replace-row">
+            <el-input
+              v-model="replaceText"
+              placeholder="替换"
+              size="small"
+              clearable
+              class="search-input"
+              @keyup.enter="replaceCurrent"
+            />
+            <el-button size="small" @click="replaceCurrent" :disabled="searchMatches.length === 0">替换</el-button>
+            <el-button size="small" @click="replaceAll" :disabled="!searchText">全部替换</el-button>
+          </div>
+        </div>
+
         <div v-if="editLoading" class="preview-loading">
           <el-icon class="is-loading" :size="32"><Loading /></el-icon>
           <span>加载中...</span>
         </div>
         <el-input
           v-else
+          ref="editTextareaRef"
           v-model="editContent"
           type="textarea"
           :rows="20"
@@ -209,8 +251,12 @@
         />
       </div>
       <template #footer>
-        <el-button @click="showEditDialog = false">取消</el-button>
-        <el-button type="primary" @click="saveEditedFile" :loading="editSaving">保存</el-button>
+        <div class="edit-footer">
+          <div class="footer-actions">
+            <el-button @click="showEditDialog = false">取消</el-button>
+            <el-button type="primary" @click="saveEditedFile" :loading="editSaving">保存</el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
     
@@ -344,7 +390,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Close, Back, HomeFilled, FolderOpened, Refresh, Plus, FolderAdd,
   Document, Upload, Download, Folder, Link, Edit, Delete, Lock, View,
-  ZoomIn, EditPen, Loading, Position, Box, QuestionFilled
+  ZoomIn, EditPen, Loading, Position, Box, QuestionFilled, Search, ArrowUp, ArrowDown
 } from '@element-plus/icons-vue'
 
 interface FileInfo {
@@ -421,6 +467,96 @@ const editContent = ref('')
 const editLoading = ref(false)
 const editSaving = ref(false)
 const editingFilePath = ref('')
+
+// 搜索替换
+const editTextareaRef = ref<any>(null)
+const searchText = ref('')
+const replaceText = ref('')
+const searchMatchCase = ref(false)
+const searchCurrentIndex = ref(-1)
+const searchMatches = ref<number[]>([])
+
+const escapeRegex = (s: string) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, (c) => `\\${c}`)
+
+const computedSearchMatches = computed(() => {
+  if (!searchText.value || !editContent.value) return []
+  const flags = searchMatchCase.value ? 'g' : 'gi'
+  const regex = new RegExp(escapeRegex(searchText.value), flags)
+  const matches: number[] = []
+  let m: RegExpExecArray | null
+  while ((m = regex.exec(editContent.value)) !== null) {
+    matches.push(m.index)
+  }
+  return matches
+})
+
+watch(computedSearchMatches, (val) => {
+  searchMatches.value = val
+  searchCurrentIndex.value = val.length > 0 ? 0 : -1
+  if (val.length > 0) nextTick(() => scrollToMatch(0))
+})
+
+watch([searchText, searchMatchCase], () => {
+  searchMatches.value = computedSearchMatches.value
+  searchCurrentIndex.value = searchMatches.value.length > 0 ? 0 : -1
+  if (searchMatches.value.length > 0) nextTick(() => scrollToMatch(0))
+})
+
+const searchMatchInfo = computed(() => {
+  if (!searchText.value) return ''
+  const total = searchMatches.value.length
+  if (total === 0) return '无匹配'
+  return `${searchCurrentIndex.value + 1} / ${total}`
+})
+
+const getNativeTextarea = (): HTMLTextAreaElement | null => {
+  if (!editTextareaRef.value) return null
+  return editTextareaRef.value.textarea || editTextareaRef.value.$el?.querySelector('textarea') || null
+}
+
+const scrollToMatch = (index: number) => {
+  const ta = getNativeTextarea()
+  if (!ta || searchMatches.value.length === 0) return
+  const pos = searchMatches.value[index]
+  const len = searchText.value.length
+  ta.focus()
+  ta.setSelectionRange(pos, pos + len)
+  const lineHeight = parseInt(getComputedStyle(ta).lineHeight) || 20
+  const textBefore = editContent.value.slice(0, pos)
+  const linesBefore = textBefore.split('\n').length - 1
+  const targetScrollTop = linesBefore * lineHeight - ta.clientHeight / 2
+  ta.scrollTop = Math.max(0, targetScrollTop)
+}
+
+const findNext = () => {
+  if (searchMatches.value.length === 0) return
+  searchCurrentIndex.value = (searchCurrentIndex.value + 1) % searchMatches.value.length
+  scrollToMatch(searchCurrentIndex.value)
+}
+
+const findPrev = () => {
+  if (searchMatches.value.length === 0) return
+  searchCurrentIndex.value = (searchCurrentIndex.value - 1 + searchMatches.value.length) % searchMatches.value.length
+  scrollToMatch(searchCurrentIndex.value)
+}
+
+const replaceCurrent = () => {
+  if (searchMatches.value.length === 0 || searchCurrentIndex.value < 0) return
+  const idx = searchMatches.value[searchCurrentIndex.value]
+  const before = editContent.value.slice(0, idx)
+  const after = editContent.value.slice(idx + searchText.value.length)
+  editContent.value = before + replaceText.value + after
+}
+
+const replaceAll = () => {
+  if (!searchText.value) return
+  const flags = searchMatchCase.value ? 'g' : 'gi'
+  const regex = new RegExp(escapeRegex(searchText.value), flags)
+  const count = (editContent.value.match(regex) || []).length
+  editContent.value = editContent.value.replace(regex, replaceText.value)
+  ElMessage.success(`已替换 ${count} 处`)
+}
+
 
 // 权限编辑
 const permissionBits = ref({
@@ -1886,5 +2022,51 @@ watch(() => props.currentDir, (newDir) => {
   font-size: var(--text-sm);
   line-height: 1.5;
   resize: none;
+}
+
+.search-replace-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--bg-secondary, #f5f7fa);
+  border: 1px solid var(--border-color, #e4e7ed);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.search-row,
+.replace-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.search-input {
+  flex: 1;
+}
+
+.match-info {
+  font-size: 11px;
+  color: var(--text-secondary, #909399);
+  white-space: nowrap;
+  padding-right: 4px;
+}
+
+.case-btn {
+  font-weight: bold;
+  min-width: 32px;
+}
+
+.edit-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.footer-actions {
+  display: flex;
+  gap: 8px;
 }
 </style>

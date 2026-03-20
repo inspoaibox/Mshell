@@ -137,7 +137,8 @@ export class SSHConnectionManager extends EventEmitter {
             ISIG: 1,
             ICRNL: 1,
             ONLCR: 1,
-            OPOST: 1
+            OPOST: 1,
+            VERASE: 127  // 0x7F (DEL) - 匹配 xterm.js 发送的 Backspace 字符
           }
         }
 

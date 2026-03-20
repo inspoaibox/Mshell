@@ -830,6 +830,28 @@ export class AIManager {
   // ==================== 持久化 ====================
 
   /**
+   * 重新从文件加载配置（备份恢复后使用）
+   */
+  async reloadConfig(): Promise<void> {
+    // 清空内存中的数据
+    this.channels.clear()
+    this.models.clear()
+    this.config = {
+      temperature: 0.7,
+      maxTokens: 2000,
+      timeout: 30000,
+      prompts: {
+        explain: PROMPT_TEMPLATES.explain.template,
+        optimize: PROMPT_TEMPLATES.optimize.template,
+        write: PROMPT_TEMPLATES.write.template
+      }
+    }
+    // 重新从文件加载
+    await this.loadConfig()
+    logger.logInfo('system', 'AI config reloaded from file')
+  }
+
+  /**
    * 加载配置
    */
   private async loadConfig(): Promise<void> {

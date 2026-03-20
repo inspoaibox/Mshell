@@ -285,7 +285,7 @@ export function registerSFTPHandlers() {
   // 批量上传文件
   ipcMain.handle(
     'sftp:uploadFiles',
-    async (_event, connectionId: string, files: Array<{ localPath: string; remotePath: string }>) => {
+    async (_event, connectionId: string, files: Array<{ localPath: string; remotePath: string; taskId?: string }>) => {
       try {
         const results = await sftpManager.uploadFiles(connectionId, files)
         return { success: true, results }
@@ -298,7 +298,7 @@ export function registerSFTPHandlers() {
   // 批量下载文件
   ipcMain.handle(
     'sftp:downloadFiles',
-    async (_event, connectionId: string, files: Array<{ remotePath: string; localPath: string }>) => {
+    async (_event, connectionId: string, files: Array<{ remotePath: string; localPath: string; taskId?: string }>) => {
       try {
         const results = await sftpManager.downloadFiles(connectionId, files)
         return { success: true, results }

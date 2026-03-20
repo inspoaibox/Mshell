@@ -85,9 +85,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('sftp:changePermissions', connectionId, path, mode),
     getAllTasks: () => ipcRenderer.invoke('sftp:getAllTasks'),
     cancelTask: (taskId: string) => ipcRenderer.invoke('sftp:cancelTask', taskId),
-    uploadFiles: (connectionId: string, files: Array<{ localPath: string; remotePath: string }>) =>
+    uploadFiles: (connectionId: string, files: Array<{ localPath: string; remotePath: string; taskId?: string }>) =>
       ipcRenderer.invoke('sftp:uploadFiles', connectionId, files),
-    downloadFiles: (connectionId: string, files: Array<{ remotePath: string; localPath: string }>) =>
+    downloadFiles: (connectionId: string, files: Array<{ remotePath: string; localPath: string; taskId?: string }>) =>
       ipcRenderer.invoke('sftp:downloadFiles', connectionId, files),
     deleteFiles: (connectionId: string, filePaths: string[]) =>
       ipcRenderer.invoke('sftp:deleteFiles', connectionId, filePaths),
@@ -185,6 +185,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteFile: (filePath: string) => ipcRenderer.invoke('fs:deleteFile', filePath),
     rename: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
     stat: (filePath: string) => ipcRenderer.invoke('fs:stat', filePath),
+    writeFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', filePath, content),
     compress: (sourcePath: string, archivePath: string) => 
       ipcRenderer.invoke('fs:compress', sourcePath, archivePath),
     compressMultiple: (sourcePaths: string[], archivePath: string) => 

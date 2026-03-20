@@ -477,43 +477,59 @@ export class BackupManager {
     restoreQuickCommands?: boolean
   }): Promise<void> {
     try {
-      // 恢复会话
-      if (options.restoreSessions && backupData.sessions) {
-        const currentSessions = sessionManager.getAllSessions()
-        for (const session of backupData.sessions) {
-          try {
-            // 检查是否存在相同会话（通过 ID 或 名称+IP+用户名 判断）
-            const existing = currentSessions.find(s =>
-              s.id === session.id ||
-              (s.name === session.name && s.host === session.host && s.username === session.username)
-            )
-
-            if (existing) {
-              // 更新现有会话
-              const { id, ...updates } = session
-              await sessionManager.updateSession(existing.id, updates)
-            } else {
-              // 创建新会话
-              await sessionManager.createSession(session)
-            }
-          } catch (error) {
-            logger.logError('system', `Failed to restore session: ${session.name}`, error as Error)
-          }
-        }
-
-        // 恢复会话分组
+      // 恢复会话（先恢复分组，再恢复会话，确保 groupId 能正确匹配）
+      if (options.restoreSessions) {
+        // 第一步：先恢复分组，保留原始 ID
         if (backupData.sessionGroups) {
           const currentGroups = sessionManager.getAllGroups()
           for (const group of backupData.sessionGroups) {
             try {
-              const existing = currentGroups.find(g => g.id === group.id || g.name === group.name)
-              if (!existing) {
-                await sessionManager.createGroup(group.name)
-              } else if (existing.name !== group.name) {
-                await sessionManager.renameGroup(existing.id, group.name)
+              const existingById = currentGroups.find(g => g.id === group.id)
+              const existingByName = currentGroups.find(g => g.name === group.name)
+
+              if (existingById) {
+                // ID 已存在，确保名称一致
+                if (existingById.name !== group.name) {
+                  await sessionManager.renameGroup(existingById.id, group.name)
+                }
+              } else if (existingByName) {
+                // 名称存在但 ID 不同：用原始 ID 重建，迁移旧分组下的会话
+                const oldId = existingByName.id
+                await sessionManager.createGroup(group.name + '__migrating__', group.id)
+                const sessionsToMigrate = sessionManager.getAllSessions().filter(s => (s as any).group === oldId)
+                for (const s of sessionsToMigrate) {
+                  await sessionManager.updateSession(s.id, { group: group.id })
+                }
+                await sessionManager.deleteGroup(oldId)
+                await sessionManager.renameGroup(group.id, group.name)
+              } else {
+                // 不存在，用原始 ID 创建
+                await sessionManager.createGroup(group.name, group.id)
               }
             } catch (error) {
               logger.logError('system', `Failed to restore group: ${group.name}`, error as Error)
+            }
+          }
+        }
+
+        // 第二步：恢复会话（此时分组 ID 已就绪）
+        if (backupData.sessions) {
+          const currentSessions = sessionManager.getAllSessions()
+          for (const session of backupData.sessions) {
+            try {
+              const existing = currentSessions.find(s =>
+                s.id === session.id ||
+                (s.name === session.name && s.host === session.host && s.username === session.username)
+              )
+
+              if (existing) {
+                const { id, ...updates } = session
+                await sessionManager.updateSession(existing.id, updates)
+              } else {
+                await sessionManager.createSession(session)
+              }
+            } catch (error) {
+              logger.logError('system', `Failed to restore session: ${session.name}`, error as Error)
             }
           }
         }
@@ -684,6 +700,13 @@ export class BackupManager {
         try {
           const aiConfigPath = join(app.getPath('userData'), 'ai-config.json')
           await fs.writeFile(aiConfigPath, JSON.stringify(backupData.aiConfig, null, 2), 'utf-8')
+          // 写入文件后，让 AIManager 重新从文件加载，更新内存中的数据
+          try {
+            const { aiManager } = await import('./AIManager')
+            await aiManager.reloadConfig()
+          } catch (reloadError) {
+            logger.logError('system', 'Failed to reload AI config into memory', reloadError as Error)
+          }
           logger.logInfo('system', 'AI config restored successfully')
         } catch (error) {
           logger.logError('system', 'Failed to restore AI config', error as Error)

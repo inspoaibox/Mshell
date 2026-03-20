@@ -30,6 +30,8 @@ interface TerminalInstance {
   outputCallback: ((data: string) => void) | null // SSH 输出回调（用于错误检测等）
   copyOnSelect: boolean // 选中自动复制
   selectionDisposable?: { dispose: () => void } // 选中事件监听器
+  bracketedPasteEnabled: boolean // 远端是否启用了 bracketed paste mode
+  echoEnabled: boolean // 终端是否处于回显模式（false = 密码输入等无回显场景）
 }
 
 class TerminalManager {
@@ -100,11 +102,15 @@ class TerminalManager {
         if (!event.repeat) {
           navigator.clipboard.readText().then(text => {
             if (text) {
-              // 使用 bracketed paste mode 包裹粘贴内容
-              // 这样 vim/nano 等编辑器能正确识别粘贴的文本
-              // 开始序列: \x1b[200~  结束序列: \x1b[201~
-              const bracketedText = `\x1b[200~${text}\x1b[201~`
-              window.electronAPI.ssh.write(connectionId, bracketedText)
+              // 统一换行符：将 \r\n 和单独的 \n 都转为 \r（SSH 终端标准）
+              const normalizedText = text.replace(/\r\n/g, '\r').replace(/\n/g, '\r')
+              // 只在远端启用了 bracketed paste mode 时才包裹序列
+              // 否则直接发送原始文本，避免远端显示 ^[[200~ 等乱码
+              const inst = this.instances.get(connectionId)
+              const pasteText = inst?.bracketedPasteEnabled
+                ? `\x1b[200~${normalizedText}\x1b[201~`
+                : normalizedText
+              window.electronAPI.ssh.write(connectionId, pasteText)
               
               // 记录粘贴的命令到历史
               recordPastedCommands(connectionId, text)
@@ -185,7 +191,9 @@ class TerminalManager {
       cursorCallback: null,
       dataCallback: null,
       outputCallback: null,
-      copyOnSelect: options.copyOnSelect || false
+      copyOnSelect: options.copyOnSelect || false,
+      bracketedPasteEnabled: false,
+      echoEnabled: true // 默认回显开启
     }
 
     // 设置选中自动复制
@@ -201,6 +209,36 @@ class TerminalManager {
     const unsubData = window.electronAPI.ssh.onData((id: string, data: string | Uint8Array) => {
       if (id === connectionId) {
         instance.terminal.write(data)
+        
+        // 检测远端是否启用/禁用了 bracketed paste mode
+        // \x1b[?2004h = 启用, \x1b[?2004l = 禁用
+        let strForDetect: string | undefined
+        if (typeof data === 'string') {
+          strForDetect = data
+        } else {
+          try {
+            strForDetect = new TextDecoder('utf-8').decode(data instanceof Uint8Array ? data : new Uint8Array(data as any))
+          } catch { /* ignore */ }
+        }
+        if (strForDetect) {
+          if (strForDetect.includes('\x1b[?2004h')) {
+            instance.bracketedPasteEnabled = true
+          }
+          if (strForDetect.includes('\x1b[?2004l')) {
+            instance.bracketedPasteEnabled = false
+          }
+          // 检测密码输入模式：服务器输出包含密码提示关键词时禁用补全
+          // 常见密码提示：password:, Password:, passphrase:, Enter password 等
+          if (/password\s*:|passphrase\s*:|enter.*password|pin\s*:/i.test(strForDetect)) {
+            instance.echoEnabled = false
+          }
+          // 检测命令提示符（说明密码输入已完成，恢复补全）
+          // 常见提示符结尾：$ # % >（去除 ANSI 转义序列后）
+          const stripped = strForDetect.replace(/\x1b\[[0-9;]*[mGKHF]/g, '')
+          if (/[$#%>]\s*$/.test(stripped.trimEnd())) {
+            instance.echoEnabled = true
+          }
+        }
         
         // 调用输出回调（用于错误检测等）
         if (instance.outputCallback) {

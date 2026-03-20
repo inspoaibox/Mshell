@@ -96,6 +96,16 @@ export function registerFsHandlers() {
     }
   })
 
+  // 写入文件
+  ipcMain.handle('fs:writeFile', async (_event, filePath: string, content: string) => {
+    try {
+      await fs.writeFile(filePath, content, 'utf-8')
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
   // 压缩单个文件或目录
   ipcMain.handle('fs:compress', async (_event, sourcePath: string, archivePath: string) => {
     try {
