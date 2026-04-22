@@ -478,12 +478,24 @@ export class SessionManager {
    */
   async exportSessions(filePath: string, includePasswords: boolean = false): Promise<void> {
     const sessionsArray = Array.from(this.sessions.values()).map((session) => {
-      const exported = { ...session }
+      const exported = { ...session } as any
 
-      // 如果不包含密码，移除敏感字段
       if (!includePasswords) {
+        // 删除主会话的敏感字段
         delete exported.password
         delete exported.passphrase
+
+        // 删除跳板机配置中的敏感字段
+        if (exported.proxyJump) {
+          exported.proxyJump = this.stripSensitiveFromProxyJump(exported.proxyJump)
+        }
+
+        // 删除代理配置中的敏感字段
+        if (exported.proxy) {
+          const proxy = { ...exported.proxy }
+          delete proxy.password
+          exported.proxy = proxy
+        }
       }
 
       return exported
@@ -497,6 +509,16 @@ export class SessionManager {
     }
 
     await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8')
+  }
+
+  private stripSensitiveFromProxyJump(config: any): any {
+    const stripped = { ...config }
+    delete stripped.password
+    delete stripped.passphrase
+    if (stripped.nextJump) {
+      stripped.nextJump = this.stripSensitiveFromProxyJump(stripped.nextJump)
+    }
+    return stripped
   }
 
   /**
@@ -520,25 +542,13 @@ export class SessionManager {
           continue
         }
 
-        // 生成新的 ID 以避免冲突
+        // 生成新的 ID 以避免冲突，只传必要字段，避免字段重复覆盖
+        const { id: _id, createdAt: _c, updatedAt: _u, ...sessionRest } = session as any
         const newSession = await this.createSession({
-          name: session.name,
-          group: session.group,
-          host: session.host,
+          ...sessionRest,
           port: session.port || 22,
-          username: session.username,
           authType: session.authType || 'password',
-          password: session.password,
-          privateKeyPath: session.privateKeyPath,
-          passphrase: session.passphrase,
-          portForwards: session.portForwards,
-          color: session.color,
-          region: session.region, // Import region if exists
-          provider: session.provider,
           expiryDate: session.expiryDate ? new Date(session.expiryDate) : undefined,
-          // ... mapping others if needed, but 'session' likely has them. 
-          // Simpler: Omit id/createdAt/updatedAt from source
-          ...(({ id, createdAt, updatedAt, ...rest }) => rest)(session as any)
         })
 
         imported.push(newSession)
@@ -548,7 +558,7 @@ export class SessionManager {
       if (parsed.groups && Array.isArray(parsed.groups)) {
         for (const group of parsed.groups) {
           if (group.name) {
-            this.createGroup(group.name)
+            await this.createGroup(group.name)
           }
         }
       }

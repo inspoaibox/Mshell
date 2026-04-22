@@ -129,11 +129,11 @@ export class SSHConnectionManager extends EventEmitter {
         // Open shell with window and options
         const window = {
           term: 'xterm-256color',
-          cols: 80,
-          rows: 24,
+          cols: 220,  // 使用较大的初始列数，避免服务端按80列折行导致显示错位
+          rows: 50,   // 使用较大的初始行数
           modes: {
             ECHO: 1,
-            ICANON: 0,
+            ICANON: 1,  // 开启规范模式，避免特殊字符处理异常
             ISIG: 1,
             ICRNL: 1,
             ONLCR: 1,
@@ -196,11 +196,14 @@ export class SSHConnectionManager extends EventEmitter {
       })
 
       client.on('error', (err) => {
-        connection.status = 'error'
         const appError = ErrorHandler.handle(err, `SSH Client ${id}`)
         this.emit('error', id, appError.userMessage)
+        // 只在连接阶段（connecting）才 reject Promise，避免已连接后的错误重复 reject
         if (connection.status === 'connecting') {
+          connection.status = 'error'
           reject(appError)
+        } else {
+          connection.status = 'error'
         }
       })
 
@@ -524,15 +527,26 @@ export class SSHConnectionManager extends EventEmitter {
           connection.socket.destroy()
         }
 
+        // 从 Map 中移除旧连接，让 connect() 创建全新的连接对象
+        this.connections.delete(id)
+
         // 尝试重新连接
         await this.connect(id, connection.options)
 
-        // 重连成功，重置计数器
-        connection.reconnectAttempts = 0
+        // 重连成功，更新新连接对象的计数器
+        const newConnection = this.connections.get(id)
+        if (newConnection) {
+          newConnection.reconnectAttempts = 0
+        }
         console.log(`Successfully reconnected session ${id}`)
         this.emit('reconnected', id)
       } catch (error) {
         console.error(`Reconnect attempt ${connection.reconnectAttempts} failed for session ${id}:`, error)
+
+        // 重新放回旧连接对象以便继续重试
+        if (!this.connections.has(id)) {
+          this.connections.set(id, connection)
+        }
 
         // 继续尝试重连
         this.attemptReconnect(id)

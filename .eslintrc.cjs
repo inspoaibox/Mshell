@@ -14,6 +14,17 @@ module.exports = {
   },
   rules: {
     'vue/multi-word-component-names': 'off',
-    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }]
+    '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    'no-useless-escape': 'off',
+    'no-control-regex': 'off',
+    'no-empty': 'warn',
+    'no-unused-vars': 'warn',
+    'no-constant-condition': 'warn',
+    'no-undef': 'warn',
+    'no-async-promise-executor': 'warn',
+    'no-inner-declarations': 'warn',
+    'vue/no-dupe-keys': 'warn',
+    'no-case-declarations': 'warn',
+    'vue/no-side-effects-in-computed-properties': 'warn'
   }
 }

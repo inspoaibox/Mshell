@@ -40,12 +40,12 @@ export class SessionTemplateManager extends BaseManager<SessionTemplate> {
   /**
    * 创建模板
    */
-  async createTemplate(data: Omit<SessionTemplate, 'id' | 'createdAt' | 'updatedAt'>): Promise<SessionTemplate> {
+  async createTemplate(data: Omit<SessionTemplate, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<SessionTemplate> {
     const now = new Date().toISOString()
     
     const template: SessionTemplate = {
       ...data,
-      id: `template-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      id: data.id || `template-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       createdAt: now,
       updatedAt: now
     }

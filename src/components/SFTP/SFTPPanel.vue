@@ -652,6 +652,16 @@ const sessions = ref<SessionConfig[]>([])
 const selectedSessionId = ref('')
 const currentSession = ref<SessionConfig | null>(null)
 
+// SFTP 事件监听器清理函数
+const sftpListenerCleanups: Array<() => void> = []
+
+onUnmounted(() => {
+  sftpListenerCleanups.forEach(cleanup => {
+    try { cleanup() } catch (e) { /* ignore */ }
+  })
+  sftpListenerCleanups.length = 0
+})
+
 // 本地文件列定义
 const localFileColumns: Column[] = [
   { key: 'name', label: '名称', minWidth: '200px', sortable: true, slot: 'name' },
@@ -776,8 +786,8 @@ onMounted(async () => {
     ElMessage.error('文件传输面板初始化失败')
   }
 
-  // 监听传输进度事件
-  window.electronAPI.sftp.onProgress((taskId: string, progress: any) => {
+  // 监听传输进度事件（保存取消函数以便清理）
+  const unsubProgress = window.electronAPI.sftp.onProgress((taskId: string, progress: any) => {
     const transfer = transfers.value.find(t => t.id === taskId)
     if (transfer) {
       transfer.progress = progress.percentage || 0
@@ -786,7 +796,7 @@ onMounted(async () => {
     }
   })
 
-  window.electronAPI.sftp.onComplete((taskId: string) => {
+  const unsubComplete = window.electronAPI.sftp.onComplete((taskId: string) => {
     const transfer = transfers.value.find(t => t.id === taskId)
     if (transfer) {
       transfer.status = 'completed'
@@ -795,13 +805,16 @@ onMounted(async () => {
     }
   })
 
-  window.electronAPI.sftp.onError((taskId: string, error: string) => {
+  const unsubError = window.electronAPI.sftp.onError((taskId: string, error: string) => {
     const transfer = transfers.value.find(t => t.id === taskId)
     if (transfer) {
       transfer.status = 'failed'
       transfer.endTime = new Date()
     }
   })
+
+  // 保存清理函数
+  sftpListenerCleanups.push(unsubProgress, unsubComplete, unsubError)
 })
 
 const loadSessions = async () => {

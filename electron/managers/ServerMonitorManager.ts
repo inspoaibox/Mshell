@@ -306,12 +306,17 @@ export class ServerMonitorManager extends EventEmitter {
       }
     }
 
+    // 获取第一个非 lo 的网络接口的流量数据
     const netInfo = await this.executeCommand(client,
-      "cat /proc/net/dev | grep -E 'eth0|ens|enp' | head -1 | awk '{print $2,$3,$10,$11}'"
+      "cat /proc/net/dev | awk 'NR>2 && $1 !~ /^lo:/ {print $1,$2,$3,$10,$11; exit}'"
     )
 
-    const values = netInfo.trim().split(' ').map(Number)
-    const [bytesIn, packetsIn, bytesOut, packetsOut] = values
+    const parts = netInfo.trim().split(/\s+/)
+    // parts[0] 是接口名（带冒号），parts[1..4] 是数据
+    const bytesIn = parseInt(parts[1]) || 0
+    const packetsIn = parseInt(parts[2]) || 0
+    const bytesOut = parseInt(parts[3]) || 0
+    const packetsOut = parseInt(parts[4]) || 0
 
     let speedIn = 0
     let speedOut = 0
@@ -424,7 +429,10 @@ export class ServerMonitorManager extends EventEmitter {
         })
 
         stream.on('close', (code: number) => {
-          if (code !== 0) {
+          // 即使退出码非零，如果有输出也返回（某些系统命令会返回非零但有有效数据）
+          if (output.trim()) {
+            resolve(output)
+          } else if (code !== 0) {
             reject(new Error(`Command failed with code ${code}: ${errorOutput}`))
           } else {
             resolve(output)

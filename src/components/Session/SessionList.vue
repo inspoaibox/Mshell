@@ -496,10 +496,14 @@ const handleContextMenu = async (session: SessionConfig, event: MouseEvent) => {
 const handleCopy = async (session: SessionConfig) => {
   try {
     const { id, createdAt, updatedAt, ...rest } = session
-    const newSession = {
-      ...rest,
-      name: `${session.name} (副本)`,
+    // 检查名称唯一性，避免重名
+    const baseName = `${session.name} (副本)`
+    let finalName = baseName
+    let counter = 1
+    while (appStore.sessions.some(s => s.name === finalName)) {
+      finalName = `${baseName} ${counter++}`
     }
+    const newSession = { ...rest, name: finalName }
     await appStore.createSession(newSession)
     ElMessage.success('会话已复制')
   } catch (err: any) {
@@ -675,11 +679,10 @@ const handleSessionReorder = async (groupId: string, fromIndex: number, toIndex:
     const [movedSession] = sessions.splice(fromIndex, 1)
     sessions.splice(toIndex, 0, movedSession)
     
-    // 更新每个会话的 sortOrder
-    for (let i = 0; i < sessions.length; i++) {
-      const session = sessions[i]
-      await appStore.updateSession(session.id, { sortOrder: i })
-    }
+    // 更新每个会话的 sortOrder（并行执行，提升性能）
+    await Promise.all(
+      sessions.map((session, i) => appStore.updateSession(session.id, { sortOrder: i }))
+    )
     
     // 重新加载会话列表以反映更新
     await appStore.loadSessions()

@@ -158,48 +158,11 @@ export class SSHKeyManager {
    */
   private generateWithSSH2(options: KeyGenerationOptions): { publicKey: string; privateKey: string } | null {
     try {
-      let result: { publicKey: string; privateKey: string } | null = null
-      let error: Error | null = null
-      let done = false
-
-      const genOpts: any = {}
-      if (options.type === 'rsa') {
-        genOpts.bits = options.bits || 2048
-      } else if (options.type === 'ecdsa') {
-        genOpts.bits = options.bits || 256
-      }
-      if (options.passphrase) {
-        genOpts.passphrase = options.passphrase
-        genOpts.cipher = 'aes-256-cbc'
-      }
-      if (options.comment) {
-        genOpts.comment = options.comment
-      }
-
-      ssh2Utils.generateKeyPair(options.type, genOpts, (err: Error | null, keys: any) => {
-        if (err) {
-          error = err
-        } else {
-          result = {
-            privateKey: keys.private,
-            publicKey: keys.public
-          }
-        }
-        done = true
-      })
-
-      // ssh2 的 generateKeyPair 在某些情况下是同步回调的
-      // 如果不是同步的，我们回退到 crypto
-      if (!done) {
-        return null
-      }
-      if (error) {
-        console.error('ssh2 generateKeyPair failed:', error)
-        return null
-      }
-      return result
+      // ssh2Utils.generateKeyPair 是异步的，用 Promise + 同步等待方式处理
+      // 实际上 ssh2 的回调在 Node.js 中是异步的，无法真正同步
+      // 直接返回 null，使用 crypto 回退方案（更可靠）
+      return null
     } catch (err) {
-      console.error('ssh2 generateKeyPair error:', err)
       return null
     }
   }
@@ -265,8 +228,14 @@ export class SSHKeyManager {
       if (existsSync(publicKeyPath)) {
         publicKey = readFileSync(publicKeyPath, 'utf-8')
       } else {
-        // 如果没有公钥文件，尝试从私钥提取（这里简化处理）
-        publicKey = 'Public key not available'
+        // 没有 .pub 文件，尝试从私钥提取公钥
+        try {
+          const { createPublicKey } = require('crypto')
+          const pubKeyObj = createPublicKey({ key: privateKey, format: 'pem' })
+          publicKey = pubKeyObj.export({ type: 'spki', format: 'pem' }) as string
+        } catch {
+          publicKey = 'Public key not available'
+        }
       }
 
       // 生成新的 ID 和路径
@@ -370,11 +339,22 @@ export class SSHKeyManager {
   /**
    * 手动添加密钥
    */
-  addKey(keyData: { name: string; privateKey: string; publicKey?: string; passphrase?: string; comment?: string }): SSHKey {
+  addKey(keyData: { id?: string; name: string; privateKey: string; publicKey?: string; passphrase?: string; comment?: string }): SSHKey {
     try {
-      const id = `key_${Date.now()}_${Math.random().toString(36).substring(7)}`
+      const id = keyData.id || `key_${Date.now()}_${Math.random().toString(36).substring(7)}`
       const privateKeyPath = join(this.keysDir, `${id}`)
       const publicKeyPath = `${privateKeyPath}.pub`
+
+      // 如果已存在同 ID 的记录，先删除旧文件（防止残留）
+      if (this.keys.has(id)) {
+        const existing = this.keys.get(id)!
+        try {
+          if (existsSync(existing.privateKeyPath)) unlinkSync(existing.privateKeyPath)
+          const oldPub = `${existing.privateKeyPath}.pub`
+          if (existsSync(oldPub)) unlinkSync(oldPub)
+        } catch { /* ignore */ }
+        this.keys.delete(id)
+      }
 
       // 写入私钥文件
       writeFileSync(privateKeyPath, keyData.privateKey, { mode: 0o600 })

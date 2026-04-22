@@ -334,7 +334,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Connection, Plus, Lightning, Grid, ChatDotRound, Upload, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
@@ -580,6 +580,9 @@ const handleTabReorder = (fromIndex: number, toIndex: number) => {
   appStore.tabs = tabs
 }
 
+// IPC 监听器清理函数集合
+const ipcCleanups: Array<() => void> = []
+
 onMounted(async () => {
   // 初始化应用状态
   await appStore.initialize()
@@ -587,10 +590,11 @@ onMounted(async () => {
   // 加载 AI 聊天记录
   aiStore.loadChatHistory()
   
-  // 监听设置变化
-  window.electronAPI.settings.onChange((newSettings) => {
+  // 监听设置变化（保存取消函数）
+  const unsubSettings = window.electronAPI.settings.onChange((newSettings) => {
     appStore.applySettings(newSettings)
   })
+  if (unsubSettings) ipcCleanups.push(unsubSettings)
 
   // 注册快捷键
   setupKeyboardShortcuts()
@@ -599,18 +603,20 @@ onMounted(async () => {
   setupMainProcessShortcuts()
   
   // 监听锁定事件（从后端触发）
-  window.electronAPI.sessionLock?.onLocked?.(() => {
+  const unsubLocked = window.electronAPI.sessionLock?.onLocked?.(() => {
     isLocked.value = true
   })
+  if (unsubLocked) ipcCleanups.push(unsubLocked)
   
-  window.electronAPI.sessionLock?.onUnlocked?.(() => {
+  const unsubUnlocked = window.electronAPI.sessionLock?.onUnlocked?.(() => {
     isLocked.value = false
   })
+  if (unsubUnlocked) ipcCleanups.push(unsubUnlocked)
   
   // 监听自定义锁定事件（从前端触发）
-  window.addEventListener('session-locked', () => {
-    isLocked.value = true
-  })
+  const handleSessionLocked = () => { isLocked.value = true }
+  window.addEventListener('session-locked', handleSessionLocked)
+  ipcCleanups.push(() => window.removeEventListener('session-locked', handleSessionLocked))
   
   // 检查初始锁定状态
   try {
@@ -623,6 +629,14 @@ onMounted(async () => {
   }
 })
 
+onUnmounted(() => {
+  // 清理所有 IPC 监听器
+  ipcCleanups.forEach(cleanup => {
+    try { cleanup() } catch (e) { /* ignore */ }
+  })
+  ipcCleanups.length = 0
+})
+
 /**
  * 监听主进程发送的快捷键事件
  * 主进程通过 before-input-event 拦截键盘事件并发送 IPC 消息
@@ -631,19 +645,21 @@ function setupMainProcessShortcuts() {
   console.log('[App] Setting up main process shortcuts...')
   
   // Ctrl+N: 新建会话
-  window.electronAPI.onShortcut('new-connection', () => {
+  const u1 = window.electronAPI.onShortcut('new-connection', () => {
     console.log('[Shortcut IPC] New connection triggered')
     appStore.showSessionForm = true
   })
+  if (u1) ipcCleanups.push(u1)
   
   // Ctrl+T: 快速连接
-  window.electronAPI.onShortcut('quick-connect', () => {
+  const u2 = window.electronAPI.onShortcut('quick-connect', () => {
     console.log('[Shortcut IPC] Quick connect triggered')
     appStore.showQuickConnect = true
   })
+  if (u2) ipcCleanups.push(u2)
   
   // Ctrl+F: 搜索
-  window.electronAPI.onShortcut('search', () => {
+  const u3 = window.electronAPI.onShortcut('search', () => {
     console.log('[Shortcut IPC] Search triggered')
     appStore.activeView = 'sessions'
     setTimeout(() => {
@@ -653,35 +669,40 @@ function setupMainProcessShortcuts() {
       }
     }, 100)
   })
+  if (u3) ipcCleanups.push(u3)
   
   // Ctrl+W: 关闭当前标签
-  window.electronAPI.onShortcut('close-tab', () => {
+  const u4 = window.electronAPI.onShortcut('close-tab', () => {
     console.log('[Shortcut IPC] Close tab triggered')
     if (appStore.activeTab) {
       appStore.removeTab(appStore.activeTab)
     }
   })
+  if (u4) ipcCleanups.push(u4)
   
   // Ctrl+,: 打开设置
-  window.electronAPI.onShortcut('settings', () => {
+  const u5 = window.electronAPI.onShortcut('settings', () => {
     console.log('[Shortcut IPC] Settings triggered')
     appStore.activeView = 'settings'
   })
+  if (u5) ipcCleanups.push(u5)
   
   // Ctrl+Tab: 下一个标签
-  window.electronAPI.onShortcut('next-tab', () => {
+  const u6 = window.electronAPI.onShortcut('next-tab', () => {
     console.log('[Shortcut IPC] Next tab triggered')
     appStore.nextTab()
   })
+  if (u6) ipcCleanups.push(u6)
   
   // Ctrl+Shift+Tab: 上一个标签
-  window.electronAPI.onShortcut('prev-tab', () => {
+  const u7 = window.electronAPI.onShortcut('prev-tab', () => {
     console.log('[Shortcut IPC] Previous tab triggered')
     appStore.prevTab()
   })
+  if (u7) ipcCleanups.push(u7)
   
   // Ctrl+Alt+L: 锁定会话
-  window.electronAPI.onShortcut('lock-session', async () => {
+  const u8 = window.electronAPI.onShortcut('lock-session', async () => {
     console.log('[Shortcut IPC] Lock session triggered')
     try {
       const result = await window.electronAPI.sessionLock?.lock?.()
@@ -694,15 +715,17 @@ function setupMainProcessShortcuts() {
       console.error('Failed to lock session:', error)
     }
   })
+  if (u8) ipcCleanups.push(u8)
   
   // Ctrl+1~9: 切换到指定标签
-  window.electronAPI.onShortcut('switch-tab', (tabNum: string) => {
+  const u9 = window.electronAPI.onShortcut('switch-tab', (tabNum: string) => {
     console.log('[Shortcut IPC] Switch tab triggered:', tabNum)
     const index = parseInt(tabNum) - 1
     if (appStore.tabs.length > index) {
       appStore.activeTab = appStore.tabs[index].id
     }
   })
+  if (u9) ipcCleanups.push(u9)
   
   console.log('[App] Main process shortcuts registered')
 }

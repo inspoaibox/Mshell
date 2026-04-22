@@ -94,38 +94,70 @@ export function registerSessionHandlers() {
   })
 
   ipcMain.handle('session:export', async (_event, filePath: string) => {
-    await sessionManager.initialize()
-    await sessionManager.exportSessions(filePath)
+    try {
+      await sessionManager.initialize()
+      await sessionManager.exportSessions(filePath)
+      return { success: true }
+    } catch (error: any) {
+      console.error('Failed to export sessions:', error)
+      return { success: false, error: error.message }
+    }
   })
 
   ipcMain.handle('session:import', async (_event, filePath: string) => {
-    await sessionManager.initialize()
-    return await sessionManager.importSessions(filePath)
+    try {
+      await sessionManager.initialize()
+      const imported = await sessionManager.importSessions(filePath)
+      return { success: true, data: imported }
+    } catch (error: any) {
+      console.error('Failed to import sessions:', error)
+      return { success: false, error: error.message }
+    }
   })
 
-  // Group management
-  ipcMain.handle('session:createGroup', async (_event, name: string, description?: string) => {
-    await sessionManager.initialize()
-    return await sessionManager.createGroup(name)
+  ipcMain.handle('session:createGroup', async (_event, name: string, _description?: string) => {
+    try {
+      await sessionManager.initialize()
+      const group = await sessionManager.createGroup(name)
+      return group  // 直接返回 group 对象，保持前端兼容性
+    } catch (error: any) {
+      console.error('Failed to create group:', error)
+      throw error
+    }
   })
 
   ipcMain.handle('session:getAllGroups', async () => {
     await sessionManager.initialize()
-    return sessionManager.getAllGroups()
+    return sessionManager.getAllGroups()  // 直接返回数组，保持前端兼容性
   })
 
   ipcMain.handle('session:addToGroup', async (_event, sessionId: string, groupId: string) => {
-    await sessionManager.initialize()
-    await sessionManager.addSessionToGroup(sessionId, groupId)
+    try {
+      await sessionManager.initialize()
+      await sessionManager.addSessionToGroup(sessionId, groupId)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
   })
 
   ipcMain.handle('session:renameGroup', async (_event, groupId: string, newName: string) => {
-    await sessionManager.initialize()
-    await sessionManager.renameGroup(groupId, newName)
+    try {
+      await sessionManager.initialize()
+      await sessionManager.renameGroup(groupId, newName)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
   })
 
   ipcMain.handle('session:deleteGroup', async (_event, groupId: string) => {
-    await sessionManager.initialize()
-    await sessionManager.deleteGroup(groupId)
+    try {
+      await sessionManager.initialize()
+      await sessionManager.deleteGroup(groupId)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
   })
 }

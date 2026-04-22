@@ -33,11 +33,12 @@ export class QuickCommandManager extends BaseManager<QuickCommand> {
     description?: string
     category?: string
     tags?: string[]
+    id?: string // 备份恢复时可传入原始 ID
   }): Promise<QuickCommand> {
     const now = new Date().toISOString()
     
     const quickCommand: QuickCommand = {
-      id: uuidv4(),
+      id: (data as any).id || uuidv4(),
       name: data.name,
       command: data.command,
       description: data.description || '',

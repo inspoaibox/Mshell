@@ -174,15 +174,14 @@ const props = defineProps<Props>()
 
 const isMonitoring = ref(false)
 const metrics = ref<any>(null)
+let metricsUnsubscribe: (() => void) | null = null
 
 // 切换监控
 const toggleMonitoring = async () => {
   if (isMonitoring.value) {
-    // 停止监控
     await window.electronAPI.serverMonitor?.stop?.(props.sessionId)
     isMonitoring.value = false
   } else {
-    // 开始监控
     await window.electronAPI.serverMonitor?.start?.(props.sessionId)
     isMonitoring.value = true
   }
@@ -191,7 +190,6 @@ const toggleMonitoring = async () => {
 // 刷新指标
 const refreshMetrics = async () => {
   if (!isMonitoring.value) return
-  
   try {
     const result = await window.electronAPI.serverMonitor?.getMetrics?.(props.sessionId)
     if (result?.success && result.data) {
@@ -227,7 +225,6 @@ const formatUptime = (seconds: number): string => {
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor((seconds % 86400) / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
-  
   if (days > 0) return `${days}天 ${hours}小时`
   if (hours > 0) return `${hours}小时 ${minutes}分钟`
   return `${minutes}分钟`
@@ -258,14 +255,17 @@ const getDiskColor = (usage: number): string => {
 }
 
 onMounted(() => {
-  // 注册事件监听
-  window.electronAPI.serverMonitor?.onMetrics?.(handleMetricsUpdate)
+  const unsub = window.electronAPI.serverMonitor?.onMetrics?.(handleMetricsUpdate)
+  if (unsub) metricsUnsubscribe = unsub
 })
 
 onUnmounted(() => {
-  // 停止监控
   if (isMonitoring.value) {
     window.electronAPI.serverMonitor?.stop?.(props.sessionId)
+  }
+  if (metricsUnsubscribe) {
+    metricsUnsubscribe()
+    metricsUnsubscribe = null
   }
 })
 </script>

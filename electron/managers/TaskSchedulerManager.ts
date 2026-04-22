@@ -131,13 +131,13 @@ export class TaskSchedulerManager {
 
     const task: ScheduledTask = {
       ...data,
-      id: `task_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-      createdAt: new Date().toISOString(),
+      id: data.id || `task_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      createdAt: data.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      executionCount: 0,
-      successCount: 0,
-      failureCount: 0,
-      nextExecution: new Date(Date.now() + 60000).toISOString()
+      executionCount: data.executionCount ?? 0,
+      successCount: data.successCount ?? 0,
+      failureCount: data.failureCount ?? 0,
+      nextExecution: data.nextExecution || new Date(Date.now() + 60000).toISOString()
     }
 
     this.tasks.set(task.id, task)
@@ -212,7 +212,7 @@ export class TaskSchedulerManager {
     }
   }
 
-  async executeTask(id: string): Promise<TaskExecution> {
+  async executeTask(id: string, isManual: boolean = false): Promise<TaskExecution> {
     const task = this.get(id)
     if (!task) throw new Error('Task not found')
 
@@ -226,12 +226,41 @@ export class TaskSchedulerManager {
     this.addExecution(id, execution)
     this.eventEmitter.emit('task-started', { task, execution })
 
-    try {
+    const runOnce = async (): Promise<{ output: string }> => {
       let output = ''
-      
       if (task.type === TaskType.COMMAND && task.sessionId && task.command) {
         output = await this.executeCommand(task)
+      } else if (task.type === TaskType.SCRIPT && task.sessionId && task.script) {
+        output = await this.executeScript(task)
+      } else if (task.type === TaskType.BACKUP) {
+        output = 'Backup task type is handled by BackupManager'
+      } else if (task.type === TaskType.FILE_SYNC) {
+        output = 'File sync task type is not yet implemented'
       }
+      return { output }
+    }
+
+    try {
+      let output = ''
+      let lastError: Error | null = null
+      const maxAttempts = (task.retryOnFailure && !isManual) ? task.maxRetries + 1 : 1
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const result = await runOnce()
+          output = result.output
+          lastError = null
+          break
+        } catch (err) {
+          lastError = err as Error
+          if (attempt < maxAttempts) {
+            // 等待 5 秒后重试
+            await new Promise(resolve => setTimeout(resolve, 5000))
+          }
+        }
+      }
+
+      if (lastError) throw lastError
 
       execution.endTime = new Date().toISOString()
       execution.status = TaskStatus.SUCCESS
@@ -241,6 +270,7 @@ export class TaskSchedulerManager {
       const updatedTask = this.get(id)
       if (updatedTask) {
         updatedTask.lastExecution = execution.endTime
+        updatedTask.nextExecution = this.getNextExecutionTime(updatedTask.cronExpression)
         updatedTask.executionCount++
         updatedTask.successCount++
         this.tasks.set(id, updatedTask)
@@ -248,6 +278,9 @@ export class TaskSchedulerManager {
       }
 
       this.eventEmitter.emit('task-completed', { task, execution })
+      if (task.notifyOnSuccess) {
+        this.eventEmitter.emit('task-notify', { task, execution, type: 'success' })
+      }
     } catch (error) {
       execution.endTime = new Date().toISOString()
       execution.status = TaskStatus.FAILED
@@ -257,6 +290,7 @@ export class TaskSchedulerManager {
       const updatedTask = this.get(id)
       if (updatedTask) {
         updatedTask.lastExecution = execution.endTime
+        updatedTask.nextExecution = this.getNextExecutionTime(updatedTask.cronExpression)
         updatedTask.executionCount++
         updatedTask.failureCount++
         this.tasks.set(id, updatedTask)
@@ -264,10 +298,26 @@ export class TaskSchedulerManager {
       }
 
       this.eventEmitter.emit('task-failed', { task, execution, error })
+      if (task.notifyOnFailure) {
+        this.eventEmitter.emit('task-notify', { task, execution, type: 'failure' })
+      }
     }
 
     this.updateExecution(id, execution)
     return execution
+  }
+
+  /**
+   * 计算下次执行时间（简单估算，基于当前时间 + cron 间隔）
+   */
+  private getNextExecutionTime(cronExpression: string): string {
+    try {
+      // node-cron 没有直接提供 next() 方法，用简单的 +1分钟 作为占位
+      // 实际下次执行时间由 cron 调度器决定
+      return new Date(Date.now() + 60000).toISOString()
+    } catch {
+      return new Date(Date.now() + 60000).toISOString()
+    }
   }
 
   private async executeCommand(task: ScheduledTask): Promise<string> {
@@ -291,7 +341,44 @@ export class TaskSchedulerManager {
         stream.on('data', (data: Buffer) => { output += data.toString() })
         stream.on('close', (code: number) => {
           clearTimeout(timer)
-          code === 0 ? resolve(output) : reject(new Error(`Exit code ${code}`))
+          code === 0 ? resolve(output) : reject(new Error(`Exit code ${code}: ${output}`))
+        })
+      })
+    })
+  }
+
+  private async executeScript(task: ScheduledTask): Promise<string> {
+    const connection = sshConnectionManager.getConnection(task.sessionId!)
+    if (!connection || !connection.client) {
+      throw new Error('SSH connection not found')
+    }
+
+    // 将脚本内容通过 heredoc 方式传给 bash 执行
+    const escapedScript = task.script!.replace(/'/g, "'\\''")
+    const command = `bash -s << 'MSHELL_SCRIPT_EOF'\n${task.script}\nMSHELL_SCRIPT_EOF`
+
+    return new Promise((resolve, reject) => {
+      const timeout = task.timeout ? task.timeout * 1000 : 60000
+      const timer = setTimeout(() => reject(new Error('Script execution timeout')), timeout)
+
+      connection.client!.exec(command, (err, stream) => {
+        if (err) {
+          clearTimeout(timer)
+          reject(err)
+          return
+        }
+
+        let output = ''
+        let errorOutput = ''
+        stream.on('data', (data: Buffer) => { output += data.toString() })
+        stream.stderr.on('data', (data: Buffer) => { errorOutput += data.toString() })
+        stream.on('close', (code: number) => {
+          clearTimeout(timer)
+          if (code === 0) {
+            resolve(output)
+          } else {
+            reject(new Error(`Script failed (exit ${code}): ${errorOutput || output}`))
+          }
         })
       })
     })

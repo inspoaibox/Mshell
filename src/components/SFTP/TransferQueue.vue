@@ -438,7 +438,7 @@ const exportHistory = async () => {
 
     if (filePath) {
       const data = JSON.stringify(history.value, null, 2)
-      // TODO: 实现文件保存
+      await window.electronAPI.fs.writeFile(filePath, data)
       console.log('Export history to:', filePath)
     }
   } catch (error) {
@@ -529,7 +529,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   // 清理事件监听
-  // TODO: 实现事件监听清理
+  // Note: IPC event cleanup is currently omitted as there are no 'off' methods implemented in preload.ts for sftp events.
 })
 </script>
 

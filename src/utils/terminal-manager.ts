@@ -71,8 +71,8 @@ class TerminalManager {
       scrollback: options.scrollback || 10000,
       theme: options.theme,
       allowProposedApi: true,
-      convertEol: true,
-      windowsMode: typeof window !== 'undefined' && navigator.platform.indexOf('Win') > -1,
+      convertEol: false, // 关闭自动换行转换，由服务端PTY的ONLCR处理，避免双重转换导致显示错位
+      windowsMode: false, // SSH 目标通常是 Linux/Unix，不应使用 Windows 模式
       altClickMovesCursor: true,
       rightClickSelectsWord: false,
       macOptionIsMeta: false,

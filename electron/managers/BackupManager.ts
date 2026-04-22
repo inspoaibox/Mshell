@@ -16,6 +16,7 @@ import { auditLogManager } from './AuditLogManager'
 import { transferRecordManager } from './TransferRecordManager'
 import { sessionLockManager } from './SessionLockManager'
 import { logger } from '../utils/logger'
+import { credentialManager } from './CredentialManager'
 
 const scryptAsync = promisify(scrypt)
 
@@ -188,14 +189,20 @@ export class BackupManager {
    */
   private async decrypt(encryptedData: string, password: string): Promise<string> {
     try {
-      // 分离 iv 和加密数据
-      const parts = encryptedData.split(':')
-      if (parts.length !== 2) {
+      // 分离 iv 和加密数据（只分割第一个冒号，IV 是32个hex字符）
+      const colonIndex = encryptedData.indexOf(':')
+      if (colonIndex === -1) {
         throw new Error('Invalid encrypted data format')
       }
 
-      const iv = Buffer.from(parts[0], 'hex')
-      const encrypted = parts[1]
+      const ivHex = encryptedData.slice(0, colonIndex)
+      const encrypted = encryptedData.slice(colonIndex + 1)
+
+      if (ivHex.length !== 32 || !encrypted) {
+        throw new Error('Invalid encrypted data format')
+      }
+
+      const iv = Buffer.from(ivHex, 'hex')
 
       // 生成密钥
       const key = (await scryptAsync(password, this.ENCRYPTION_KEY, 32)) as Buffer
@@ -206,8 +213,9 @@ export class BackupManager {
       decrypted += decipher.final('utf8')
 
       return decrypted
-    } catch (error) {
+    } catch (error: any) {
       logger.logError('system', 'Failed to decrypt data', error as Error)
+      // 统一错误提示，不暴露内部细节
       throw new Error('解密失败，密码可能不正确')
     }
   }
@@ -221,10 +229,17 @@ export class BackupManager {
       const { quickCommandManager } = await import('./QuickCommandManager')
       
       // 收集所有数据
+      // 收集所有数据
+      // SessionManager 内存中的密码已经是明文，直接使用即可
+      const sessions = sessionManager.getAllSessions().map(s => {
+        const plain = { ...s }
+        return plain
+      })
+
       const backupData: BackupData = {
         version: '0.2.0', // 升级版本号以支持更多数据类型
         timestamp: new Date().toISOString(),
-        sessions: sessionManager.getAllSessions(),
+        sessions,
         sessionGroups: sessionManager.getAllGroups(),
         snippets: snippetManager.getAll(),
         commandHistory: commandHistoryManager.getAll(),
@@ -320,7 +335,6 @@ export class BackupManager {
         throw error
       }
     } catch (error) {
-      logger.logError('system', 'Failed to collect AI chat history', error as Error)
       logger.logError('system', 'Failed to collect AI chat history', error as Error)
       return undefined
     }
@@ -517,16 +531,20 @@ export class BackupManager {
           const currentSessions = sessionManager.getAllSessions()
           for (const session of backupData.sessions) {
             try {
+              // 备份文件中的密码字段应该是明文的，无需解密
+              // 如果它之前被错误处理成为密文，由 credentialManager 处理是不安全的，因此直接当做明文使用
+              const cleanSession = { ...session }
+
               const existing = currentSessions.find(s =>
                 s.id === session.id ||
                 (s.name === session.name && s.host === session.host && s.username === session.username)
               )
 
               if (existing) {
-                const { id, ...updates } = session
+                const { id, ...updates } = cleanSession
                 await sessionManager.updateSession(existing.id, updates)
               } else {
-                await sessionManager.createSession(session)
+                await sessionManager.createSession(cleanSession)
               }
             } catch (error) {
               logger.logError('system', `Failed to restore session: ${session.name}`, error as Error)
@@ -577,18 +595,16 @@ export class BackupManager {
             // 如果备份中包含私钥内容，恢复完整的密钥
             if (key.privateKeyContent) {
               if (existing) {
-                // 更新现有密钥
-                logger.logInfo('system', `Updating SSH key: ${key.name}`)
-                // 删除旧密钥
+                // 已存在同名或同 ID 的密钥，先删除再用原始 ID 重建
                 sshKeyManager.deleteKey(existing.id)
               }
 
-              // 使用 addKey 方法恢复密钥（会创建新的密钥文件）
+              // 用原始 ID 恢复密钥，确保会话的 privateKeyId 能正确匹配
               sshKeyManager.addKey({
+                id: key.id,
                 name: key.name,
                 privateKey: key.privateKeyContent,
                 publicKey: key.publicKeyContent || key.publicKey,
-                passphrase: key.protected ? undefined : undefined, // 如果有密码保护，用户需要重新输入
                 comment: key.comment
               })
 
@@ -788,7 +804,7 @@ export class BackupManager {
           for (const record of backupData.transferRecords) {
             const existing = transferRecordManager.getAllRecords().find((r: any) => r.id === record.id)
             if (!existing) {
-              // 移除时间戳字段，让 createRecord 自动生成新的时间戳
+              // 移除时间戳字段，让 createRecord 自动生成新的时间戳，保留原始 id
               const { createdAt, updatedAt, ...recordWithoutTimestamps } = record
               await transferRecordManager.createRecord(recordWithoutTimestamps)
             }
@@ -832,6 +848,7 @@ export class BackupManager {
               })
             } else {
               await quickCommandManager.create({
+                id: cmd.id,
                 name: cmd.name,
                 command: cmd.command,
                 description: cmd.description || '',

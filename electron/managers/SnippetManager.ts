@@ -37,6 +37,7 @@ export class SnippetManager extends BaseManager<Snippet> {
     tags?: string[]
     variables?: string[]
     shortcut?: string
+    id?: string // 备份恢复时可传入原始 ID
   }): Promise<Snippet> {
     const now = new Date().toISOString()
     
@@ -49,7 +50,7 @@ export class SnippetManager extends BaseManager<Snippet> {
     }
     
     const snippet: Snippet = {
-      id: uuidv4(),
+      id: (data as any).id || uuidv4(),
       name: data.name,
       command: data.command,
       description: data.description || '',

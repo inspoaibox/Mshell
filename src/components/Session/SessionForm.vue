@@ -684,11 +684,9 @@ watch(
         // 服务器管理字段
         form.provider = props.session.provider || ''
         form.region = props.session.region || ''
-        // 将 Date 对象转换为字符串格式
-        form.expiryDate = props.session.expiryDate 
-          ? (props.session.expiryDate instanceof Date 
-            ? props.session.expiryDate.toISOString().slice(0, 19).replace('T', ' ')
-            : props.session.expiryDate)
+        // 将日期统一转换为字符串格式（兼容 Date 对象和各种字符串格式）
+        form.expiryDate = props.session.expiryDate
+          ? new Date(props.session.expiryDate).toISOString().slice(0, 19).replace('T', ' ')
           : null
         form.billingCycle = props.session.billingCycle || ''
         form.billingAmount = props.session.billingAmount

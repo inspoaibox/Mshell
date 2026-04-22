@@ -24,28 +24,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('ssh:testProxyJump', proxyJumpConfig, underlyingProxy),
     // 返回取消订阅函数，防止内存泄漏
     onData: (callback: (id: string, data: string) => void) => {
-      ipcRenderer.on('ssh:data', (_event, id, data) => callback(id, data))
-      return () => { } // No-op for now to test stability
+      const listener = (_event: any, id: string, data: string) => callback(id, data)
+      ipcRenderer.on('ssh:data', listener)
+      return () => ipcRenderer.removeListener('ssh:data', listener)
     },
     onError: (callback: (id: string, error: string) => void) => {
-      ipcRenderer.on('ssh:error', (_event, id, error) => callback(id, error))
-      return () => { }
+      const listener = (_event: any, id: string, error: string) => callback(id, error)
+      ipcRenderer.on('ssh:error', listener)
+      return () => ipcRenderer.removeListener('ssh:error', listener)
     },
     onClose: (callback: (id: string) => void) => {
-      ipcRenderer.on('ssh:close', (_event, id) => callback(id))
-      return () => { }
+      const listener = (_event: any, id: string) => callback(id)
+      ipcRenderer.on('ssh:close', listener)
+      return () => ipcRenderer.removeListener('ssh:close', listener)
     },
     onReconnecting: (callback: (id: string, attempt: number, maxAttempts: number) => void) => {
-      ipcRenderer.on('ssh:reconnecting', (_event, id, attempt, maxAttempts) => callback(id, attempt, maxAttempts))
-      return () => { }
+      const listener = (_event: any, id: string, attempt: number, maxAttempts: number) => callback(id, attempt, maxAttempts)
+      ipcRenderer.on('ssh:reconnecting', listener)
+      return () => ipcRenderer.removeListener('ssh:reconnecting', listener)
     },
     onReconnected: (callback: (id: string) => void) => {
-      ipcRenderer.on('ssh:reconnected', (_event, id) => callback(id))
-      return () => { }
+      const listener = (_event: any, id: string) => callback(id)
+      ipcRenderer.on('ssh:reconnected', listener)
+      return () => ipcRenderer.removeListener('ssh:reconnected', listener)
     },
     onReconnectFailed: (callback: (id: string, reason: string) => void) => {
-      ipcRenderer.on('ssh:reconnect-failed', (_event, id, reason) => callback(id, reason))
-      return () => { }
+      const listener = (_event: any, id: string, reason: string) => callback(id, reason)
+      ipcRenderer.on('ssh:reconnect-failed', listener)
+      return () => ipcRenderer.removeListener('ssh:reconnect-failed', listener)
     }
   },
 
@@ -128,13 +134,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     extract: (connectionId: string, archivePath: string, targetDir: string) =>
       ipcRenderer.invoke('sftp:extract', connectionId, archivePath, targetDir),
     onProgress: (callback: (taskId: string, progress: any) => void) => {
-      ipcRenderer.on('sftp:progress', (_event, taskId, progress) => callback(taskId, progress))
+      const listener = (_event: any, taskId: string, progress: any) => callback(taskId, progress)
+      ipcRenderer.on('sftp:progress', listener)
+      return () => ipcRenderer.removeListener('sftp:progress', listener)
     },
     onComplete: (callback: (taskId: string) => void) => {
-      ipcRenderer.on('sftp:complete', (_event, taskId) => callback(taskId))
+      const listener = (_event: any, taskId: string) => callback(taskId)
+      ipcRenderer.on('sftp:complete', listener)
+      return () => ipcRenderer.removeListener('sftp:complete', listener)
     },
     onError: (callback: (taskId: string, error: string) => void) => {
-      ipcRenderer.on('sftp:error', (_event, taskId, error) => callback(taskId, error))
+      const listener = (_event: any, taskId: string, error: string) => callback(taskId, error)
+      ipcRenderer.on('sftp:error', listener)
+      return () => ipcRenderer.removeListener('sftp:error', listener)
     }
   },
 
@@ -144,7 +156,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (updates: any) => ipcRenderer.invoke('settings:update', updates),
     reset: () => ipcRenderer.invoke('settings:reset'),
     onChange: (callback: (settings: any) => void) => {
-      ipcRenderer.on('settings:changed', (_event, settings) => callback(settings))
+      const listener = (_event: any, settings: any) => callback(settings)
+      ipcRenderer.on('settings:changed', listener)
+      return () => ipcRenderer.removeListener('settings:changed', listener)
     }
   },
 
@@ -167,7 +181,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Shortcut events
   onShortcut: (event: string, callback: (...args: any[]) => void) => {
-    ipcRenderer.on(`shortcut:${event}`, (_event, ...args) => callback(...args))
+    const listener = (_event: any, ...args: any[]) => callback(...args)
+    ipcRenderer.on(`shortcut:${event}`, listener)
+    return () => ipcRenderer.removeListener(`shortcut:${event}`, listener)
   },
 
   // Dialog operations
@@ -345,10 +361,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMonitoredSessions: () => ipcRenderer.invoke('serverMonitor:getMonitoredSessions'),
     updateConfig: (sessionId: string, config: any) => ipcRenderer.invoke('serverMonitor:updateConfig', sessionId, config),
     onMetrics: (callback: (sessionId: string, metrics: any) => void) => {
-      ipcRenderer.on('serverMonitor:metrics', (_event, sessionId, metrics) => callback(sessionId, metrics))
+      const listener = (_event: any, sessionId: string, metrics: any) => callback(sessionId, metrics)
+      ipcRenderer.on('serverMonitor:metrics', listener)
+      return () => ipcRenderer.removeListener('serverMonitor:metrics', listener)
     },
     onError: (callback: (sessionId: string, error: any) => void) => {
-      ipcRenderer.on('serverMonitor:error', (_event, sessionId, error) => callback(sessionId, error))
+      const listener = (_event: any, sessionId: string, error: any) => callback(sessionId, error)
+      ipcRenderer.on('serverMonitor:error', listener)
+      return () => ipcRenderer.removeListener('serverMonitor:error', listener)
     }
   },
 
@@ -406,10 +426,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateActivity: () => ipcRenderer.invoke('sessionLock:updateActivity'),
     getStatus: () => ipcRenderer.invoke('sessionLock:getStatus'),
     onLocked: (callback: () => void) => {
-      ipcRenderer.on('session:locked', (_event) => callback())
+      const listener = () => callback()
+      ipcRenderer.on('session:locked', listener)
+      return () => ipcRenderer.removeListener('session:locked', listener)
     },
     onUnlocked: (callback: () => void) => {
-      ipcRenderer.on('session:unlocked', (_event) => callback())
+      const listener = () => callback()
+      ipcRenderer.on('session:unlocked', listener)
+      return () => ipcRenderer.removeListener('session:unlocked', listener)
     }
   },
 
@@ -430,16 +454,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getByTag: (tag: string) => ipcRenderer.invoke('taskScheduler:getByTag', tag),
     getStatistics: () => ipcRenderer.invoke('taskScheduler:getStatistics'),
     onTaskStarted: (callback: (data: any) => void) => {
-      ipcRenderer.on('taskScheduler:task-started', (_event, data) => callback(data))
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('taskScheduler:task-started', listener)
+      return () => ipcRenderer.removeListener('taskScheduler:task-started', listener)
     },
     onTaskCompleted: (callback: (data: any) => void) => {
-      ipcRenderer.on('taskScheduler:task-completed', (_event, data) => callback(data))
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('taskScheduler:task-completed', listener)
+      return () => ipcRenderer.removeListener('taskScheduler:task-completed', listener)
     },
     onTaskFailed: (callback: (data: any) => void) => {
-      ipcRenderer.on('taskScheduler:task-failed', (_event, data) => callback(data))
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('taskScheduler:task-failed', listener)
+      return () => ipcRenderer.removeListener('taskScheduler:task-failed', listener)
     },
     onTaskNotify: (callback: (data: any) => void) => {
-      ipcRenderer.on('taskScheduler:task-notify', (_event, data) => callback(data))
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('taskScheduler:task-notify', listener)
+      return () => ipcRenderer.removeListener('taskScheduler:task-notify', listener)
     }
   },
 
@@ -456,13 +488,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getByTag: (tag: string) => ipcRenderer.invoke('workflow:getByTag', tag),
     getStatistics: () => ipcRenderer.invoke('workflow:getStatistics'),
     onStarted: (callback: (data: any) => void) => {
-      ipcRenderer.on('workflow:started', (_event, data) => callback(data))
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('workflow:started', listener)
+      return () => ipcRenderer.removeListener('workflow:started', listener)
     },
     onCompleted: (callback: (data: any) => void) => {
-      ipcRenderer.on('workflow:completed', (_event, data) => callback(data))
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('workflow:completed', listener)
+      return () => ipcRenderer.removeListener('workflow:completed', listener)
     },
     onFailed: (callback: (data: any) => void) => {
-      ipcRenderer.on('workflow:failed', (_event, data) => callback(data))
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('workflow:failed', listener)
+      return () => ipcRenderer.removeListener('workflow:failed', listener)
     }
   },
 
@@ -495,7 +533,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // 事件监听
     onProgress: (callback: (requestId: string, progress: number) => void) => {
-      ipcRenderer.on('ai:progress', (_event, requestId, progress) => callback(requestId, progress))
+      const listener = (_event: any, requestId: string, progress: number) => callback(requestId, progress)
+      ipcRenderer.on('ai:progress', listener)
+      return () => ipcRenderer.removeListener('ai:progress', listener)
     },
     onStreamChunk: (callback: (requestId: string, chunk: string) => void) => {
       const listener = (_event: any, requestId: string, chunk: string) => callback(requestId, chunk)
@@ -505,13 +545,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
       }
     },
     onComplete: (callback: (requestId: string, response: string) => void) => {
-      ipcRenderer.on('ai:complete', (_event, requestId, response) => callback(requestId, response))
+      const listener = (_event: any, requestId: string, response: string) => callback(requestId, response)
+      ipcRenderer.on('ai:complete', listener)
+      return () => ipcRenderer.removeListener('ai:complete', listener)
     },
     onError: (callback: (requestId: string, error: string) => void) => {
-      ipcRenderer.on('ai:error', (_event, requestId, error) => callback(requestId, error))
+      const listener = (_event: any, requestId: string, error: string) => callback(requestId, error)
+      ipcRenderer.on('ai:error', listener)
+      return () => ipcRenderer.removeListener('ai:error', listener)
     },
     onCancelled: (callback: (requestId: string) => void) => {
-      ipcRenderer.on('ai:cancelled', (_event, requestId) => callback(requestId))
+      const listener = (_event: any, requestId: string) => callback(requestId)
+      ipcRenderer.on('ai:cancelled', listener)
+      return () => ipcRenderer.removeListener('ai:cancelled', listener)
     },
 
     // 聊天历史管理（全局）
@@ -532,13 +578,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getStatus: (connectionId: string) => ipcRenderer.invoke('rdp:getStatus', connectionId),
     getAllConnections: () => ipcRenderer.invoke('rdp:getAllConnections'),
     onConnected: (callback: (connectionId: string) => void) => {
-      ipcRenderer.on('rdp:connected', (_event, connectionId) => callback(connectionId))
+      const listener = (_event: any, connectionId: string) => callback(connectionId)
+      ipcRenderer.on('rdp:connected', listener)
+      return () => ipcRenderer.removeListener('rdp:connected', listener)
     },
     onDisconnected: (callback: (connectionId: string, code: number | null) => void) => {
-      ipcRenderer.on('rdp:disconnected', (_event, connectionId, code) => callback(connectionId, code))
+      const listener = (_event: any, connectionId: string, code: number | null) => callback(connectionId, code)
+      ipcRenderer.on('rdp:disconnected', listener)
+      return () => ipcRenderer.removeListener('rdp:disconnected', listener)
     },
     onError: (callback: (connectionId: string, error: string) => void) => {
-      ipcRenderer.on('rdp:error', (_event, connectionId, error) => callback(connectionId, error))
+      const listener = (_event: any, connectionId: string, error: string) => callback(connectionId, error)
+      ipcRenderer.on('rdp:error', listener)
+      return () => ipcRenderer.removeListener('rdp:error', listener)
     }
   },
 
@@ -549,13 +601,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getStatus: (connectionId: string) => ipcRenderer.invoke('vnc:getStatus', connectionId),
     getAllConnections: () => ipcRenderer.invoke('vnc:getAllConnections'),
     onConnected: (callback: (connectionId: string) => void) => {
-      ipcRenderer.on('vnc:connected', (_event, connectionId) => callback(connectionId))
+      const listener = (_event: any, connectionId: string) => callback(connectionId)
+      ipcRenderer.on('vnc:connected', listener)
+      return () => ipcRenderer.removeListener('vnc:connected', listener)
     },
     onDisconnected: (callback: (connectionId: string) => void) => {
-      ipcRenderer.on('vnc:disconnected', (_event, connectionId) => callback(connectionId))
+      const listener = (_event: any, connectionId: string) => callback(connectionId)
+      ipcRenderer.on('vnc:disconnected', listener)
+      return () => ipcRenderer.removeListener('vnc:disconnected', listener)
     },
     onError: (callback: (connectionId: string, error: string) => void) => {
-      ipcRenderer.on('vnc:error', (_event, connectionId, error) => callback(connectionId, error))
+      const listener = (_event: any, connectionId: string, error: string) => callback(connectionId, error)
+      ipcRenderer.on('vnc:error', listener)
+      return () => ipcRenderer.removeListener('vnc:error', listener)
     }
   },
 
@@ -566,22 +624,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
     install: () => ipcRenderer.invoke('update:install'),
     getVersion: () => ipcRenderer.invoke('update:getVersion'),
     onChecking: (callback: () => void) => {
-      ipcRenderer.on('update:checking', () => callback())
+      const listener = () => callback()
+      ipcRenderer.on('update:checking', listener)
+      return () => ipcRenderer.removeListener('update:checking', listener)
     },
     onAvailable: (callback: (info: any) => void) => {
-      ipcRenderer.on('update:available', (_event, info) => callback(info))
+      const listener = (_event: any, info: any) => callback(info)
+      ipcRenderer.on('update:available', listener)
+      return () => ipcRenderer.removeListener('update:available', listener)
     },
     onNotAvailable: (callback: (info: any) => void) => {
-      ipcRenderer.on('update:not-available', (_event, info) => callback(info))
+      const listener = (_event: any, info: any) => callback(info)
+      ipcRenderer.on('update:not-available', listener)
+      return () => ipcRenderer.removeListener('update:not-available', listener)
     },
     onProgress: (callback: (progress: any) => void) => {
-      ipcRenderer.on('update:progress', (_event, progress) => callback(progress))
+      const listener = (_event: any, progress: any) => callback(progress)
+      ipcRenderer.on('update:progress', listener)
+      return () => ipcRenderer.removeListener('update:progress', listener)
     },
     onDownloaded: (callback: (info: any) => void) => {
-      ipcRenderer.on('update:downloaded', (_event, info) => callback(info))
+      const listener = (_event: any, info: any) => callback(info)
+      ipcRenderer.on('update:downloaded', listener)
+      return () => ipcRenderer.removeListener('update:downloaded', listener)
     },
     onError: (callback: (error: any) => void) => {
-      ipcRenderer.on('update:error', (_event, error) => callback(error))
+      const listener = (_event: any, error: any) => callback(error)
+      ipcRenderer.on('update:error', listener)
+      return () => ipcRenderer.removeListener('update:error', listener)
     }
   },
 

@@ -469,9 +469,8 @@ import { isExplainQuery, parseExplainQuery } from '@/utils/command-intelligence'
 import type { SessionConfig as BaseSessionConfig } from '@/types/session'
 import { useAppStore } from '@/stores/app'
 
-// 全局连接跟踪 - 防止重复连接
-const connectingIds = new Set<string>()
-const connectedIds = new Set<string>()
+// 全局连接跟踪 - 防止重复连接（使用 Map 存储每个 connectionId 的状态，避免模块级 Set 在 HMR 时不清空的问题）
+const globalConnectionState = new Map<string, 'connecting' | 'connected'>()
 
 // Extend base config if needed, or simply alias it
 type SessionConfig = BaseSessionConfig
@@ -744,9 +743,11 @@ const reconnectMessage = computed(() => {
 })
 
 // 设置重连事件监听器
+const reconnectListenerCleanups: Array<() => void> = []
+
 const setupReconnectListeners = () => {
   // 监听重连开始事件
-  window.electronAPI.ssh.onReconnecting((id: string, attempt: number, maxAttempts: number) => {
+  const u1 = window.electronAPI.ssh.onReconnecting((id: string, attempt: number, maxAttempts: number) => {
     if (id === props.connectionId) {
       console.log(`[TerminalTab] Reconnecting ${id}: attempt ${attempt}/${maxAttempts}`)
       connectionStatus.value = 'reconnecting'
@@ -760,9 +761,10 @@ const setupReconnectListeners = () => {
       })
     }
   })
+  if (u1) reconnectListenerCleanups.push(u1)
   
   // 监听重连成功事件
-  window.electronAPI.ssh.onReconnected((id: string) => {
+  const u2 = window.electronAPI.ssh.onReconnected((id: string) => {
     if (id === props.connectionId) {
       console.log(`[TerminalTab] Reconnected ${id}`)
       connectionStatus.value = 'connected'
@@ -776,9 +778,10 @@ const setupReconnectListeners = () => {
       })
     }
   })
+  if (u2) reconnectListenerCleanups.push(u2)
   
   // 监听重连失败事件
-  window.electronAPI.ssh.onReconnectFailed((id: string, reason: string) => {
+  const u3 = window.electronAPI.ssh.onReconnectFailed((id: string, reason: string) => {
     if (id === props.connectionId) {
       console.log(`[TerminalTab] Reconnect failed ${id}: ${reason}`)
       connectionStatus.value = 'error'
@@ -793,6 +796,7 @@ const setupReconnectListeners = () => {
       })
     }
   })
+  if (u3) reconnectListenerCleanups.push(u3)
 }
 
 // 取消重连
@@ -827,19 +831,13 @@ const loadCommandIntelligenceSettings = async () => {
 
 // 手动重连
 const handleManualReconnect = async () => {
-  if (!props.sessionId) return
+  // 使用 props.session 对象（props 中没有 sessionId，只有 session 对象）
+  if (!props.session) return
   
   isManualReconnecting.value = true
   showDisconnectedNotification.value = false
   
   try {
-    // 获取会话配置
-    const session = await window.electronAPI.session.get(props.sessionId)
-    if (!session) {
-      ElMessage.error('会话不存在')
-      return
-    }
-    
     // 断开旧连接
     try {
       await window.electronAPI.ssh.disconnect(props.connectionId)
@@ -849,12 +847,13 @@ const handleManualReconnect = async () => {
     
     // 重新连接 - 序列化 session 以便 IPC 传输
     connectionStatus.value = 'connecting'
-    const sessionData = JSON.parse(JSON.stringify(session))
+    const sessionData = JSON.parse(JSON.stringify(props.session))
     const result = await window.electronAPI.ssh.connect(props.connectionId, sessionData)
     
     if (result.success) {
       connectionStatus.value = 'connected'
       isConnected.value = true
+      globalConnectionState.set(props.connectionId, 'connected')
       ElMessage.success('重连成功！')
     } else {
       connectionStatus.value = 'error'
@@ -1029,12 +1028,13 @@ onMounted(async () => {
   }
   
   // 检查是否已经连接或正在连接（防止重复连接）
-  if (connectingIds.has(props.connectionId) || connectedIds.has(props.connectionId)) {
+  const existingState = globalConnectionState.get(props.connectionId)
+  if (existingState) {
     console.log(`[TerminalTab] Connection ${props.connectionId} already exists or connecting, reusing existing connection`)
-    if (connectedIds.has(props.connectionId)) {
+    if (existingState === 'connected') {
       isConnected.value = true
       connectionStatus.value = 'connected'
-    } else if (connectingIds.has(props.connectionId)) {
+    } else if (existingState === 'connecting') {
       // 连接正在进行中，等待连接完成
       connectionStatus.value = 'connecting'
       // 检查终端实例是否已经存在且有数据（说明已经连接成功）
@@ -1043,8 +1043,7 @@ onMounted(async () => {
         // 终端实例存在，说明连接已经成功，只是状态没同步
         isConnected.value = true
         connectionStatus.value = 'connected'
-        connectedIds.add(props.connectionId)
-        connectingIds.delete(props.connectionId)
+        globalConnectionState.set(props.connectionId, 'connected')
       }
     }
     // 设置重连事件监听器（即使复用连接也需要监听）
@@ -1057,7 +1056,7 @@ onMounted(async () => {
   }
   
   // 标记为正在连接
-  connectingIds.add(props.connectionId)
+  globalConnectionState.set(props.connectionId, 'connecting')
   
   // 设置重连事件监听器
   setupReconnectListeners()
@@ -1094,8 +1093,17 @@ onMounted(async () => {
     if (result.success) {
       isConnected.value = true
       connectionStatus.value = 'connected'
-      connectedIds.add(props.connectionId)
+      globalConnectionState.set(props.connectionId, 'connected')
       ElMessage.success(`Connected to ${props.session.host}`)
+      
+      // 连接成功后延迟触发 fit，让终端渲染完成后立即同步真实尺寸给服务端
+      // 这样可以避免服务端按初始 PTY 尺寸(220x50)折行导致的显示错位
+      setTimeout(() => {
+        const instance = terminalManager.get(props.connectionId)
+        if (instance?.fitAddon) {
+          instance.fitAddon.fit()
+        }
+      }, 100)
       
       // 记录连接统计开始
       try {
@@ -1108,14 +1116,18 @@ onMounted(async () => {
       }
     } else {
       connectionStatus.value = 'error'
+      globalConnectionState.delete(props.connectionId)
       ElMessage.error(`Connection failed: ${result.error}`)
     }
   } catch (error: any) {
     connectionStatus.value = 'error'
+    globalConnectionState.delete(props.connectionId)
     ElMessage.error(`Connection error: ${error.message}`)
   } finally {
-    // 移除正在连接标记
-    connectingIds.delete(props.connectionId)
+    // 如果还是 connecting 状态（连接失败），清除标记
+    if (globalConnectionState.get(props.connectionId) === 'connecting') {
+      globalConnectionState.delete(props.connectionId)
+    }
   }
 })
 
@@ -1125,6 +1137,12 @@ onUnmounted(async () => {
     cleanupKeyboard()
     cleanupKeyboard = null
   }
+  
+  // 清理重连事件监听器
+  reconnectListenerCleanups.forEach(cleanup => {
+    try { cleanup() } catch (e) { /* ignore */ }
+  })
+  reconnectListenerCleanups.length = 0
   
   // 清理 AI 建议防抖定时器
   if (aiSuggestDebounceTimer) {
@@ -1173,24 +1191,21 @@ onUnmounted(async () => {
   // 2. 断开 SSH 连接（只在最后一个实例时断开）
   if (isConnected.value) {
     try {
-      // 从已连接集合中移除
-      connectedIds.delete(props.connectionId)
+      // 从全局状态中移除
+      globalConnectionState.delete(props.connectionId)
       
-      // 只有当没有其他实例使用这个连接时才断开
-      if (!connectedIds.has(props.connectionId)) {
-        // 记录连接统计结束
-        try {
-          await window.electronAPI.connectionStats?.end?.(props.connectionId)
-        } catch (error) {
-          console.error('Failed to end connection stats:', error)
-        }
-        
-        await window.electronAPI.ssh.disconnect(props.connectionId)
-        console.log(`[TerminalTab] Disconnected ${props.connectionId}`)
-        
-        // 销毁终端实例
-        terminalManager.destroy(props.connectionId)
+      // 记录连接统计结束
+      try {
+        await window.electronAPI.connectionStats?.end?.(props.connectionId)
+      } catch (error) {
+        console.error('Failed to end connection stats:', error)
       }
+      
+      await window.electronAPI.ssh.disconnect(props.connectionId)
+      console.log(`[TerminalTab] Disconnected ${props.connectionId}`)
+      
+      // 销毁终端实例
+      terminalManager.destroy(props.connectionId)
     } catch (error) {
       console.error('Error disconnecting:', error)
     }

@@ -41,21 +41,20 @@ export function registerPortForwardHandlers() {
 
         // 不自动启动，只添加配置
         const forward = {
-          id,
           connectionId,
           type: config.type,
           localHost: config.localHost,
           localPort: config.localPort,
-          remoteHost: config.remoteHost,
-          remotePort: config.remotePort,
-          status: 'inactive' as const,
-          description: config.description
+          remoteHost: config.remoteHost || '',
+          remotePort: config.remotePort || 0,
+          description: config.description,
+          autoStart: config.autoStart || false
         }
 
         // 存储转发配置
-        portForwardManager.addForward(forward)
+        const created = await portForwardManager.addForward(forward)
 
-        return { success: true, id }
+        return { success: true, id: created.id }
       } catch (error: any) {
         return { success: false, error: error.message }
       }

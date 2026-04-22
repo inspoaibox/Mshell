@@ -91,11 +91,11 @@ class PortForwardTemplateManager extends BaseManager<PortForwardTemplate> {
   /**
    * 创建模板
    */
-  async createTemplate(data: Omit<PortForwardTemplate, 'id' | 'createdAt' | 'updatedAt'>): Promise<PortForwardTemplate> {
+  async createTemplate(data: Omit<PortForwardTemplate, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<PortForwardTemplate> {
     const now = new Date().toISOString()
     const template: PortForwardTemplate = {
       ...data,
-      id: `template-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: data.id || `template-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       createdAt: now,
       updatedAt: now
     }
@@ -371,7 +371,8 @@ export class PortForwardManager extends EventEmitter {
         resolve()
       })
 
-      sshClient.on('tcp connection', (_info, accept) => {
+      // 使用具名函数避免重复注册监听器
+      const tcpConnectionHandler = (_info: any, accept: any) => {
         const stream = accept()
         const socket = net.connect(localPort, localHost)
 
@@ -384,7 +385,11 @@ export class PortForwardManager extends EventEmitter {
         stream.on('error', (err: Error) => {
           console.error('Stream error:', err)
         })
-      })
+      }
+
+      // 先移除旧的同名监听器（如果有），再注册新的
+      sshClient.removeAllListeners('tcp connection')
+      sshClient.on('tcp connection', tcpConnectionHandler)
     })
   }
 
@@ -632,7 +637,7 @@ export class PortForwardManager extends EventEmitter {
   /**
    * 创建转发模板
    */
-  async createTemplate(data: Omit<PortForwardTemplate, 'id' | 'createdAt' | 'updatedAt'>): Promise<PortForwardTemplate> {
+  async createTemplate(data: Omit<PortForwardTemplate, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<PortForwardTemplate> {
     return await this.templateManager.createTemplate(data)
   }
 

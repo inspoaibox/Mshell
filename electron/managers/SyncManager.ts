@@ -4,6 +4,7 @@ import { promises as fs } from 'fs'
 import { createHash } from 'crypto'
 import { backupManager, BackupData } from './BackupManager'
 import { logger } from '../utils/logger'
+import { credentialManager } from './CredentialManager'
 import axios from 'axios'
 
 /**
@@ -211,10 +212,17 @@ export class SyncManager {
     // 收集 SSH 密钥（包含私钥内容）
     const sshKeysWithContent = await this.collectSSHKeysWithPrivateKeys(sshKeyManager)
 
+    // 确保 session 密码字段是明文
+    // SessionManager 内存中已经解密为明文，因此直接使用即可
+    const plainSessions = sessionManager.getAllSessions().map(s => {
+      const plain = { ...s }
+      return plain
+    })
+
     return {
       version: '1.0.0',
       timestamp: new Date().toISOString(),
-      sessions: sessionManager.getAllSessions(),
+      sessions: plainSessions,
       sessionGroups: sessionManager.getAllGroups(),
       snippets: snippetManager.getAll(),
       commandHistory: commandHistoryManager.getAll(),
@@ -302,21 +310,30 @@ export class SyncManager {
     const { promisify } = await import('util')
     const scryptAsync = promisify(scrypt)
     
-    const parts = encryptedData.split(':')
-    if (parts.length !== 2) {
+    // 只分割第一个冒号，IV 是32个hex字符
+    const colonIndex = encryptedData.indexOf(':')
+    if (colonIndex === -1) {
+      throw new Error('Invalid encrypted data format')
+    }
+
+    const ivHex = encryptedData.slice(0, colonIndex)
+    const encrypted = encryptedData.slice(colonIndex + 1)
+
+    if (ivHex.length !== 32 || !encrypted) {
       throw new Error('Invalid encrypted data format')
     }
     
-    const iv = Buffer.from(parts[0], 'hex')
-    const encrypted = parts[1]
-    
+    const iv = Buffer.from(ivHex, 'hex')
     const key = (await scryptAsync(password, 'mshell-sync-salt', 32)) as Buffer
     
-    const decipher = createDecipheriv('aes-256-cbc', key, iv)
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8')
-    decrypted += decipher.final('utf8')
-    
-    return decrypted
+    try {
+      const decipher = createDecipheriv('aes-256-cbc', key, iv)
+      let decrypted = decipher.update(encrypted, 'hex', 'utf8')
+      decrypted += decipher.final('utf8')
+      return decrypted
+    } catch (error) {
+      throw new Error('解密失败，密码可能不正确')
+    }
   }
 
   // ==================== GitHub Gist 同步 ====================

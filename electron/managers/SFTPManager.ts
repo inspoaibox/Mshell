@@ -40,12 +40,15 @@ export class SFTPManager extends EventEmitter {
   private sftpClients: Map<string, any>
   private sshClients: Map<string, Client>
   private transferTasks: Map<string, TransferTask>
+  // 暂停控制：存储每个任务的中止控制器，用于真正中断流传输
+  private pauseControllers: Map<string, { paused: boolean; readStream?: fs.ReadStream; writeStream?: any }>
 
   constructor() {
     super()
     this.sftpClients = new Map()
     this.sshClients = new Map()
     this.transferTasks = new Map()
+    this.pauseControllers = new Map()
     
     // 初始化传输记录管理器
     transferRecordManager.initialize().catch(console.error)
@@ -263,6 +266,9 @@ export class SFTPManager extends EventEmitter {
       const readStream = fs.createReadStream(localPath, { start: startPosition, highWaterMark: CHUNK_SIZE })
       const writeStream = sftp.createWriteStream(remotePath, { flags: 'a', highWaterMark: CHUNK_SIZE })
 
+      // 注册流引用，供 pauseTask 使用
+      this.pauseControllers.set(taskId, { paused: false, readStream, writeStream })
+
       let transferred = startPosition
       let lastTransferred = startPosition
       let lastTime = Date.now()
@@ -294,6 +300,12 @@ export class SFTPManager extends EventEmitter {
 
       writeStream.on('close', async () => {
         clearInterval(progressInterval)
+        this.pauseControllers.delete(taskId)
+        // 如果是暂停导致的关闭，不标记为完成
+        if (task.status === 'paused') {
+          resolve()
+          return
+        }
         task.status = 'completed'
         task.progress.percentage = 100
         await transferRecordManager.updateRecord(taskId, { status: 'completed', transferred: totalSize }).catch(console.error)
@@ -303,6 +315,11 @@ export class SFTPManager extends EventEmitter {
 
       writeStream.on('error', async (err: Error) => {
         clearInterval(progressInterval)
+        this.pauseControllers.delete(taskId)
+        if (task.status === 'paused') {
+          resolve()
+          return
+        }
         task.status = 'failed'
         task.error = err.message
         await transferRecordManager.updateRecord(taskId, { status: 'failed', transferred }).catch(console.error)
@@ -312,6 +329,11 @@ export class SFTPManager extends EventEmitter {
 
       readStream.on('error', async (err: Error) => {
         clearInterval(progressInterval)
+        this.pauseControllers.delete(taskId)
+        if (task.status === 'paused') {
+          resolve()
+          return
+        }
         task.status = 'failed'
         task.error = err.message
         await transferRecordManager.updateRecord(taskId, { status: 'failed', transferred }).catch(console.error)
@@ -470,6 +492,9 @@ export class SFTPManager extends EventEmitter {
       const readStream = sftp.createReadStream(remotePath, { start: startPosition, highWaterMark: CHUNK_SIZE })
       const writeStream = fs.createWriteStream(localPath, { flags: 'a', highWaterMark: CHUNK_SIZE })
 
+      // 注册流引用，供 pauseTask 使用
+      this.pauseControllers.set(taskId, { paused: false, readStream, writeStream })
+
       let transferred = startPosition
       let lastTransferred = startPosition
       let lastTime = Date.now()
@@ -501,6 +526,11 @@ export class SFTPManager extends EventEmitter {
 
       writeStream.on('close', async () => {
         clearInterval(progressInterval)
+        this.pauseControllers.delete(taskId)
+        if (task.status === 'paused') {
+          resolve()
+          return
+        }
         task.status = 'completed'
         task.progress.percentage = 100
         await transferRecordManager.updateRecord(taskId, { status: 'completed', transferred: totalSize }).catch(console.error)
@@ -510,6 +540,11 @@ export class SFTPManager extends EventEmitter {
 
       writeStream.on('error', async (err: Error) => {
         clearInterval(progressInterval)
+        this.pauseControllers.delete(taskId)
+        if (task.status === 'paused') {
+          resolve()
+          return
+        }
         task.status = 'failed'
         task.error = err.message
         await transferRecordManager.updateRecord(taskId, { status: 'failed', transferred }).catch(console.error)
@@ -519,6 +554,11 @@ export class SFTPManager extends EventEmitter {
 
       readStream.on('error', async (err: Error) => {
         clearInterval(progressInterval)
+        this.pauseControllers.delete(taskId)
+        if (task.status === 'paused') {
+          resolve()
+          return
+        }
         task.status = 'failed'
         task.error = err.message
         await transferRecordManager.updateRecord(taskId, { status: 'failed', transferred }).catch(console.error)
@@ -688,12 +728,26 @@ export class SFTPManager extends EventEmitter {
   }
 
   /**
-   * 暂停传输任务
+   * 暂停传输任务（真正中断底层流）
    */
   async pauseTask(taskId: string): Promise<void> {
     const task = this.transferTasks.get(taskId)
     if (task && task.status === 'active') {
       task.status = 'paused'
+      
+      // 真正暂停底层流
+      const controller = this.pauseControllers.get(taskId)
+      if (controller) {
+        controller.paused = true
+        // 暂停读取流，停止数据流动
+        if (controller.readStream) {
+          controller.readStream.pause()
+        }
+        // 销毁写入流，中断传输
+        if (controller.writeStream) {
+          controller.writeStream.destroy()
+        }
+      }
       
       // 更新传输记录
       await transferRecordManager.updateRecord(taskId, {

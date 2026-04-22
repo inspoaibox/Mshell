@@ -1172,6 +1172,9 @@
           <el-checkbox label="lockConfig" :disabled="!restoreBackupData.lockConfig">
             锁定配置 {{ restoreBackupData.lockConfig ? '✓' : '(无)' }}
           </el-checkbox>
+          <el-checkbox label="quickCommands" :disabled="!restoreBackupData.quickCommands?.length">
+            快捷命令 ({{ restoreBackupData.quickCommands?.length || 0 }} 个)
+          </el-checkbox>
         </el-checkbox-group>
         <el-alert 
           type="info" 
@@ -1353,7 +1356,7 @@ const backupPasswordConfirm = ref('')
 const restoreFilePath = ref('')
 const restorePassword = ref('')
 const restoreBackupData = ref<any>(null)
-const restoreOptions = ref<string[]>(['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings', 'aiConfig', 'aiChatHistory', 'connectionStats', 'auditLogs', 'transferRecords', 'lockConfig'])
+const restoreOptions = ref<string[]>(['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings', 'aiConfig', 'aiChatHistory', 'connectionStats', 'auditLogs', 'transferRecords', 'lockConfig', 'quickCommands'])
 const backupLoading = ref(false)
 
 const appVersion = ref('0.1.3')
@@ -1698,7 +1701,8 @@ const applyRestore = async () => {
       restoreConnectionStats: restoreOptions.value.includes('connectionStats'),
       restoreAuditLogs: restoreOptions.value.includes('auditLogs'),
       restoreTransferRecords: restoreOptions.value.includes('transferRecords'),
-      restoreLockConfig: restoreOptions.value.includes('lockConfig')
+      restoreLockConfig: restoreOptions.value.includes('lockConfig'),
+      restoreQuickCommands: restoreOptions.value.includes('quickCommands')
     }
 
     const result = await window.electronAPI.backup.apply(toRaw(restoreBackupData.value), options)
@@ -1762,7 +1766,7 @@ const cancelRestore = () => {
   restoreFilePath.value = ''
   restorePassword.value = ''
   restoreBackupData.value = null
-  restoreOptions.value = ['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings', 'aiConfig', 'aiChatHistory', 'connectionStats', 'auditLogs', 'transferRecords', 'lockConfig']
+  restoreOptions.value = ['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings', 'aiConfig', 'aiChatHistory', 'connectionStats', 'auditLogs', 'transferRecords', 'lockConfig', 'quickCommands']
 }
 
 // 格式化函数

@@ -140,12 +140,12 @@ export class WorkflowManager {
   create(data: any): Workflow {
     const workflow: Workflow = {
       ...data,
-      id: `workflow_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-      createdAt: new Date().toISOString(),
+      id: data.id || `workflow_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      createdAt: data.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      executionCount: 0,
-      successCount: 0,
-      failureCount: 0
+      executionCount: data.executionCount ?? 0,
+      successCount: data.successCount ?? 0,
+      failureCount: data.failureCount ?? 0
     }
 
     this.workflows.set(workflow.id, workflow)
@@ -328,12 +328,20 @@ export class WorkflowManager {
 
   private evaluateCondition(condition: string, variables: Record<string, any>): boolean {
     try {
-      // 简单的条件评估（实际应该使用安全的表达式解析器）
+      // 安全的条件评估：只支持简单的比较表达式，不使用 eval
       let expr = condition
       Object.keys(variables).forEach(key => {
         expr = expr.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), JSON.stringify(variables[key]))
       })
-      return eval(expr)
+      // 只允许简单的比较：==, !=, >, <, >=, <=, &&, ||, !
+      // 拒绝包含危险字符的表达式
+      const safePattern = /^[\s\d"'`+\-*/.,()\[\]!&|<>=!?:truefals]+$/
+      if (!safePattern.test(expr.replace(/true|false|null|undefined/g, ''))) {
+        console.warn('[WorkflowManager] Unsafe condition expression rejected:', expr)
+        return false
+      }
+      // 使用 Function 构造器替代 eval，限制作用域
+      return new Function(`"use strict"; return (${expr})`)()
     } catch {
       return false
     }
