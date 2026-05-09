@@ -15,7 +15,7 @@ export interface TerminalOptions {
   cursorStyle: 'block' | 'underline' | 'bar'
   cursorBlink: boolean
   scrollback: number
-  rendererType: 'dom' | 'canvas' | 'webgl'
+  rendererType: 'auto' | 'dom' | 'canvas' | 'webgl'
   copyOnSelect: boolean
 }
 
@@ -25,7 +25,9 @@ export interface TerminalOptions {
  */
 export const useAppStore = defineStore('app', () => {
   // ============ 视图状态 ============
-  const activeView = ref<'sessions' | 'sftp' | 'port-forward' | 'snippets' | 'statistics' | 'logs' | 'settings'>('sessions')
+  const activeView = ref<
+    'sessions' | 'sftp' | 'port-forward' | 'snippets' | 'statistics' | 'logs' | 'settings'
+  >('sessions')
 
   // ============ 标签页管理 ============
   const tabs = ref<Tab[]>([])
@@ -33,7 +35,7 @@ export const useAppStore = defineStore('app', () => {
 
   // 当前活动的会话
   const currentSession = computed(() => {
-    const tab = tabs.value.find(t => t.id === activeTab.value)
+    const tab = tabs.value.find((t) => t.id === activeTab.value)
     return tab?.session || null
   })
 
@@ -45,7 +47,7 @@ export const useAppStore = defineStore('app', () => {
 
   // 移除标签页
   async function removeTab(tabId: string) {
-    const index = tabs.value.findIndex(t => t.id === tabId)
+    const index = tabs.value.findIndex((t) => t.id === tabId)
     if (index !== -1) {
       console.log(`[Store] Removing tab ${tabId}`)
 
@@ -81,7 +83,7 @@ export const useAppStore = defineStore('app', () => {
 
   // 切换到下一个标签
   function nextTab() {
-    const currentIndex = tabs.value.findIndex(t => t.id === activeTab.value)
+    const currentIndex = tabs.value.findIndex((t) => t.id === activeTab.value)
     if (currentIndex < tabs.value.length - 1) {
       activeTab.value = tabs.value[currentIndex + 1].id
     }
@@ -89,7 +91,7 @@ export const useAppStore = defineStore('app', () => {
 
   // 切换到上一个标签
   function prevTab() {
-    const currentIndex = tabs.value.findIndex(t => t.id === activeTab.value)
+    const currentIndex = tabs.value.findIndex((t) => t.id === activeTab.value)
     if (currentIndex > 0) {
       activeTab.value = tabs.value[currentIndex - 1].id
     }
@@ -105,13 +107,15 @@ export const useAppStore = defineStore('app', () => {
       return sessions.value
     }
     const query = searchQuery.value.toLowerCase().trim()
-    return sessions.value.filter(session => {
-      return session.name.toLowerCase().includes(query) ||
+    return sessions.value.filter((session) => {
+      return (
+        session.name.toLowerCase().includes(query) ||
         session.host.toLowerCase().includes(query) ||
         session.username.toLowerCase().includes(query) ||
         (session.provider && session.provider.toLowerCase().includes(query)) ||
         (session.region && session.region.toLowerCase().includes(query)) ||
         (session.notes && session.notes.toLowerCase().includes(query))
+      )
     })
   })
 
@@ -157,7 +161,7 @@ export const useAppStore = defineStore('app', () => {
   // 删除会话
   async function deleteSession(id: string) {
     await window.electronAPI.session.delete(id)
-    sessions.value = sessions.value.filter(s => s.id !== id)
+    sessions.value = sessions.value.filter((s) => s.id !== id)
   }
 
   // 创建分组
@@ -243,7 +247,7 @@ export const useAppStore = defineStore('app', () => {
         cursorStyle: settings.terminal.cursorStyle,
         cursorBlink: settings.terminal.cursorBlink,
         scrollback: settings.terminal.scrollback,
-        rendererType: settings.terminal.rendererType || 'webgl',
+        rendererType: settings.terminal.rendererType || 'auto',
         copyOnSelect: settings.terminal.copyOnSelect || false
       })
     }
@@ -276,10 +280,7 @@ export const useAppStore = defineStore('app', () => {
 
   // ============ 初始化 ============
   async function initialize() {
-    await Promise.all([
-      loadSessions(),
-      loadSettings()
-    ])
+    await Promise.all([loadSessions(), loadSettings()])
   }
 
   return {

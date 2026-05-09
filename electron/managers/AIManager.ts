@@ -1,9 +1,11 @@
+/* global Buffer */
+
 /**
  * AI Manager
  * 管理 AI 渠道、模型、请求处理、缓存和配置持久化
  */
 
-import { app, safeStorage } from 'electron'
+import { app, safeStorage, type BrowserWindow } from 'electron'
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import { createHash } from 'crypto'
@@ -36,6 +38,13 @@ interface ConfigFileData {
   defaultModelId?: string
 }
 
+export interface AIBackupData {
+  channels: AIChannel[]
+  models: AIModel[]
+  config: AIConfig
+  defaultModelId?: string
+}
+
 export class AIManager {
   private channels: Map<string, AIChannel> = new Map()
   private models: Map<string, AIModel> = new Map()
@@ -44,7 +53,7 @@ export class AIManager {
   private cache: Map<string, CacheEntry> = new Map()
   private configPath: string
   private adapters: Map<AIProviderType, AIProviderAdapter> = new Map()
-  private mainWindow: Electron.BrowserWindow | null = null
+  private mainWindow: BrowserWindow | null = null
 
   // 缓存配置
   private readonly MAX_CACHE_SIZE = 10
@@ -73,7 +82,7 @@ export class AIManager {
   /**
    * 设置主窗口引用（用于发送事件）
    */
-  setMainWindow(window: Electron.BrowserWindow): void {
+  setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window
   }
 
@@ -154,7 +163,7 @@ export class AIManager {
       }
 
       // 删除关联的模型
-      const relatedModels = Array.from(this.models.values()).filter(m => m.channelId === id)
+      const relatedModels = Array.from(this.models.values()).filter((m) => m.channelId === id)
       for (const model of relatedModels) {
         this.models.delete(model.id)
       }
@@ -318,7 +327,7 @@ export class AIManager {
    * 获取渠道的所有模型
    */
   getModelsByChannel(channelId: string): AIModel[] {
-    return Array.from(this.models.values()).filter(m => m.channelId === channelId)
+    return Array.from(this.models.values()).filter((m) => m.channelId === channelId)
   }
 
   // ==================== 默认模型管理 ====================
@@ -426,18 +435,21 @@ export class AIManager {
 
       if (adapter.streamRequest) {
         // 使用流式请求
-        response = await adapter.streamRequest({
-          apiKey: channel.apiKey,
-          endpoint: channel.apiEndpoint,
-          modelId: defaultModel.modelId,
-          prompt,
-          temperature: this.config.temperature,
-          maxTokens: this.config.maxTokens,
-          timeout: this.config.timeout
-        }, (chunk) => {
-          // 发送数据块
-          this.sendEvent('ai:stream-chunk', requestId, chunk)
-        })
+        response = await adapter.streamRequest(
+          {
+            apiKey: channel.apiKey,
+            endpoint: channel.apiEndpoint,
+            modelId: defaultModel.modelId,
+            prompt,
+            temperature: this.config.temperature,
+            maxTokens: this.config.maxTokens,
+            timeout: this.config.timeout
+          },
+          (chunk) => {
+            // 发送数据块
+            this.sendEvent('ai:stream-chunk', requestId, chunk)
+          }
+        )
       } else {
         // 降级为普通请求
         response = await adapter.sendRequest({
@@ -489,7 +501,12 @@ export class AIManager {
   /**
    * 使用指定模型发送 AI 请求
    */
-  async requestWithModel(action: AIAction, content: string, modelId: string, language?: string): Promise<string> {
+  async requestWithModel(
+    action: AIAction,
+    content: string,
+    modelId: string,
+    language?: string
+  ): Promise<string> {
     const requestId = uuidv4()
 
     try {
@@ -557,18 +574,21 @@ export class AIManager {
 
       if (adapter.streamRequest) {
         // 使用流式请求
-        response = await adapter.streamRequest({
-          apiKey: channel.apiKey,
-          endpoint: channel.apiEndpoint,
-          modelId: model.modelId,
-          prompt,
-          temperature: this.config.temperature,
-          maxTokens: this.config.maxTokens,
-          timeout: this.config.timeout
-        }, (chunk) => {
-          // 发送数据块
-          this.sendEvent('ai:stream-chunk', requestId, chunk)
-        })
+        response = await adapter.streamRequest(
+          {
+            apiKey: channel.apiKey,
+            endpoint: channel.apiEndpoint,
+            modelId: model.modelId,
+            prompt,
+            temperature: this.config.temperature,
+            maxTokens: this.config.maxTokens,
+            timeout: this.config.timeout
+          },
+          (chunk) => {
+            // 发送数据块
+            this.sendEvent('ai:stream-chunk', requestId, chunk)
+          }
+        )
       } else {
         // 降级为普通请求
         response = await adapter.sendRequest({
@@ -705,9 +725,30 @@ export class AIManager {
   }
 
   /**
+   * 导出可备份/同步的 AI 配置。
+   * this.channels 中保存的是运行时明文 API Key；外层备份/同步会整体加密。
+   */
+  exportForBackup(): AIBackupData {
+    return {
+      channels: Array.from(this.channels.values()).map((channel) => ({ ...channel })),
+      models: Array.from(this.models.values()).map((model) => ({ ...model })),
+      config: {
+        ...this.config,
+        prompts: { ...(this.config.prompts || {}) }
+      },
+      defaultModelId: this.config.defaultModelId
+    }
+  }
+
+  /**
    * 批量更新所有配置
    */
-  async updateAll(data: { channels: AIChannel[], models: AIModel[], config: AIConfig, defaultModelId?: string }): Promise<void> {
+  async updateAll(data: {
+    channels: AIChannel[]
+    models: AIModel[]
+    config: AIConfig
+    defaultModelId?: string
+  }): Promise<void> {
     try {
       // 1. 更新 Config
       if (data.config) {
@@ -734,7 +775,11 @@ export class AIManager {
           const existing = this.channels.get(ch.id)
           const channel: AIChannel = {
             ...ch,
-            createdAt: existing?.createdAt ? new Date(existing.createdAt) : (ch.createdAt ? new Date(ch.createdAt) : new Date()),
+            createdAt: existing?.createdAt
+              ? new Date(existing.createdAt)
+              : ch.createdAt
+                ? new Date(ch.createdAt)
+                : new Date(),
             updatedAt: new Date()
           }
           newChannelsMap.set(channel.id, channel)
@@ -749,7 +794,11 @@ export class AIManager {
           const existing = this.models.get(m.id)
           const model: AIModel = {
             ...m,
-            createdAt: existing?.createdAt ? new Date(existing.createdAt) : (m.createdAt ? new Date(m.createdAt) : new Date())
+            createdAt: existing?.createdAt
+              ? new Date(existing.createdAt)
+              : m.createdAt
+                ? new Date(m.createdAt)
+                : new Date()
           }
           newModelsMap.set(model.id, model)
         }
@@ -761,7 +810,6 @@ export class AIManager {
 
       // 通知前端更新（虽然是前端发起的，但为了保持一致性）
       this.sendEvent('ai:config-updated')
-
     } catch (error) {
       logger.logError('system', 'Failed to update all AI config', error as Error)
       throw error
@@ -803,8 +851,9 @@ export class AIManager {
   private saveToCache(key: string, response: string): void {
     // 如果缓存已满，删除最旧的条目
     if (this.cache.size >= this.MAX_CACHE_SIZE) {
-      const oldestKey = Array.from(this.cache.entries())
-        .sort((a, b) => a[1].timestamp.getTime() - b[1].timestamp.getTime())[0][0]
+      const oldestKey = Array.from(this.cache.entries()).sort(
+        (a, b) => a[1].timestamp.getTime() - b[1].timestamp.getTime()
+      )[0][0]
       this.cache.delete(oldestKey)
     }
 
@@ -868,7 +917,11 @@ export class AIManager {
             channel.apiKey = safeStorage.decryptString(encrypted)
           }
         } catch (error) {
-          logger.logError('system', `Failed to decrypt API key for channel: ${channel.name}`, error as Error)
+          logger.logError(
+            'system',
+            `Failed to decrypt API key for channel: ${channel.name}`,
+            error as Error
+          )
         }
 
         // 转换日期字符串为 Date 对象
@@ -917,7 +970,7 @@ export class AIManager {
    */
   private async saveConfig(): Promise<void> {
     try {
-      const channels = Array.from(this.channels.values()).map(channel => {
+      const channels = Array.from(this.channels.values()).map((channel) => {
         const encrypted = { ...channel }
 
         // 加密 API Key
@@ -1033,7 +1086,11 @@ export class AIManager {
       const data = JSON.stringify(messages, null, 2)
       await fs.writeFile(filePath, data, 'utf-8')
     } catch (error) {
-      logger.logError('system', `Failed to save terminal chat history for ${connectionId}`, error as Error)
+      logger.logError(
+        'system',
+        `Failed to save terminal chat history for ${connectionId}`,
+        error as Error
+      )
       throw error
     }
   }
@@ -1058,7 +1115,11 @@ export class AIManager {
       await fs.unlink(filePath)
     } catch (error: any) {
       if (error.code !== 'ENOENT') {
-        logger.logError('system', `Failed to clear terminal chat history for ${connectionId}`, error)
+        logger.logError(
+          'system',
+          `Failed to clear terminal chat history for ${connectionId}`,
+          error
+        )
         throw error
       }
     }

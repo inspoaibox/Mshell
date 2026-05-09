@@ -20,7 +20,8 @@ interface TerminalOptions {
   cursorStyle?: 'block' | 'underline' | 'bar'
   cursorBlink?: boolean
   scrollback?: number
-  rendererType?: 'dom' | 'canvas' | 'webgl'
+  rendererType?: 'auto' | 'dom' | 'canvas' | 'webgl'
+  copyOnSelect?: boolean
 }
 
 interface Props {
@@ -37,7 +38,7 @@ const props = withDefaults(defineProps<Props>(), {
     cursorStyle: 'block',
     cursorBlink: true,
     scrollback: 10000,
-    rendererType: 'webgl'
+    rendererType: 'auto'
   })
 })
 
@@ -64,27 +65,39 @@ let currentLineBuffer = '' // 当前行的输入缓冲
 let currentCommand = ''
 let commandStartTime: number | null = null
 
+const normalizeDataForRemote = (data: string) => (data === '\b' ? '\x7F' : data)
+const removeLastInputCharacter = (value: string) => Array.from(value).slice(0, -1).join('')
+
+const fitAndSyncRemote = () => {
+  const instance = terminalManager.get(props.connectionId)
+  if (instance) {
+    terminalManager.fit(props.connectionId)
+  } else {
+    fitAddon?.fit()
+    if (terminal && terminal.cols > 0 && terminal.rows > 0) {
+      window.electronAPI.ssh.resize(props.connectionId, terminal.cols, terminal.rows)
+    }
+  }
+}
+
 onMounted(() => {
   if (!terminalContainer.value) return
 
   // 加载 AI 配置
-  aiStore.loadConfig().catch(err => {
+  aiStore.loadConfig().catch((err) => {
     console.error('Failed to load AI config:', err)
   })
 
-  const theme = typeof props.options.theme === 'string'
-    ? getTheme(props.options.theme)
-    : (props.options.theme || getTheme('dark'))
+  const theme =
+    typeof props.options.theme === 'string'
+      ? getTheme(props.options.theme)
+      : props.options.theme || getTheme('dark')
 
   // 使用全局管理器获取或创建终端实例
-  const instance = terminalManager.getOrCreate(
-    props.connectionId,
-    terminalContainer.value,
-    {
-      ...props.options,
-      theme
-    }
-  )
+  const instance = terminalManager.getOrCreate(props.connectionId, terminalContainer.value, {
+    ...props.options,
+    theme
+  })
 
   terminal = instance.terminal
   fitAddon = instance.fitAddon
@@ -93,19 +106,18 @@ onMounted(() => {
   // 每次组件挂载时，更新回调引用（解决闭包陷阱问题）
   // 这样即使组件重新挂载，回调也会指向正确的 emit 函数
   console.log(`[TerminalView] onMounted: Setting callbacks for ${props.connectionId}`)
-  terminalManager.setInputCallback(props.connectionId, (data: string, lineBuffer: string) => {
-    console.log(`[TerminalView] inputCallback called: lineBuffer="${lineBuffer}"`)
+  terminalManager.setInputCallback(props.connectionId, (_data: string, lineBuffer: string) => {
     emit('input', lineBuffer)
   })
-  
+
   terminalManager.setCursorCallback(props.connectionId, (position: { x: number; y: number }) => {
     emit('cursorPosition', position)
   })
-  
+
   terminalManager.setDataCallback(props.connectionId, (data: string) => {
     emit('data', data)
   })
-  
+
   terminalManager.setOutputCallback(props.connectionId, (data: string) => {
     emit('ssh-output', data)
   })
@@ -120,10 +132,7 @@ onMounted(() => {
     terminal.onData((data) => {
       // 获取终端实例
       const inst = terminalManager.get(props.connectionId)
-      
-      // 调试日志：检查回调状态
-      console.log(`[TerminalView:onData] connectionId=${props.connectionId}, data="${data.replace(/[\r\n]/g, '\\n')}", inputCallback=${inst?.inputCallback ? 'SET' : 'NULL'}`)
-      
+
       // 更新当前行缓冲（用于自动补全）
       // 注意：当 echoEnabled=false（密码输入模式）时，不更新缓冲，避免密码被记录或触发补全
       if (inst?.echoEnabled === false) {
@@ -143,8 +152,8 @@ onMounted(() => {
         currentLineBuffer = ''
       } else if (data === '\x7F' || data === '\b') {
         // 退格键
-        currentCommand = currentCommand.slice(0, -1)
-        currentLineBuffer = currentLineBuffer.slice(0, -1)
+        currentCommand = removeLastInputCharacter(currentCommand)
+        currentLineBuffer = removeLastInputCharacter(currentLineBuffer)
       } else if (data === '\x03') {
         // Ctrl+C - 取消命令
         currentCommand = ''
@@ -162,28 +171,29 @@ onMounted(() => {
           currentLineBuffer += data
         }
       }
-      
+
       // 通过回调引用发射输入事件（解决闭包陷阱）
       // 仅在终端处于正常回显模式时触发补全（密码输入时 echoEnabled=false，禁用补全）
-      console.log(`[TerminalView:onData] currentLineBuffer="${currentLineBuffer}", will call inputCallback: ${!!(currentLineBuffer && inst?.inputCallback && inst?.echoEnabled !== false)}`)
-      if (currentLineBuffer && inst?.inputCallback && inst?.echoEnabled !== false) {
+      if (inst?.inputCallback && inst?.echoEnabled !== false) {
         inst.inputCallback(data, currentLineBuffer)
-        
+
         // 发射光标位置（用于定位补全弹窗）
         if (terminal && terminalContainer.value && inst.cursorCallback) {
           try {
             const rect = terminalContainer.value.getBoundingClientRect()
-            
+
             // 确保容器有有效尺寸，无效时跳过光标位置更新但不中断后续逻辑
             if (rect.width <= 0 || rect.height <= 0) {
-              console.warn('[TerminalView] Container has invalid size, skipping cursor position update')
+              console.warn(
+                '[TerminalView] Container has invalid size, skipping cursor position update'
+              )
             } else {
               // 获取终端的实际单元格尺寸
               // xterm.js 内部使用 _core._renderService.dimensions
               const core = (terminal as any)._core
               let cellWidth = 9
               let cellHeight = 20
-              
+
               if (core?._renderService?.dimensions) {
                 const dims = core._renderService.dimensions
                 cellWidth = dims.css.cell.width || dims.actualCellWidth || cellWidth
@@ -194,23 +204,28 @@ onMounted(() => {
                 cellWidth = fontSize * 0.6
                 cellHeight = fontSize * 1.2
               }
-              
+
               // 获取光标位置
               const cursorX = terminal.buffer.active.cursorX
               const cursorY = terminal.buffer.active.cursorY
-              
+
               // 计算光标在视口中的绝对位置
               const padding = 4 // 终端内边距（xterm 默认较小）
-              
+
               // 计算位置
               const x = rect.left + padding + cursorX * cellWidth
               const y = rect.top + padding + cursorY * cellHeight
-              
+
               // 验证位置是否合理（在屏幕范围内）
               if (x >= 0 && y >= 0 && x < window.innerWidth + 100 && y < window.innerHeight + 100) {
                 inst.cursorCallback({ x, y })
               } else {
-                console.warn('[TerminalView] Cursor position out of bounds:', { x, y, cursorX, cursorY })
+                console.warn('[TerminalView] Cursor position out of bounds:', {
+                  x,
+                  y,
+                  cursorX,
+                  cursorY
+                })
               }
             }
           } catch (e) {
@@ -218,16 +233,18 @@ onMounted(() => {
           }
         }
       }
-      
+
+      const remoteData = normalizeDataForRemote(data)
+
       // 通过回调引用发射数据事件
       if (inst?.dataCallback) {
-        inst.dataCallback(data)
+        inst.dataCallback(remoteData)
       }
-      
-      window.electronAPI.ssh.write(props.connectionId, data)
-      
+
+      window.electronAPI.ssh.write(props.connectionId, remoteData)
+
       try {
-        const bytesOut = new Blob([data]).size
+        const bytesOut = new Blob([remoteData]).size
         window.electronAPI.connectionStats?.updateTraffic?.(props.connectionId, 0, bytesOut)
       } catch (error) {
         // 忽略统计错误
@@ -246,10 +263,10 @@ onMounted(() => {
     terminalContainer.value.addEventListener('contextmenu', async (e) => {
       e.preventDefault()
       const selection = terminal?.getSelection()
-      
+
       // Show context menu via Electron
       const menuItems = []
-      
+
       // 基础操作
       if (selection) {
         menuItems.push({
@@ -258,33 +275,33 @@ onMounted(() => {
           action: 'copy'
         })
       }
-      
+
       menuItems.push({
         label: '粘贴',
         accelerator: terminalShortcutsManager.format('paste'),
         action: 'paste'
       })
-      
+
       menuItems.push({ type: 'separator' })
-      
+
       menuItems.push({
         label: '全选',
         accelerator: terminalShortcutsManager.format('selectAll'),
         action: 'selectAll'
       })
-      
+
       menuItems.push({
         label: '清屏',
         accelerator: terminalShortcutsManager.format('clear'),
         action: 'clear'
       })
-      
+
       // AI 功能菜单
       menuItems.push({ type: 'separator' })
-      
+
       const aiEnabled = hasDefaultModel.value
       const aiLabel = aiEnabled ? 'AI 助手' : 'AI 助手 (未配置)'
-      
+
       menuItems.push({
         label: aiLabel,
         enabled: aiEnabled,
@@ -306,10 +323,10 @@ onMounted(() => {
           }
         ]
       })
-      
+
       // Request context menu from main process
       const result = await window.electronAPI.dialog.showContextMenu(menuItems)
-      
+
       // 处理基础操作
       if (result === 'copy' && selection) {
         await navigator.clipboard.writeText(selection)
@@ -350,72 +367,72 @@ onMounted(() => {
   let resizeTimeout: ReturnType<typeof setTimeout> | null = null
   let lastWidth = 0
   let lastHeight = 0
-  
+
   resizeObserver = new ResizeObserver((entries) => {
     if (!fitAddon || !terminal || !terminalContainer.value) return
-    
+
     for (const entry of entries) {
-        const { width, height } = entry.contentRect
-        if (width <= 0 || height <= 0) return
-        
-        // Skip if size hasn't changed significantly (avoid micro-adjustments during animation)
-        if (Math.abs(width - lastWidth) < 5 && Math.abs(height - lastHeight) < 5) return
-        
-        lastWidth = width
-        lastHeight = height
+      const { width, height } = entry.contentRect
+      if (width <= 0 || height <= 0) return
+
+      // Skip if size hasn't changed significantly (avoid micro-adjustments during animation)
+      if (Math.abs(width - lastWidth) < 5 && Math.abs(height - lastHeight) < 5) return
+
+      lastWidth = width
+      lastHeight = height
     }
 
     // Clear previous timeout to debounce rapid resize events
     if (resizeTimeout) {
       clearTimeout(resizeTimeout)
     }
-    
+
     // Debounce fit() call - wait for sidebar animation to complete (300ms transition + buffer)
     resizeTimeout = setTimeout(() => {
       requestAnimationFrame(() => {
         try {
-            fitAddon?.fit()
+          fitAndSyncRemote()
         } catch (e) {
-            console.error('Fit error:', e)
+          console.error('Fit error:', e)
         }
       })
     }, 150) // Wait for animation to settle
   })
-  
+
   if (terminalContainer.value) {
     resizeObserver.observe(terminalContainer.value)
   }
 
   setTimeout(() => {
     try {
-        console.log(`[TerminalView] Delayed initial fit for ${props.connectionId}`)
-        fitAddon?.fit()
-        terminal?.focus() // 自动聚焦
+      console.log(`[TerminalView] Delayed initial fit for ${props.connectionId}`)
+      fitAndSyncRemote()
+      terminal?.focus() // 自动聚焦
     } catch (e) {
-        console.error('Initial fit error:', e)
+      console.error('Initial fit error:', e)
     }
   }, 300)
 })
 
 onUnmounted(() => {
   console.log(`[TerminalView] Unmounting terminal view for ${props.connectionId}`)
-  
+
   // 清理回调引用
   console.log(`[TerminalView] Clearing callbacks for ${props.connectionId}`)
   terminalManager.setInputCallback(props.connectionId, null)
   terminalManager.setCursorCallback(props.connectionId, null)
   terminalManager.setDataCallback(props.connectionId, null)
   terminalManager.setOutputCallback(props.connectionId, null)
-  
+
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
   }
-  
+
   terminal = null
   fitAddon = null
   searchAddon = null
-  
+
   console.log(`[TerminalView] Unmount completed for ${props.connectionId}`)
 })
 
@@ -427,16 +444,16 @@ const recordCommand = async (command: string) => {
       console.log('[TerminalView] Skipping AI query command:', command)
       return
     }
-    
+
     const duration = commandStartTime ? Date.now() - commandStartTime : undefined
-    
+
     await window.electronAPI.commandHistory?.add?.({
       command,
       sessionId: props.connectionId,
       sessionName: props.sessionName || 'Unknown Session',
       duration
     })
-    
+
     try {
       await window.electronAPI.connectionStats?.incrementCommand?.(props.connectionId)
     } catch (error) {
@@ -452,17 +469,17 @@ const recordPastedCommands = async (text: string) => {
   try {
     // 按换行符分割命令
     const lines = text.split(/\r?\n/)
-    
+
     for (const line of lines) {
       const command = line.trim()
-      
+
       // 只记录非空命令
       if (command) {
         await window.electronAPI.commandHistory?.add?.({
           command,
           sessionId: props.connectionId,
           sessionName: props.sessionName || 'Unknown Session',
-          duration: undefined 
+          duration: undefined
         })
       }
     }
@@ -483,7 +500,9 @@ const handleAIWrite = async (description: string) => {
     return
   }
 
-  const template = aiStore.config.prompts?.write || `Write code based on this description: {content}\n\nLanguage: {language}\n\nReturn only the code without explanations or markdown code blocks.`
+  const template =
+    aiStore.config.prompts?.write ||
+    `Write code based on this description: {content}\n\nLanguage: {language}\n\nReturn only the code without explanations or markdown code blocks.`
   const prompt = template.replace('{content}', description).replace(/{language}/g, 'unknown')
   emit('ai-request', prompt)
 }
@@ -499,7 +518,9 @@ const handleAIExplain = async (code: string) => {
     return
   }
 
-  const template = aiStore.config.prompts?.explain || `请作为一名资深开发人员，详细分析并解释以下代码片段的主要功能和目的。\n\n\`\`\`{language}\n{content}\n\`\`\``
+  const template =
+    aiStore.config.prompts?.explain ||
+    `请作为一名资深开发人员，详细分析并解释以下代码片段的主要功能和目的。\n\n\`\`\`{language}\n{content}\n\`\`\``
   const prompt = template.replace('{content}', code).replace(/{language}/g, 'unknown')
   emit('ai-request', prompt)
 }
@@ -515,7 +536,9 @@ const handleAIOptimize = async (code: string) => {
     return
   }
 
-  const template = aiStore.config.prompts?.optimize || `Optimize this code:\n\n\`\`\`{language}\n{content}\n\`\`\`\n\nReturn only the optimized code without explanations or markdown code blocks.`
+  const template =
+    aiStore.config.prompts?.optimize ||
+    `Optimize this code:\n\n\`\`\`{language}\n{content}\n\`\`\`\n\nReturn only the optimized code without explanations or markdown code blocks.`
   const prompt = template.replace('{content}', code).replace(/{language}/g, 'unknown')
   emit('ai-request', prompt)
 }
@@ -539,11 +562,10 @@ watch(
       terminal.options.cursorBlink = newOptions.cursorBlink
     }
     if (newOptions.theme) {
-      terminal.options.theme = typeof newOptions.theme === 'string'
-        ? getTheme(newOptions.theme)
-        : newOptions.theme
+      terminal.options.theme =
+        typeof newOptions.theme === 'string' ? getTheme(newOptions.theme) : newOptions.theme
     }
-    
+
     // 更新选中自动复制设置
     if (newOptions.copyOnSelect !== undefined) {
       terminalManager.setCopyOnSelect(props.connectionId, newOptions.copyOnSelect)
@@ -551,7 +573,7 @@ watch(
 
     // Refit after options change
     if (fitAddon) {
-      fitAddon.fit()
+      fitAndSyncRemote()
     }
   },
   { deep: true }
@@ -589,21 +611,21 @@ defineExpose({
       try {
         // 清除之前的搜索高亮
         searchAddon.clearDecorations()
-        
+
         if (!term) return
 
         // 从头开始搜索
         const found = searchAddon.findNext(term, {
-            caseSensitive: options?.caseSensitive,
-            regex: options?.regex,
-            incremental: false
+          caseSensitive: options?.caseSensitive,
+          regex: options?.regex,
+          incremental: false
         })
         console.log(`[TerminalView] Search result found: ${found}`)
       } catch (e) {
         console.error('[TerminalView] Search error:', e)
       }
     } else {
-        console.warn('[TerminalView] SearchAddon not initialized')
+      console.warn('[TerminalView] SearchAddon not initialized')
     }
   },
   findNext: (term: string, options?: { caseSensitive?: boolean; regex?: boolean }) => {
@@ -624,7 +646,7 @@ defineExpose({
   },
   fit: () => {
     if (fitAddon) {
-      fitAddon.fit()
+      fitAndSyncRemote()
     }
   }
 })
@@ -640,6 +662,7 @@ defineExpose({
 .terminal-container :deep(.xterm) {
   height: 100%;
   padding: 8px;
+  box-sizing: border-box;
 }
 
 .terminal-container :deep(.xterm-viewport) {

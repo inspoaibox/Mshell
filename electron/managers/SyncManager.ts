@@ -1,3 +1,5 @@
+/* global Buffer, NodeJS */
+
 import { app } from 'electron'
 import { join } from 'path'
 import { promises as fs } from 'fs'
@@ -18,7 +20,7 @@ export interface SyncConfig {
   lastSync?: string
   lastSyncChecksum?: string
   encryptionPassword?: string // 同步数据加密密码
-  
+
   // GitHub Gist 配置
   github?: {
     token: string
@@ -26,7 +28,7 @@ export interface SyncConfig {
     gistUrl?: string
     username?: string
   }
-  
+
   // GitLab Snippet 配置
   gitlab?: {
     token: string
@@ -36,6 +38,13 @@ export interface SyncConfig {
     instanceUrl?: string // 支持自托管 GitLab，默认 https://gitlab.com
   }
 }
+
+type SyncConfigUpdate = Partial<
+  Omit<SyncConfig, 'github' | 'gitlab'> & {
+    github?: Partial<SyncConfig['github']>
+    gitlab?: Partial<SyncConfig['gitlab']>
+  }
+>
 
 /**
  * 同步数据结构
@@ -64,10 +73,12 @@ export interface SyncResult {
  * SyncManager - 云同步管理器
  */
 export class SyncManager {
+  private readonly REDACTED_SECRET = '__mshell_secret_configured__'
   private configPath: string
   private config: SyncConfig
   private timer: NodeJS.Timeout | null = null
   private isSyncing: boolean = false
+  private runtimeEncryptionPassword?: string
 
   constructor() {
     this.configPath = join(app.getPath('userData'), 'sync-config.json')
@@ -85,11 +96,12 @@ export class SyncManager {
   async initialize(): Promise<void> {
     try {
       await this.loadConfig()
-      
+      await this.saveConfig()
+
       if (this.config.enabled && this.config.autoSync) {
         this.startAutoSync()
       }
-      
+
       console.log('[SyncManager] Initialized')
     } catch (error) {
       logger.logError('system', 'Failed to initialize sync manager', error as Error)
@@ -102,7 +114,8 @@ export class SyncManager {
   private async loadConfig(): Promise<void> {
     try {
       const data = await fs.readFile(this.configPath, 'utf-8')
-      this.config = { ...this.config, ...JSON.parse(data) }
+      this.config = this.decryptConfig({ ...this.config, ...JSON.parse(data) })
+      this.runtimeEncryptionPassword = this.config.encryptionPassword
     } catch (error: any) {
       if (error.code !== 'ENOENT') {
         logger.logError('system', 'Failed to load sync config', error)
@@ -115,7 +128,11 @@ export class SyncManager {
    */
   private async saveConfig(): Promise<void> {
     try {
-      await fs.writeFile(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8')
+      await fs.writeFile(
+        this.configPath,
+        JSON.stringify(this.encryptConfig(this.config), null, 2),
+        'utf-8'
+      )
     } catch (error) {
       logger.logError('system', 'Failed to save sync config', error as Error)
       throw new Error('保存同步配置失败')
@@ -129,13 +146,50 @@ export class SyncManager {
     return { ...this.config }
   }
 
+  getConfigForRenderer(): SyncConfig {
+    return this.redactConfig(this.config)
+  }
+
+  exportConfigForBackup(): SyncConfig {
+    const config = { ...this.config }
+    delete config.lastSync
+    delete config.lastSyncChecksum
+    return config
+  }
+
+  async applyConfigFromBackup(config: Partial<SyncConfig>): Promise<void> {
+    const restoredConfig = this.restoreConfigForImport(config)
+    await this.updateConfig(restoredConfig)
+  }
+
   /**
    * 更新配置
    */
   async updateConfig(updates: Partial<SyncConfig>): Promise<void> {
-    this.config = { ...this.config, ...updates }
+    const normalizedUpdates = this.normalizeConfigUpdates(updates)
+    const { github, gitlab, ...restUpdates } = normalizedUpdates
+
+    this.config = { ...this.config, ...restUpdates }
+
+    if (github) {
+      if (this.config.github) {
+        this.config.github = { ...this.config.github, ...github }
+      } else if (github.token) {
+        this.config.github = { ...github, token: github.token }
+      }
+    }
+
+    if (gitlab) {
+      if (this.config.gitlab) {
+        this.config.gitlab = { ...this.config.gitlab, ...gitlab }
+      } else if (gitlab.token) {
+        this.config.gitlab = { ...gitlab, token: gitlab.token }
+      }
+    }
+
+    this.runtimeEncryptionPassword = this.config.encryptionPassword
     await this.saveConfig()
-    
+
     // 重启自动同步
     this.stopAutoSync()
     if (this.config.enabled && this.config.autoSync) {
@@ -143,6 +197,186 @@ export class SyncManager {
     }
   }
 
+  private normalizeConfigUpdates(updates: Partial<SyncConfig>): SyncConfigUpdate {
+    const normalized: SyncConfigUpdate = {
+      ...updates,
+      github: updates.github ? { ...updates.github } : undefined,
+      gitlab: updates.gitlab ? { ...updates.gitlab } : undefined
+    }
+
+    if (normalized.encryptionPassword === this.REDACTED_SECRET) {
+      delete normalized.encryptionPassword
+    }
+    if (normalized.github?.token === this.REDACTED_SECRET) {
+      delete normalized.github.token
+    }
+    if (normalized.gitlab?.token === this.REDACTED_SECRET) {
+      delete normalized.gitlab.token
+    }
+
+    return normalized
+  }
+
+  /**
+   * 设置同步加密密码，仅保存在当前进程内存中。
+   * 本地配置文件只保存 safeStorage 加密后的副本，用于下次启动自动同步。
+   */
+  async setEncryptionPassword(password: string): Promise<void> {
+    this.runtimeEncryptionPassword = password
+    this.config.encryptionPassword = password
+    await this.saveConfig()
+  }
+
+  private getEncryptionPassword(): string | undefined {
+    return this.runtimeEncryptionPassword || this.config.encryptionPassword
+  }
+
+  private encryptConfig(config: SyncConfig): SyncConfig {
+    const safeConfig: SyncConfig = {
+      ...config,
+      github: config.github ? { ...config.github } : undefined,
+      gitlab: config.gitlab ? { ...config.gitlab } : undefined
+    }
+
+    if (safeConfig.encryptionPassword) {
+      safeConfig.encryptionPassword = credentialManager.encrypt(safeConfig.encryptionPassword)
+    }
+    if (safeConfig.github?.token) {
+      safeConfig.github.token = credentialManager.encrypt(safeConfig.github.token)
+    }
+    if (safeConfig.gitlab?.token) {
+      safeConfig.gitlab.token = credentialManager.encrypt(safeConfig.gitlab.token)
+    }
+
+    return safeConfig
+  }
+
+  private redactConfig(config: SyncConfig): SyncConfig {
+    const redacted: SyncConfig = {
+      ...config,
+      github: config.github ? { ...config.github } : undefined,
+      gitlab: config.gitlab ? { ...config.gitlab } : undefined
+    }
+
+    if (redacted.encryptionPassword) {
+      redacted.encryptionPassword = this.REDACTED_SECRET
+    }
+    if (redacted.github?.token) {
+      redacted.github.token = this.REDACTED_SECRET
+    }
+    if (redacted.gitlab?.token) {
+      redacted.gitlab.token = this.REDACTED_SECRET
+    }
+
+    return redacted
+  }
+
+  private decryptConfig(config: SyncConfig): SyncConfig {
+    const decrypted: SyncConfig = {
+      ...config,
+      github: config.github ? { ...config.github } : undefined,
+      gitlab: config.gitlab ? { ...config.gitlab } : undefined
+    }
+
+    if (decrypted.encryptionPassword) {
+      decrypted.encryptionPassword = this.decryptMaybeEncrypted(decrypted.encryptionPassword)
+    }
+    if (decrypted.github?.token) {
+      decrypted.github.token = this.decryptMaybeEncrypted(decrypted.github.token)
+    }
+    if (decrypted.gitlab?.token) {
+      decrypted.gitlab.token = this.decryptMaybeEncrypted(decrypted.gitlab.token)
+    }
+
+    return decrypted
+  }
+
+  private decryptMaybeEncrypted(value: string): string {
+    if (!credentialManager.isEncrypted(value)) {
+      return credentialManager.decryptLegacyUnprefixed(value) ?? value
+    }
+
+    try {
+      return credentialManager.decrypt(value)
+    } catch (error) {
+      logger.logError('system', 'Failed to decrypt sync config value', error as Error)
+      return value
+    }
+  }
+
+  private restoreConfigForImport(config: Partial<SyncConfig>): Partial<SyncConfig> {
+    const restored: Partial<SyncConfig> = {
+      ...config,
+      github: config.github ? { ...config.github } : undefined,
+      gitlab: config.gitlab ? { ...config.gitlab } : undefined
+    }
+
+    delete restored.lastSync
+    delete restored.lastSyncChecksum
+
+    if (restored.encryptionPassword) {
+      const password = this.restoreSecretForImport(restored.encryptionPassword)
+      if (password) {
+        restored.encryptionPassword = password
+      } else {
+        delete restored.encryptionPassword
+        restored.enabled = false
+        restored.autoSync = false
+      }
+    } else {
+      restored.enabled = false
+      restored.autoSync = false
+    }
+
+    if (restored.github?.token) {
+      const token = this.restoreSecretForImport(restored.github.token)
+      if (token) {
+        restored.github.token = token
+      } else {
+        delete restored.github
+        if (restored.provider === 'github') {
+          restored.enabled = false
+          restored.autoSync = false
+        }
+      }
+    }
+
+    if (restored.gitlab?.token) {
+      const token = this.restoreSecretForImport(restored.gitlab.token)
+      if (token) {
+        restored.gitlab.token = token
+      } else {
+        delete restored.gitlab
+        if (restored.provider === 'gitlab') {
+          restored.enabled = false
+          restored.autoSync = false
+        }
+      }
+    }
+
+    return restored
+  }
+
+  private restoreSecretForImport(value: string): string | undefined {
+    if (!value || value === this.REDACTED_SECRET) {
+      return undefined
+    }
+
+    if (!credentialManager.isEncrypted(value)) {
+      return credentialManager.decryptLegacyUnprefixed(value) ?? value
+    }
+
+    try {
+      return credentialManager.decrypt(value)
+    } catch (error) {
+      logger.logError(
+        'system',
+        'Skipped encrypted sync config secret from another machine',
+        error as Error
+      )
+      return undefined
+    }
+  }
 
   /**
    * 计算数据校验和
@@ -151,137 +385,17 @@ export class SyncManager {
     return createHash('sha256').update(data).digest('hex').substring(0, 16)
   }
 
+  private calculateBackupChecksum(data: BackupData): string {
+    const { timestamp, ...stableData } = data
+    void timestamp
+    return this.calculateChecksum(JSON.stringify(stableData))
+  }
+
   /**
    * 收集同步数据
    */
   private async collectSyncData(): Promise<BackupData> {
-    // 复用 BackupManager 的数据收集逻辑
-    const { sessionManager } = await import('./SessionManager')
-    const { snippetManager } = await import('./SnippetManager')
-    const { commandHistoryManager } = await import('./CommandHistoryManager')
-    const { sshKeyManager } = await import('./SSHKeyManager')
-    const { portForwardManager } = await import('./PortForwardManager')
-    const { sessionTemplateManager } = await import('./SessionTemplateManager')
-    const { taskSchedulerManager } = await import('./TaskSchedulerManager')
-    const { workflowManager } = await import('./WorkflowManager')
-    const { appSettingsManager } = await import('../utils/app-settings')
-
-    // 收集 AI 配置
-    let aiConfig = null
-    try {
-      const aiConfigPath = join(app.getPath('userData'), 'ai-config.json')
-      const data = await fs.readFile(aiConfigPath, 'utf-8')
-      aiConfig = JSON.parse(data)
-    } catch {
-      // AI 配置不存在
-    }
-
-    // 收集 AI 全局聊天历史
-    let aiChatHistory = undefined
-    try {
-      const chatHistoryPath = join(app.getPath('userData'), 'ai-chat-history.json')
-      const data = await fs.readFile(chatHistoryPath, 'utf-8')
-      aiChatHistory = JSON.parse(data)
-    } catch {
-      // AI 聊天历史不存在
-    }
-
-    // 收集终端 AI 聊天历史
-    let aiTerminalChatHistory: Record<string, any[]> | undefined = undefined
-    try {
-      const historyDir = join(app.getPath('userData'), 'ai-terminal-history')
-      const files = await fs.readdir(historyDir)
-      const history: Record<string, any[]> = {}
-
-      for (const file of files) {
-        if (!file.endsWith('.json')) continue
-        const content = await fs.readFile(join(historyDir, file), 'utf-8')
-        history[file] = JSON.parse(content)
-      }
-
-      if (Object.keys(history).length > 0) {
-        aiTerminalChatHistory = history
-      }
-    } catch {
-      // 终端 AI 聊天历史不存在
-    }
-
-    // 收集快捷命令
-    const { quickCommandManager } = await import('./QuickCommandManager')
-
-    // 收集 SSH 密钥（包含私钥内容）
-    const sshKeysWithContent = await this.collectSSHKeysWithPrivateKeys(sshKeyManager)
-
-    // 确保 session 密码字段是明文
-    // SessionManager 内存中已经解密为明文，因此直接使用即可
-    const plainSessions = sessionManager.getAllSessions().map(s => {
-      const plain = { ...s }
-      return plain
-    })
-
-    return {
-      version: '1.0.0',
-      timestamp: new Date().toISOString(),
-      sessions: plainSessions,
-      sessionGroups: sessionManager.getAllGroups(),
-      snippets: snippetManager.getAll(),
-      commandHistory: commandHistoryManager.getAll(),
-      sshKeys: sshKeysWithContent,
-      portForwards: portForwardManager.getAllForwards(),
-      portForwardTemplates: portForwardManager.getAllTemplates(),
-      sessionTemplates: sessionTemplateManager.getAll(),
-      scheduledTasks: taskSchedulerManager.getAll(),
-      workflows: workflowManager.getAll(),
-      settings: appSettingsManager.getSettings(),
-      aiConfig, // AI 配置（API Key 等）
-      aiChatHistory, // AI 全局聊天历史
-      aiTerminalChatHistory, // 终端 AI 聊天历史
-      quickCommands: quickCommandManager.getAll() // 快捷命令
-    }
-  }
-
-  /**
-   * 收集 SSH 密钥（包含私钥内容）
-   */
-  private async collectSSHKeysWithPrivateKeys(sshKeyManager: any): Promise<any[]> {
-    try {
-      const keys = sshKeyManager.getAllKeys()
-      const keysWithContent = []
-
-      for (const key of keys) {
-        try {
-          // 读取私钥文件内容
-          const privateKeyContent = await fs.readFile(key.privateKeyPath, 'utf-8')
-
-          // 尝试读取公钥文件内容
-          let publicKeyContent = key.publicKey
-          const publicKeyPath = `${key.privateKeyPath}.pub`
-          try {
-            const pubKeyFromFile = await fs.readFile(publicKeyPath, 'utf-8')
-            if (pubKeyFromFile) {
-              publicKeyContent = pubKeyFromFile
-            }
-          } catch {
-            // 公钥文件不存在，使用元数据中的公钥
-          }
-
-          keysWithContent.push({
-            ...key,
-            privateKeyContent, // 添加私钥内容
-            publicKeyContent   // 添加公钥内容
-          })
-        } catch (error) {
-          console.error(`[SyncManager] Failed to read SSH key file: ${key.name}`, error)
-          // 如果读取失败，仍然保存元数据
-          keysWithContent.push(key)
-        }
-      }
-
-      return keysWithContent
-    } catch (error) {
-      console.error('[SyncManager] Failed to collect SSH keys', error)
-      return []
-    }
+    return backupManager.collectBackupData()
   }
 
   /**
@@ -291,14 +405,14 @@ export class SyncManager {
     const { createCipheriv, randomBytes, scrypt } = await import('crypto')
     const { promisify } = await import('util')
     const scryptAsync = promisify(scrypt)
-    
+
     const key = (await scryptAsync(password, 'mshell-sync-salt', 32)) as Buffer
     const iv = randomBytes(16)
-    
+
     const cipher = createCipheriv('aes-256-cbc', key, iv)
     let encrypted = cipher.update(data, 'utf8', 'hex')
     encrypted += cipher.final('hex')
-    
+
     return iv.toString('hex') + ':' + encrypted
   }
 
@@ -309,7 +423,7 @@ export class SyncManager {
     const { createDecipheriv, scrypt } = await import('crypto')
     const { promisify } = await import('util')
     const scryptAsync = promisify(scrypt)
-    
+
     // 只分割第一个冒号，IV 是32个hex字符
     const colonIndex = encryptedData.indexOf(':')
     if (colonIndex === -1) {
@@ -322,10 +436,10 @@ export class SyncManager {
     if (ivHex.length !== 32 || !encrypted) {
       throw new Error('Invalid encrypted data format')
     }
-    
+
     const iv = Buffer.from(ivHex, 'hex')
     const key = (await scryptAsync(password, 'mshell-sync-salt', 32)) as Buffer
-    
+
     try {
       const decipher = createDecipheriv('aes-256-cbc', key, iv)
       let decrypted = decipher.update(encrypted, 'hex', 'utf8')
@@ -341,18 +455,20 @@ export class SyncManager {
   /**
    * 验证 GitHub Token
    */
-  async verifyGitHubToken(token: string): Promise<{ valid: boolean; username?: string; error?: string }> {
+  async verifyGitHubToken(
+    token: string
+  ): Promise<{ valid: boolean; username?: string; error?: string }> {
     try {
       // 清理 token 中的空白字符
       const cleanToken = token.trim().replace(/[\r\n]/g, '')
-      
+
       const response = await axios.get('https://api.github.com/user', {
         headers: {
-          'Authorization': `token ${cleanToken}`,
-          'Accept': 'application/vnd.github.v3+json'
+          Authorization: `token ${cleanToken}`,
+          Accept: 'application/vnd.github.v3+json'
         }
       })
-      
+
       return {
         valid: true,
         username: response.data.login
@@ -369,21 +485,23 @@ export class SyncManager {
    * 查找已存在的 MShell 同步 Gist
    * 用于在新设备上恢复同步
    */
-  async findExistingGist(token: string): Promise<{ found: boolean; gistId?: string; gistUrl?: string; error?: string }> {
+  async findExistingGist(
+    token: string
+  ): Promise<{ found: boolean; gistId?: string; gistUrl?: string; error?: string }> {
     try {
       const cleanToken = token.trim().replace(/[\r\n]/g, '')
-      
+
       // 获取用户的所有 Gist
       const response = await axios.get('https://api.github.com/gists', {
         headers: {
-          'Authorization': `token ${cleanToken}`,
-          'Accept': 'application/vnd.github.v3+json'
+          Authorization: `token ${cleanToken}`,
+          Accept: 'application/vnd.github.v3+json'
         },
         params: {
           per_page: 100 // 获取最多 100 个 Gist
         }
       })
-      
+
       // 查找包含 mshell-sync.json 文件的 Gist
       for (const gist of response.data) {
         if (gist.files && gist.files['mshell-sync.json']) {
@@ -395,7 +513,7 @@ export class SyncManager {
           }
         }
       }
-      
+
       return { found: false }
     } catch (error: any) {
       console.error('[SyncManager] Error finding existing Gist:', error)
@@ -410,21 +528,25 @@ export class SyncManager {
    * 创建 GitHub Gist
    */
   private async createGist(token: string, content: string): Promise<{ id: string; url: string }> {
-    const response = await axios.post('https://api.github.com/gists', {
-      description: 'MShell Sync Data - DO NOT DELETE',
-      public: false,
-      files: {
-        'mshell-sync.json': {
-          content: content
+    const response = await axios.post(
+      'https://api.github.com/gists',
+      {
+        description: 'MShell Sync Data - DO NOT DELETE',
+        public: false,
+        files: {
+          'mshell-sync.json': {
+            content: content
+          }
+        }
+      },
+      {
+        headers: {
+          Authorization: `token ${token}`,
+          Accept: 'application/vnd.github.v3+json'
         }
       }
-    }, {
-      headers: {
-        'Authorization': `token ${token}`,
-        'Accept': 'application/vnd.github.v3+json'
-      }
-    })
-    
+    )
+
     return {
       id: response.data.id,
       url: response.data.html_url
@@ -435,37 +557,44 @@ export class SyncManager {
    * 更新 GitHub Gist
    */
   private async updateGist(token: string, gistId: string, content: string): Promise<void> {
-    await axios.patch(`https://api.github.com/gists/${gistId}`, {
-      files: {
-        'mshell-sync.json': {
-          content: content
+    await axios.patch(
+      `https://api.github.com/gists/${gistId}`,
+      {
+        files: {
+          'mshell-sync.json': {
+            content: content
+          }
+        }
+      },
+      {
+        headers: {
+          Authorization: `token ${token}`,
+          Accept: 'application/vnd.github.v3+json'
         }
       }
-    }, {
-      headers: {
-        'Authorization': `token ${token}`,
-        'Accept': 'application/vnd.github.v3+json'
-      }
-    })
+    )
   }
 
   /**
    * 获取 GitHub Gist 内容
    */
-  private async getGist(token: string, gistId: string): Promise<{ content: string; updatedAt: string } | null> {
+  private async getGist(
+    token: string,
+    gistId: string
+  ): Promise<{ content: string; updatedAt: string } | null> {
     try {
       const response = await axios.get(`https://api.github.com/gists/${gistId}`, {
         headers: {
-          'Authorization': `token ${token}`,
-          'Accept': 'application/vnd.github.v3+json'
+          Authorization: `token ${token}`,
+          Accept: 'application/vnd.github.v3+json'
         }
       })
-      
+
       const file = response.data.files['mshell-sync.json']
       if (!file) {
         return null
       }
-      
+
       return {
         content: file.content,
         updatedAt: response.data.updated_at
@@ -490,18 +619,21 @@ export class SyncManager {
   /**
    * 验证 GitLab Token
    */
-  async verifyGitLabToken(token: string, instanceUrl?: string): Promise<{ valid: boolean; username?: string; error?: string }> {
+  async verifyGitLabToken(
+    token: string,
+    instanceUrl?: string
+  ): Promise<{ valid: boolean; username?: string; error?: string }> {
     try {
       // 清理 token 中的空白字符
       const cleanToken = token.trim().replace(/[\r\n]/g, '')
       const baseUrl = (instanceUrl || 'https://gitlab.com').trim()
-      
+
       const response = await axios.get(`${baseUrl}/api/v4/user`, {
         headers: {
           'PRIVATE-TOKEN': cleanToken
         }
       })
-      
+
       return {
         valid: true,
         username: response.data.username
@@ -518,11 +650,14 @@ export class SyncManager {
    * 查找已存在的 MShell 同步 Snippet
    * 用于在新设备上恢复同步
    */
-  async findExistingSnippet(token: string, instanceUrl?: string): Promise<{ found: boolean; snippetId?: string; snippetUrl?: string; error?: string }> {
+  async findExistingSnippet(
+    token: string,
+    instanceUrl?: string
+  ): Promise<{ found: boolean; snippetId?: string; snippetUrl?: string; error?: string }> {
     try {
       const cleanToken = token.trim().replace(/[\r\n]/g, '')
       const baseUrl = (instanceUrl || 'https://gitlab.com').trim()
-      
+
       // 获取用户的所有 Snippet
       const response = await axios.get(`${baseUrl}/api/v4/snippets`, {
         headers: {
@@ -532,12 +667,14 @@ export class SyncManager {
           per_page: 100
         }
       })
-      
+
       // 查找包含 mshell-sync.json 文件的 Snippet
       for (const snippet of response.data) {
         // 检查标题或文件名
-        if (snippet.title?.includes('MShell Sync Data') || 
-            snippet.files?.some((f: any) => f.path === 'mshell-sync.json')) {
+        if (
+          snippet.title?.includes('MShell Sync Data') ||
+          snippet.files?.some((f: any) => f.path === 'mshell-sync.json')
+        ) {
           console.log('[SyncManager] Found existing MShell Snippet:', snippet.id)
           return {
             found: true,
@@ -546,7 +683,7 @@ export class SyncManager {
           }
         }
       }
-      
+
       return { found: false }
     } catch (error: any) {
       console.error('[SyncManager] Error finding existing Snippet:', error)
@@ -560,23 +697,32 @@ export class SyncManager {
   /**
    * 创建 GitLab Snippet
    */
-  private async createSnippet(token: string, content: string): Promise<{ id: number; url: string }> {
+  private async createSnippet(
+    token: string,
+    content: string
+  ): Promise<{ id: number; url: string }> {
     const baseUrl = this.getGitLabApiUrl()
-    const response = await axios.post(`${baseUrl}/api/v4/snippets`, {
-      title: 'MShell Sync Data - DO NOT DELETE',
-      description: 'MShell 同步数据，请勿删除',
-      visibility: 'private',
-      files: [{
-        file_path: 'mshell-sync.json',
-        content: content
-      }]
-    }, {
-      headers: {
-        'PRIVATE-TOKEN': token,
-        'Content-Type': 'application/json'
+    const response = await axios.post(
+      `${baseUrl}/api/v4/snippets`,
+      {
+        title: 'MShell Sync Data - DO NOT DELETE',
+        description: 'MShell 同步数据，请勿删除',
+        visibility: 'private',
+        files: [
+          {
+            file_path: 'mshell-sync.json',
+            content: content
+          }
+        ]
+      },
+      {
+        headers: {
+          'PRIVATE-TOKEN': token,
+          'Content-Type': 'application/json'
+        }
       }
-    })
-    
+    )
+
     return {
       id: response.data.id,
       url: response.data.web_url
@@ -588,43 +734,55 @@ export class SyncManager {
    */
   private async updateSnippet(token: string, snippetId: string, content: string): Promise<void> {
     const baseUrl = this.getGitLabApiUrl()
-    await axios.put(`${baseUrl}/api/v4/snippets/${snippetId}`, {
-      files: [{
-        action: 'update',
-        file_path: 'mshell-sync.json',
-        content: content
-      }]
-    }, {
-      headers: {
-        'PRIVATE-TOKEN': token,
-        'Content-Type': 'application/json'
+    await axios.put(
+      `${baseUrl}/api/v4/snippets/${snippetId}`,
+      {
+        files: [
+          {
+            action: 'update',
+            file_path: 'mshell-sync.json',
+            content: content
+          }
+        ]
+      },
+      {
+        headers: {
+          'PRIVATE-TOKEN': token,
+          'Content-Type': 'application/json'
+        }
       }
-    })
+    )
   }
 
   /**
    * 获取 GitLab Snippet 内容
    */
-  private async getSnippet(token: string, snippetId: string): Promise<{ content: string; updatedAt: string } | null> {
+  private async getSnippet(
+    token: string,
+    snippetId: string
+  ): Promise<{ content: string; updatedAt: string } | null> {
     try {
       const baseUrl = this.getGitLabApiUrl()
-      
+
       // 获取 snippet 元数据
       const metaResponse = await axios.get(`${baseUrl}/api/v4/snippets/${snippetId}`, {
         headers: {
           'PRIVATE-TOKEN': token
         }
       })
-      
+
       // 获取 snippet 原始内容
       const rawResponse = await axios.get(`${baseUrl}/api/v4/snippets/${snippetId}/raw`, {
         headers: {
           'PRIVATE-TOKEN': token
         }
       })
-      
+
       return {
-        content: typeof rawResponse.data === 'string' ? rawResponse.data : JSON.stringify(rawResponse.data),
+        content:
+          typeof rawResponse.data === 'string'
+            ? rawResponse.data
+            : JSON.stringify(rawResponse.data),
         updatedAt: metaResponse.data.updated_at
       }
     } catch (error: any) {
@@ -642,8 +800,9 @@ export class SyncManager {
     if (!this.config.gitlab?.token) {
       return { success: false, message: '未配置 GitLab Token' }
     }
-    
-    if (!this.config.encryptionPassword) {
+
+    const encryptionPassword = this.getEncryptionPassword()
+    if (!encryptionPassword) {
       return { success: false, message: '未设置同步加密密码' }
     }
 
@@ -651,22 +810,22 @@ export class SyncManager {
       // 收集数据
       const backupData = await this.collectSyncData()
       const jsonData = JSON.stringify(backupData)
-      
+
       // 加密数据
-      const encryptedData = await this.encryptData(jsonData, this.config.encryptionPassword)
-      
+      const encryptedData = await this.encryptData(jsonData, encryptionPassword)
+
       // 构建同步数据
       const syncData: SyncData = {
         version: '1.0.0',
         appVersion: app.getVersion(),
         lastModified: new Date().toISOString(),
-        checksum: this.calculateChecksum(jsonData),
+        checksum: this.calculateBackupChecksum(backupData),
         encrypted: true,
         data: encryptedData
       }
-      
+
       const content = JSON.stringify(syncData, null, 2)
-      
+
       // 上传到 Snippet
       if (this.config.gitlab.snippetId) {
         // 更新现有 Snippet
@@ -678,12 +837,12 @@ export class SyncManager {
         this.config.gitlab.snippetUrl = result.url
         await this.saveConfig()
       }
-      
+
       // 更新同步状态
       this.config.lastSync = new Date().toISOString()
       this.config.lastSyncChecksum = syncData.checksum
       await this.saveConfig()
-      
+
       return {
         success: true,
         action: 'uploaded',
@@ -706,12 +865,13 @@ export class SyncManager {
     if (!this.config.gitlab?.token) {
       return { success: false, message: '未配置 GitLab Token' }
     }
-    
+
     if (!this.config.gitlab.snippetId) {
       return { success: false, message: '未找到同步数据，请先上传' }
     }
-    
-    if (!this.config.encryptionPassword) {
+
+    const encryptionPassword = this.getEncryptionPassword()
+    if (!encryptionPassword) {
       return { success: false, message: '未设置同步加密密码' }
     }
 
@@ -721,26 +881,28 @@ export class SyncManager {
       if (!snippet) {
         return { success: false, message: 'Snippet 不存在或已被删除' }
       }
-      
+
       // 解析同步数据
       const syncData: SyncData = JSON.parse(snippet.content)
-      
+
       // 解密数据
       let jsonData: string
       if (syncData.encrypted) {
-        jsonData = await this.decryptData(syncData.data, this.config.encryptionPassword)
+        jsonData = await this.decryptData(syncData.data, encryptionPassword)
       } else {
         jsonData = syncData.data
       }
-      
+
       // 解析备份数据
       const backupData: BackupData = JSON.parse(jsonData)
-      
+
       // 应用数据
       await backupManager.applyBackup(backupData, {
         restoreSessions: true,
         restoreSnippets: true,
         restoreSettings: true,
+        restoreBackupConfig: false,
+        restoreSyncConfig: false,
         restoreCommandHistory: true,
         restoreSSHKeys: true, // 恢复 SSH 密钥（包含私钥）
         restorePortForwards: true,
@@ -749,14 +911,18 @@ export class SyncManager {
         restoreWorkflows: true,
         restoreAIConfig: true, // 恢复 AI 配置
         restoreAIChatHistory: true, // 恢复 AI 聊天历史（全局 + 终端）
+        restoreConnectionStats: true,
+        restoreAuditLogs: true,
+        restoreTransferRecords: true,
+        restoreLockConfig: true,
         restoreQuickCommands: true // 恢复快捷命令
       })
-      
+
       // 更新同步状态
       this.config.lastSync = new Date().toISOString()
       this.config.lastSyncChecksum = syncData.checksum
       await this.saveConfig()
-      
+
       return {
         success: true,
         action: 'downloaded',
@@ -765,11 +931,11 @@ export class SyncManager {
       }
     } catch (error: any) {
       logger.logError('system', 'Failed to download from GitLab', error)
-      
+
       if (error.message?.includes('解密失败') || error.message?.includes('decipher')) {
         return { success: false, message: '解密失败，密码可能不正确' }
       }
-      
+
       return {
         success: false,
         message: error.message || '下载失败'
@@ -784,22 +950,21 @@ export class SyncManager {
     if (!this.config.gitlab?.token) {
       return { success: false, message: '未配置 GitLab Token' }
     }
-    
-    if (!this.config.encryptionPassword) {
+
+    if (!this.getEncryptionPassword()) {
       return { success: false, message: '未设置同步加密密码' }
     }
 
     try {
       // 收集本地数据
       const localData = await this.collectSyncData()
-      const localJson = JSON.stringify(localData)
-      const localChecksum = this.calculateChecksum(localJson)
-      
+      const localChecksum = this.calculateBackupChecksum(localData)
+
       // 如果没有 Snippet，直接上传
       if (!this.config.gitlab.snippetId) {
         return await this.uploadToGitLab()
       }
-      
+
       // 获取远程数据
       const snippet = await this.getSnippet(this.config.gitlab.token, this.config.gitlab.snippetId)
       if (!snippet) {
@@ -808,9 +973,9 @@ export class SyncManager {
         await this.saveConfig()
         return await this.uploadToGitLab()
       }
-      
+
       const remoteSyncData: SyncData = JSON.parse(snippet.content)
-      
+
       // 比较校验和
       if (localChecksum === remoteSyncData.checksum) {
         return {
@@ -819,16 +984,23 @@ export class SyncManager {
           message: '数据已是最新，无需同步'
         }
       }
-      
-      // 比较时间戳决定同步方向
-      const localTime = new Date(localData.timestamp).getTime()
-      const remoteTime = new Date(remoteSyncData.lastModified).getTime()
-      
-      if (localTime > remoteTime) {
+
+      const localChanged = this.config.lastSyncChecksum !== localChecksum
+      const remoteChanged = this.config.lastSyncChecksum !== remoteSyncData.checksum
+
+      if (localChanged && !remoteChanged) {
         return await this.uploadToGitLab()
-      } else {
+      } else if (!localChanged && remoteChanged) {
         return await this.downloadFromGitLab()
+      } else if (localChanged && remoteChanged) {
+        return {
+          success: true,
+          action: 'conflict',
+          message: '本地和云端数据都已变化，请手动选择上传或下载'
+        }
       }
+
+      return { success: true, action: 'no-change', message: '数据已是最新，无需同步' }
     } catch (error: any) {
       logger.logError('system', 'GitLab sync failed', error)
       return {
@@ -845,6 +1017,13 @@ export class SyncManager {
     this.config.gitlab = undefined
     if (this.config.provider === 'gitlab') {
       this.config.enabled = false
+      if (this.config.github) {
+        this.config.provider = 'github'
+      }
+    }
+    if (!this.config.github) {
+      this.config.encryptionPassword = undefined
+      this.runtimeEncryptionPassword = undefined
     }
     this.config.lastSync = undefined
     this.config.lastSyncChecksum = undefined
@@ -859,8 +1038,9 @@ export class SyncManager {
     if (!this.config.github?.token) {
       return { success: false, message: '未配置 GitHub Token' }
     }
-    
-    if (!this.config.encryptionPassword) {
+
+    const encryptionPassword = this.getEncryptionPassword()
+    if (!encryptionPassword) {
       return { success: false, message: '未设置同步加密密码' }
     }
 
@@ -868,22 +1048,22 @@ export class SyncManager {
       // 收集数据
       const backupData = await this.collectSyncData()
       const jsonData = JSON.stringify(backupData)
-      
+
       // 加密数据
-      const encryptedData = await this.encryptData(jsonData, this.config.encryptionPassword)
-      
+      const encryptedData = await this.encryptData(jsonData, encryptionPassword)
+
       // 构建同步数据
       const syncData: SyncData = {
         version: '1.0.0',
         appVersion: app.getVersion(),
         lastModified: new Date().toISOString(),
-        checksum: this.calculateChecksum(jsonData),
+        checksum: this.calculateBackupChecksum(backupData),
         encrypted: true,
         data: encryptedData
       }
-      
+
       const content = JSON.stringify(syncData, null, 2)
-      
+
       // 上传到 Gist
       if (this.config.github.gistId) {
         // 更新现有 Gist
@@ -895,12 +1075,12 @@ export class SyncManager {
         this.config.github.gistUrl = result.url
         await this.saveConfig()
       }
-      
+
       // 更新同步状态
       this.config.lastSync = new Date().toISOString()
       this.config.lastSyncChecksum = syncData.checksum
       await this.saveConfig()
-      
+
       return {
         success: true,
         action: 'uploaded',
@@ -923,12 +1103,13 @@ export class SyncManager {
     if (!this.config.github?.token) {
       return { success: false, message: '未配置 GitHub Token' }
     }
-    
+
     if (!this.config.github.gistId) {
       return { success: false, message: '未找到同步数据，请先上传' }
     }
-    
-    if (!this.config.encryptionPassword) {
+
+    const encryptionPassword = this.getEncryptionPassword()
+    if (!encryptionPassword) {
       return { success: false, message: '未设置同步加密密码' }
     }
 
@@ -938,26 +1119,28 @@ export class SyncManager {
       if (!gist) {
         return { success: false, message: 'Gist 不存在或已被删除' }
       }
-      
+
       // 解析同步数据
       const syncData: SyncData = JSON.parse(gist.content)
-      
+
       // 解密数据
       let jsonData: string
       if (syncData.encrypted) {
-        jsonData = await this.decryptData(syncData.data, this.config.encryptionPassword)
+        jsonData = await this.decryptData(syncData.data, encryptionPassword)
       } else {
         jsonData = syncData.data
       }
-      
+
       // 解析备份数据
       const backupData: BackupData = JSON.parse(jsonData)
-      
+
       // 应用数据
       await backupManager.applyBackup(backupData, {
         restoreSessions: true,
         restoreSnippets: true,
         restoreSettings: true,
+        restoreBackupConfig: false,
+        restoreSyncConfig: false,
         restoreCommandHistory: true,
         restoreSSHKeys: true, // 恢复 SSH 密钥（包含私钥）
         restorePortForwards: true,
@@ -966,14 +1149,18 @@ export class SyncManager {
         restoreWorkflows: true,
         restoreAIConfig: true, // 恢复 AI 配置
         restoreAIChatHistory: true, // 恢复 AI 聊天历史（全局 + 终端）
+        restoreConnectionStats: true,
+        restoreAuditLogs: true,
+        restoreTransferRecords: true,
+        restoreLockConfig: true,
         restoreQuickCommands: true // 恢复快捷命令
       })
-      
+
       // 更新同步状态
       this.config.lastSync = new Date().toISOString()
       this.config.lastSyncChecksum = syncData.checksum
       await this.saveConfig()
-      
+
       return {
         success: true,
         action: 'downloaded',
@@ -982,11 +1169,11 @@ export class SyncManager {
       }
     } catch (error: any) {
       logger.logError('system', 'Failed to download from GitHub', error)
-      
+
       if (error.message?.includes('解密失败') || error.message?.includes('decipher')) {
         return { success: false, message: '解密失败，密码可能不正确' }
       }
-      
+
       return {
         success: false,
         message: error.message || '下载失败'
@@ -1001,20 +1188,20 @@ export class SyncManager {
     if (this.isSyncing) {
       return { success: false, message: '同步正在进行中' }
     }
-    
+
     if (!this.config.enabled) {
       return { success: false, message: '同步未启用' }
     }
 
     this.isSyncing = true
-    
+
     try {
       if (this.config.provider === 'github') {
         return await this.syncWithGitHub()
       } else if (this.config.provider === 'gitlab') {
         return await this.syncWithGitLab()
       }
-      
+
       return { success: false, message: '不支持的同步方式' }
     } finally {
       this.isSyncing = false
@@ -1028,22 +1215,21 @@ export class SyncManager {
     if (!this.config.github?.token) {
       return { success: false, message: '未配置 GitHub Token' }
     }
-    
-    if (!this.config.encryptionPassword) {
+
+    if (!this.getEncryptionPassword()) {
       return { success: false, message: '未设置同步加密密码' }
     }
 
     try {
       // 收集本地数据
       const localData = await this.collectSyncData()
-      const localJson = JSON.stringify(localData)
-      const localChecksum = this.calculateChecksum(localJson)
-      
+      const localChecksum = this.calculateBackupChecksum(localData)
+
       // 如果没有 Gist，直接上传
       if (!this.config.github.gistId) {
         return await this.uploadToGitHub()
       }
-      
+
       // 获取远程数据
       const gist = await this.getGist(this.config.github.token, this.config.github.gistId)
       if (!gist) {
@@ -1052,9 +1238,9 @@ export class SyncManager {
         await this.saveConfig()
         return await this.uploadToGitHub()
       }
-      
+
       const remoteSyncData: SyncData = JSON.parse(gist.content)
-      
+
       // 比较校验和
       if (localChecksum === remoteSyncData.checksum) {
         return {
@@ -1063,18 +1249,23 @@ export class SyncManager {
           message: '数据已是最新，无需同步'
         }
       }
-      
-      // 比较时间戳决定同步方向
-      const localTime = new Date(localData.timestamp).getTime()
-      const remoteTime = new Date(remoteSyncData.lastModified).getTime()
-      
-      if (localTime > remoteTime) {
-        // 本地更新，上传
+
+      const localChanged = this.config.lastSyncChecksum !== localChecksum
+      const remoteChanged = this.config.lastSyncChecksum !== remoteSyncData.checksum
+
+      if (localChanged && !remoteChanged) {
         return await this.uploadToGitHub()
-      } else {
-        // 远程更新，下载
+      } else if (!localChanged && remoteChanged) {
         return await this.downloadFromGitHub()
+      } else if (localChanged && remoteChanged) {
+        return {
+          success: true,
+          action: 'conflict',
+          message: '本地和云端数据都已变化，请手动选择上传或下载'
+        }
       }
+
+      return { success: true, action: 'no-change', message: '数据已是最新，无需同步' }
     } catch (error: any) {
       logger.logError('system', 'Sync failed', error)
       return {
@@ -1083,7 +1274,6 @@ export class SyncManager {
       }
     }
   }
-
 
   /**
    * 获取同步状态
@@ -1096,8 +1286,12 @@ export class SyncManager {
     hasRemoteData: boolean
   }> {
     let hasRemoteData = false
-    
-    if (this.config.provider === 'github' && this.config.github?.token && this.config.github?.gistId) {
+
+    if (
+      this.config.provider === 'github' &&
+      this.config.github?.token &&
+      this.config.github?.gistId
+    ) {
       try {
         const gist = await this.getGist(this.config.github.token, this.config.github.gistId)
         hasRemoteData = !!gist
@@ -1105,7 +1299,7 @@ export class SyncManager {
         hasRemoteData = false
       }
     }
-    
+
     return {
       enabled: this.config.enabled,
       provider: this.config.provider,
@@ -1121,6 +1315,13 @@ export class SyncManager {
   async disconnectGitHub(): Promise<void> {
     this.config.github = undefined
     this.config.enabled = false
+    if (this.config.gitlab) {
+      this.config.provider = 'gitlab'
+    }
+    if (!this.config.gitlab) {
+      this.config.encryptionPassword = undefined
+      this.runtimeEncryptionPassword = undefined
+    }
     this.config.lastSync = undefined
     this.config.lastSyncChecksum = undefined
     await this.saveConfig()
@@ -1134,16 +1335,18 @@ export class SyncManager {
     if (this.timer) {
       return
     }
-    
+
     const intervalMs = this.config.syncInterval * 60 * 1000
-    
+
     this.timer = setInterval(async () => {
       console.log('[SyncManager] Running auto sync...')
       const result = await this.sync()
       console.log('[SyncManager] Auto sync result:', result.message)
     }, intervalMs)
-    
-    console.log(`[SyncManager] Auto sync started with interval: ${this.config.syncInterval} minutes`)
+
+    console.log(
+      `[SyncManager] Auto sync started with interval: ${this.config.syncInterval} minutes`
+    )
   }
 
   /**

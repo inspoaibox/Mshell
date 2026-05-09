@@ -1,3 +1,5 @@
+/* global Buffer */
+
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { CredentialManager } from '../CredentialManager'
 import * as fc from 'fast-check'
@@ -33,7 +35,7 @@ describe('CredentialManager', () => {
     it('should encrypt a simple string', () => {
       const plaintext = 'myPassword123'
       const encrypted = credentialManager.encrypt(plaintext)
-      
+
       expect(encrypted).toBeDefined()
       expect(encrypted).not.toBe(plaintext)
       expect(typeof encrypted).toBe('string')
@@ -43,7 +45,7 @@ describe('CredentialManager', () => {
       const plaintext = 'myPassword123'
       const encrypted = credentialManager.encrypt(plaintext)
       const decrypted = credentialManager.decrypt(encrypted)
-      
+
       expect(decrypted).toBe(plaintext)
     })
 
@@ -51,7 +53,7 @@ describe('CredentialManager', () => {
       const plaintext = ''
       const encrypted = credentialManager.encrypt(plaintext)
       const decrypted = credentialManager.decrypt(encrypted)
-      
+
       expect(decrypted).toBe(plaintext)
     })
 
@@ -59,7 +61,7 @@ describe('CredentialManager', () => {
       const plaintext = '!@#$%^&*()_+-=[]{}|;:,.<>?'
       const encrypted = credentialManager.encrypt(plaintext)
       const decrypted = credentialManager.decrypt(encrypted)
-      
+
       expect(decrypted).toBe(plaintext)
     })
 
@@ -69,9 +71,9 @@ describe('CredentialManager', () => {
         password: 'secret123',
         host: 'example.com'
       }
-      
+
       const encrypted = credentialManager.encryptFields(obj, ['password'])
-      
+
       expect(encrypted.username).toBe('user')
       expect(encrypted.host).toBe('example.com')
       expect(encrypted.password).not.toBe('secret123')
@@ -83,11 +85,27 @@ describe('CredentialManager', () => {
         password: 'secret123',
         host: 'example.com'
       }
-      
+
       const encrypted = credentialManager.encryptFields(obj, ['password'])
       const decrypted = credentialManager.decryptFields(encrypted, ['password'])
-      
+
       expect(decrypted).toEqual(obj)
+    })
+
+    it('should mark prefixed ciphertext and keep encryption idempotent', () => {
+      const plaintext = 'secret123'
+      const encrypted = credentialManager.encrypt(plaintext)
+
+      expect(encrypted.startsWith('safe:v1:')).toBe(true)
+      expect(credentialManager.isEncrypted(encrypted)).toBe(true)
+      expect(credentialManager.encrypt(encrypted)).toBe(encrypted)
+    })
+
+    it('should decrypt legacy unprefixed safeStorage values when possible', () => {
+      const legacyCiphertext = Buffer.from('terces').toString('base64')
+
+      expect(credentialManager.isEncrypted(legacyCiphertext)).toBe(false)
+      expect(credentialManager.decryptLegacyUnprefixed(legacyCiphertext)).toBe('secret')
     })
   })
 
@@ -98,7 +116,7 @@ describe('CredentialManager', () => {
       fc.assert(
         fc.property(fc.string({ minLength: 1, maxLength: 100 }), (plaintext) => {
           const encrypted = credentialManager.encrypt(plaintext)
-          
+
           // 加密后的数据不应该等于明文
           expect(encrypted).not.toBe(plaintext)
           // 加密后的数据应该是字符串
@@ -117,7 +135,7 @@ describe('CredentialManager', () => {
         fc.property(fc.string({ minLength: 0, maxLength: 200 }), (plaintext) => {
           const encrypted = credentialManager.encrypt(plaintext)
           const decrypted = credentialManager.decrypt(encrypted)
-          
+
           // 解密后应该恢复原始内容
           expect(decrypted).toBe(plaintext)
         }),
@@ -130,7 +148,7 @@ describe('CredentialManager', () => {
         fc.property(fc.unicodeString({ minLength: 1, maxLength: 50 }), (plaintext) => {
           const encrypted = credentialManager.encrypt(plaintext)
           const decrypted = credentialManager.decrypt(encrypted)
-          
+
           expect(decrypted).toBe(plaintext)
         }),
         { numRuns: 100 }
@@ -149,7 +167,7 @@ describe('CredentialManager', () => {
             const fieldsToEncrypt: (keyof typeof obj)[] = ['field1', 'field3']
             const encrypted = credentialManager.encryptFields(obj, fieldsToEncrypt)
             const decrypted = credentialManager.decryptFields(encrypted, fieldsToEncrypt)
-            
+
             expect(decrypted).toEqual(obj)
           }
         ),

@@ -9,7 +9,7 @@
       </div>
       <el-button :icon="Close" link @click="$emit('close')" />
     </div>
-    
+
     <!-- 路径导航 -->
     <div class="path-nav">
       <el-button :icon="Back" size="small" @click="goBack" :disabled="!canGoBack" />
@@ -30,13 +30,11 @@
       </el-tooltip>
       <el-button :icon="Refresh" size="small" @click="refreshDirectory" />
     </div>
-    
+
     <!-- 工具栏 -->
     <div class="toolbar">
       <el-dropdown @command="handleCreateCommand" trigger="click" size="small">
-        <el-button size="small" :icon="Plus">
-          新建
-        </el-button>
+        <el-button size="small" :icon="Plus"> 新建 </el-button>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item command="folder">
@@ -52,18 +50,18 @@
       </el-dropdown>
       <el-button size="small" :icon="Upload" @click="handleUpload">上传</el-button>
       <el-tooltip :content="showHiddenFiles ? '隐藏隐藏文件' : '显示隐藏文件'" placement="bottom">
-        <el-button 
-          size="small" 
+        <el-button
+          size="small"
           :icon="View"
           :type="showHiddenFiles ? 'primary' : 'default'"
           @click="toggleHiddenFiles"
         />
       </el-tooltip>
     </div>
-    
+
     <!-- 文件列表 -->
-    <div 
-      class="file-list" 
+    <div
+      class="file-list"
       v-loading="loading"
       element-loading-background="var(--bg-secondary)"
       @dragover.prevent="onDragOver"
@@ -76,13 +74,13 @@
         <el-icon :size="48"><Upload /></el-icon>
         <p>释放以上传文件</p>
       </div>
-      
+
       <div v-if="displayFiles.length === 0 && !loading && !isDragOver" class="empty-state">
         <el-icon :size="48"><FolderOpened /></el-icon>
         <p>文件夹为空</p>
         <p class="drag-hint">拖曳文件到此处上传</p>
       </div>
-      
+
       <div
         v-for="(file, index) in displayFiles"
         :key="file.path"
@@ -109,7 +107,7 @@
         </div>
       </div>
     </div>
-    
+
     <!-- 右键菜单 -->
     <div
       v-if="contextMenuVisible"
@@ -160,11 +158,7 @@
           <el-icon><Box /></el-icon>
           <span>压缩</span>
         </div>
-        <div 
-          v-if="isCompressedFile(contextMenuFile)" 
-          class="menu-item" 
-          @click="handleExtract"
-        >
+        <div v-if="isCompressedFile(contextMenuFile)" class="menu-item" @click="handleExtract">
           <el-icon><FolderOpened /></el-icon>
           <span>解压</span>
         </div>
@@ -175,7 +169,7 @@
         </div>
       </template>
     </div>
-    
+
     <!-- 预览对话框 -->
     <el-dialog v-model="showPreviewDialog" title="文件预览" width="700px" append-to-body>
       <div class="preview-content">
@@ -192,9 +186,20 @@
         <el-button @click="showPreviewDialog = false">关闭</el-button>
       </template>
     </el-dialog>
-    
+
     <!-- 编辑对话框 -->
-    <el-dialog v-model="showEditDialog" title="编辑文件" width="860px" append-to-body @closed="searchText = ''; replaceText = ''">
+    <el-dialog
+      v-model="showEditDialog"
+      title="编辑文件"
+      width="860px"
+      append-to-body
+      @closed="
+        searchText = ''
+        replaceText = ''
+      "
+      @keydown.ctrl.s.prevent="saveEditedFile"
+      @keydown.meta.s.prevent="saveEditedFile"
+    >
       <div class="edit-content">
         <!-- 搜索替换工具栏（常驻） -->
         <div class="search-replace-bar">
@@ -218,10 +223,21 @@
                 :type="searchMatchCase ? 'primary' : ''"
                 @click="searchMatchCase = !searchMatchCase"
                 class="case-btn"
-              >Aa</el-button>
+                >Aa</el-button
+              >
             </el-tooltip>
-            <el-button size="small" :icon="ArrowUp" @click="findPrev" :disabled="searchMatches.length === 0" />
-            <el-button size="small" :icon="ArrowDown" @click="findNext" :disabled="searchMatches.length === 0" />
+            <el-button
+              size="small"
+              :icon="ArrowUp"
+              @click="findPrev"
+              :disabled="searchMatches.length === 0"
+            />
+            <el-button
+              size="small"
+              :icon="ArrowDown"
+              @click="findNext"
+              :disabled="searchMatches.length === 0"
+            />
           </div>
           <div class="replace-row">
             <el-input
@@ -232,7 +248,9 @@
               class="search-input"
               @keyup.enter="replaceCurrent"
             />
-            <el-button size="small" @click="replaceCurrent" :disabled="searchMatches.length === 0">替换</el-button>
+            <el-button size="small" @click="replaceCurrent" :disabled="searchMatches.length === 0"
+              >替换</el-button
+            >
             <el-button size="small" @click="replaceAll" :disabled="!searchText">全部替换</el-button>
           </div>
         </div>
@@ -259,7 +277,7 @@
         </div>
       </template>
     </el-dialog>
-    
+
     <!-- 新建文件夹对话框 -->
     <el-dialog v-model="showCreateFolderDialog" title="新建文件夹" width="350px" append-to-body>
       <el-input v-model="newFolderName" placeholder="输入文件夹名称" @keyup.enter="createFolder" />
@@ -268,7 +286,7 @@
         <el-button type="primary" @click="createFolder">创建</el-button>
       </template>
     </el-dialog>
-    
+
     <!-- 新建文件对话框 -->
     <el-dialog v-model="showCreateFileDialog" title="新建文件" width="350px" append-to-body>
       <el-input v-model="newFileName" placeholder="输入文件名称" @keyup.enter="createFile" />
@@ -277,7 +295,7 @@
         <el-button type="primary" @click="createFile">创建</el-button>
       </template>
     </el-dialog>
-    
+
     <!-- 重命名对话框 -->
     <el-dialog v-model="showRenameDialog" title="重命名" width="350px" append-to-body>
       <el-input v-model="renameValue" placeholder="输入新名称" @keyup.enter="confirmRename" />
@@ -286,7 +304,7 @@
         <el-button type="primary" @click="confirmRename">确定</el-button>
       </template>
     </el-dialog>
-    
+
     <!-- 权限编辑对话框 -->
     <el-dialog v-model="showPermissionsDialog" title="修改权限" width="400px" append-to-body>
       <div class="permissions-editor">
@@ -329,16 +347,8 @@
     <el-dialog v-model="showCompressDialog" title="压缩文件" width="400px" append-to-body>
       <el-form label-width="80px">
         <el-form-item label="源文件">
-          <el-input 
-            v-if="selectedFiles.size <= 1" 
-            :value="contextMenuFile?.name" 
-            disabled 
-          />
-          <el-input 
-            v-else 
-            :value="`已选择 ${selectedFiles.size} 个项目`" 
-            disabled 
-          />
+          <el-input v-if="selectedFiles.size <= 1" :value="contextMenuFile?.name" disabled />
+          <el-input v-else :value="`已选择 ${selectedFiles.size} 个项目`" disabled />
         </el-form-item>
         <el-form-item label="压缩格式">
           <el-select v-model="compressFormat" style="width: 100%">
@@ -388,9 +398,30 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Close, Back, HomeFilled, FolderOpened, Refresh, Plus, FolderAdd,
-  Document, Upload, Download, Folder, Link, Edit, Delete, Lock, View,
-  ZoomIn, EditPen, Loading, Position, Box, QuestionFilled, Search, ArrowUp, ArrowDown
+  Close,
+  Back,
+  HomeFilled,
+  FolderOpened,
+  Refresh,
+  Plus,
+  FolderAdd,
+  Document,
+  Upload,
+  Download,
+  Folder,
+  Link,
+  Edit,
+  Delete,
+  Lock,
+  View,
+  ZoomIn,
+  EditPen,
+  Loading,
+  Position,
+  Box,
+  QuestionFilled,
+  ArrowUp,
+  ArrowDown
 } from '@element-plus/icons-vue'
 
 interface FileInfo {
@@ -423,6 +454,8 @@ const selectedFiles = ref<Set<string>>(new Set()) // 多选文件的 path 集合
 const lastSelectedIndex = ref<number>(-1) // 用于 Shift 多选
 const pathHistory = ref<string[]>([])
 const showHiddenFiles = ref(false)
+const confirmBeforeDelete = ref(true)
+const cleanupFunctions: Array<() => void> = []
 
 // 拖曳状态
 const isDragOver = ref(false)
@@ -433,12 +466,26 @@ const displayFiles = computed(() => {
   if (showHiddenFiles.value) {
     return files.value
   }
-  return files.value.filter(f => !f.name.startsWith('.'))
+  return files.value.filter((f) => !f.name.startsWith('.'))
 })
 
 // 切换显示隐藏文件
 const toggleHiddenFiles = () => {
   showHiddenFiles.value = !showHiddenFiles.value
+}
+
+const loadFilePanelSettings = async () => {
+  try {
+    const settings = await window.electronAPI.settings.get()
+    applyFilePanelSettings(settings)
+  } catch (error) {
+    console.error('[TerminalFilePanel] Failed to load SFTP settings:', error)
+  }
+}
+
+const applyFilePanelSettings = (settings: any) => {
+  showHiddenFiles.value = settings?.sftp?.showHiddenFiles === true
+  confirmBeforeDelete.value = settings?.sftp?.confirmBeforeDelete !== false
 }
 
 // 右键菜单
@@ -511,7 +558,9 @@ const searchMatchInfo = computed(() => {
 
 const getNativeTextarea = (): HTMLTextAreaElement | null => {
   if (!editTextareaRef.value) return null
-  return editTextareaRef.value.textarea || editTextareaRef.value.$el?.querySelector('textarea') || null
+  return (
+    editTextareaRef.value.textarea || editTextareaRef.value.$el?.querySelector('textarea') || null
+  )
 }
 
 const scrollToMatch = (index: number) => {
@@ -536,7 +585,8 @@ const findNext = () => {
 
 const findPrev = () => {
   if (searchMatches.value.length === 0) return
-  searchCurrentIndex.value = (searchCurrentIndex.value - 1 + searchMatches.value.length) % searchMatches.value.length
+  searchCurrentIndex.value =
+    (searchCurrentIndex.value - 1 + searchMatches.value.length) % searchMatches.value.length
   scrollToMatch(searchCurrentIndex.value)
 }
 
@@ -557,12 +607,17 @@ const replaceAll = () => {
   ElMessage.success(`已替换 ${count} 处`)
 }
 
-
 // 权限编辑
 const permissionBits = ref({
-  ownerRead: false, ownerWrite: false, ownerExecute: false,
-  groupRead: false, groupWrite: false, groupExecute: false,
-  otherRead: false, otherWrite: false, otherExecute: false
+  ownerRead: false,
+  ownerWrite: false,
+  ownerExecute: false,
+  groupRead: false,
+  groupWrite: false,
+  groupExecute: false,
+  otherRead: false,
+  otherWrite: false,
+  otherExecute: false
 })
 
 // 压缩和解压
@@ -576,20 +631,44 @@ const extractCustomPath = ref('')
 const extracting = ref(false)
 
 // 支持的压缩文件扩展名
-const compressedExtensions = ['.tar.gz', '.tgz', '.tar', '.zip', '.gz', '.bz2', '.xz', '.tar.bz2', '.tar.xz', '.rar', '.7z']
+const compressedExtensions = [
+  '.tar.gz',
+  '.tgz',
+  '.tar',
+  '.zip',
+  '.gz',
+  '.bz2',
+  '.xz',
+  '.tar.bz2',
+  '.tar.xz',
+  '.rar',
+  '.7z'
+]
 
 // 判断是否为压缩文件
 const isCompressedFile = (file: FileInfo | null): boolean => {
   if (!file || file.type !== 'file') return false
   const name = file.name.toLowerCase()
-  return compressedExtensions.some(ext => name.endsWith(ext))
+  return compressedExtensions.some((ext) => name.endsWith(ext))
 }
 
 // 获取不带扩展名的文件名（用于解压目录名）
 const getBaseName = (filename: string): string => {
   let name = filename
   // 移除常见的压缩扩展名
-  for (const ext of ['.tar.gz', '.tar.bz2', '.tar.xz', '.tgz', '.tar', '.zip', '.gz', '.bz2', '.xz', '.rar', '.7z']) {
+  for (const ext of [
+    '.tar.gz',
+    '.tar.bz2',
+    '.tar.xz',
+    '.tgz',
+    '.tar',
+    '.zip',
+    '.gz',
+    '.bz2',
+    '.xz',
+    '.rar',
+    '.7z'
+  ]) {
     if (name.toLowerCase().endsWith(ext)) {
       return name.slice(0, -ext.length)
     }
@@ -600,15 +679,18 @@ const getBaseName = (filename: string): string => {
 const canGoBack = computed(() => pathHistory.value.length > 0)
 
 const computedOctalPermission = computed(() => {
-  const owner = (permissionBits.value.ownerRead ? 4 : 0) +
-                (permissionBits.value.ownerWrite ? 2 : 0) +
-                (permissionBits.value.ownerExecute ? 1 : 0)
-  const group = (permissionBits.value.groupRead ? 4 : 0) +
-                (permissionBits.value.groupWrite ? 2 : 0) +
-                (permissionBits.value.groupExecute ? 1 : 0)
-  const other = (permissionBits.value.otherRead ? 4 : 0) +
-                (permissionBits.value.otherWrite ? 2 : 0) +
-                (permissionBits.value.otherExecute ? 1 : 0)
+  const owner =
+    (permissionBits.value.ownerRead ? 4 : 0) +
+    (permissionBits.value.ownerWrite ? 2 : 0) +
+    (permissionBits.value.ownerExecute ? 1 : 0)
+  const group =
+    (permissionBits.value.groupRead ? 4 : 0) +
+    (permissionBits.value.groupWrite ? 2 : 0) +
+    (permissionBits.value.groupExecute ? 1 : 0)
+  const other =
+    (permissionBits.value.otherRead ? 4 : 0) +
+    (permissionBits.value.otherWrite ? 2 : 0) +
+    (permissionBits.value.otherExecute ? 1 : 0)
   return `${owner}${group}${other}`
 })
 
@@ -628,7 +710,7 @@ const loadDirectory = async (path: string) => {
   selectedFiles.value.clear()
   selectedFile.value = null
   lastSelectedIndex.value = -1
-  
+
   try {
     const result = await window.electronAPI.sftp.listDirectory(props.connectionId, path)
     if (result.success && result.files) {
@@ -678,9 +760,7 @@ const goBack = () => {
 const goHome = () => {
   pathHistory.value.push(currentPath.value)
   // 根据用户名判断 home 目录
-  const homeDir = props.username && props.username !== 'root' 
-    ? `/home/${props.username}` 
-    : '/root'
+  const homeDir = props.username && props.username !== 'root' ? `/home/${props.username}` : '/root'
   loadDirectory(homeDir)
 }
 
@@ -695,10 +775,10 @@ const syncToTerminalDir = async () => {
   pendingSync.value = true
   // 请求父组件更新 currentDir
   emit('request-current-dir')
-  
+
   // 等待一小段时间让父组件更新 currentDir
-  await new Promise(resolve => setTimeout(resolve, 100))
-  
+  await new Promise((resolve) => setTimeout(resolve, 100))
+
   // 如果 pendingSync 仍然是 true，说明 watch 没有触发（可能 currentDir 没变化）
   // 这时候直接使用 props.currentDir 刷新
   if (pendingSync.value) {
@@ -724,24 +804,24 @@ const isFileSelected = (file: FileInfo): boolean => {
 
 // 获取所有选中的文件
 const getSelectedFiles = (): FileInfo[] => {
-  return displayFiles.value.filter(f => selectedFiles.value.has(f.path))
+  return displayFiles.value.filter((f) => selectedFiles.value.has(f.path))
 }
 
 // 选择文件
 const selectFile = (file: FileInfo, index: number, event?: MouseEvent) => {
   const isCtrlSelect = event?.ctrlKey || event?.metaKey
   const isShiftSelect = event?.shiftKey
-  
+
   if (isShiftSelect && lastSelectedIndex.value !== -1) {
     // Shift + 点击：范围选择
     const start = Math.min(lastSelectedIndex.value, index)
     const end = Math.max(lastSelectedIndex.value, index)
-    
+
     // 如果没有按 Ctrl，先清空之前的选择
     if (!isCtrlSelect) {
       selectedFiles.value.clear()
     }
-    
+
     // 选择范围内的所有文件
     for (let i = start; i <= end; i++) {
       const f = displayFiles.value[i]
@@ -764,14 +844,14 @@ const selectFile = (file: FileInfo, index: number, event?: MouseEvent) => {
     selectedFiles.value.add(file.path)
     lastSelectedIndex.value = index
   }
-  
+
   // 触发响应式更新
   selectedFiles.value = new Set(selectedFiles.value)
-  
+
   // 更新 selectedFile（用于右键菜单等）
   const selected = getSelectedFiles()
-  selectedFile.value = selected.length === 1 ? selected[0] : (selected.length > 0 ? file : null)
-  
+  selectedFile.value = selected.length === 1 ? selected[0] : selected.length > 0 ? file : null
+
   contextMenuVisible.value = false
 }
 
@@ -796,40 +876,40 @@ const showContextMenu = (event: MouseEvent, file: FileInfo) => {
     selectedFiles.value.add(file.path)
     selectedFiles.value = new Set(selectedFiles.value)
   }
-  
+
   selectedFile.value = file
   contextMenuFile.value = file
-  
+
   // 计算菜单高度
   const isMultiSelect = selectedFiles.value.size > 1
-  let menuItemCount = isMultiSelect ? 3 : 3  // 基础项目数
+  let menuItemCount = isMultiSelect ? 3 : 3 // 基础项目数
   if (!isMultiSelect) {
     if (file.type === 'file') {
-      menuItemCount += 3  // 文件额外：预览、编辑、下载
+      menuItemCount += 3 // 文件额外：预览、编辑、下载
       if (isCompressedFile(file)) {
-        menuItemCount += 1  // 压缩文件额外：解压
+        menuItemCount += 1 // 压缩文件额外：解压
       }
     }
-    menuItemCount += 1  // 删除
+    menuItemCount += 1 // 删除
   }
   const dividerCount = isMultiSelect ? 1 : 2
-  const estimatedHeight = menuItemCount * 36 + dividerCount * 9 + 16  // 16px padding
+  const estimatedHeight = menuItemCount * 36 + dividerCount * 9 + 16 // 16px padding
   const menuWidth = isMultiSelect ? 180 : 150
-  
+
   // 确保菜单不超出窗口边界
   let x = event.clientX
   let y = event.clientY
-  
+
   // 右边界检查
   if (x + menuWidth > window.innerWidth) {
     x = window.innerWidth - menuWidth - 10
   }
-  
+
   // 底部边界检查：如果菜单会超出底部，则向上显示
   if (y + estimatedHeight > window.innerHeight) {
     y = window.innerHeight - estimatedHeight - 10
   }
-  
+
   // 确保不会出现负值
   contextMenuX.value = Math.max(10, x)
   contextMenuY.value = Math.max(10, y)
@@ -858,12 +938,13 @@ const createFolder = async () => {
     ElMessage.warning('请输入文件夹名称')
     return
   }
-  
+
   try {
-    const newPath = currentPath.value === '/' 
-      ? '/' + newFolderName.value 
-      : currentPath.value + '/' + newFolderName.value
-    
+    const newPath =
+      currentPath.value === '/'
+        ? '/' + newFolderName.value
+        : currentPath.value + '/' + newFolderName.value
+
     const result = await window.electronAPI.sftp.createDirectory(props.connectionId, newPath)
     if (result.success) {
       ElMessage.success('文件夹创建成功')
@@ -883,12 +964,13 @@ const createFile = async () => {
     ElMessage.warning('请输入文件名称')
     return
   }
-  
+
   try {
-    const newPath = currentPath.value === '/' 
-      ? '/' + newFileName.value 
-      : currentPath.value + '/' + newFileName.value
-    
+    const newPath =
+      currentPath.value === '/'
+        ? '/' + newFileName.value
+        : currentPath.value + '/' + newFileName.value
+
     const result = await window.electronAPI.sftp.createFile(props.connectionId, newPath)
     if (result.success) {
       ElMessage.success('文件创建成功')
@@ -908,17 +990,20 @@ const handleUpload = async () => {
     const result = await window.electronAPI.dialog.openFile({
       properties: ['openFile', 'multiSelections']
     })
-    
+
     if (result && result.length > 0) {
       for (const localPath of result) {
         const fileName = localPath.split(/[/\\]/).pop()
-        const remotePath = currentPath.value === '/' 
-          ? '/' + fileName 
-          : currentPath.value + '/' + fileName
-        
+        const remotePath =
+          currentPath.value === '/' ? '/' + fileName : currentPath.value + '/' + fileName
+
         ElMessage.info(`正在上传 ${fileName}...`)
-        
-        const uploadResult = await window.electronAPI.sftp.uploadFile(props.connectionId, localPath, remotePath)
+
+        const uploadResult = await window.electronAPI.sftp.uploadFile(
+          props.connectionId,
+          localPath,
+          remotePath
+        )
         if (uploadResult.success) {
           ElMessage.success(`${fileName} 上传成功`)
         } else {
@@ -936,8 +1021,9 @@ const handleUpload = async () => {
 const onDragOver = (event: DragEvent) => {
   // 只有从外部拖入文件时才显示上传提示
   // 检查是否是内部拖曳（通过自定义类型判断）
-  const isInternalDrag = event.dataTransfer?.types.includes('application/x-mshell-file') || isDraggingFile.value
-  
+  const isInternalDrag =
+    event.dataTransfer?.types.includes('application/x-mshell-file') || isDraggingFile.value
+
   if (event.dataTransfer?.types.includes('Files') && !isInternalDrag) {
     event.dataTransfer.dropEffect = 'copy'
     isDragOver.value = true
@@ -950,7 +1036,7 @@ const onDragLeave = (event: DragEvent) => {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   const x = event.clientX
   const y = event.clientY
-  
+
   if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
     isDragOver.value = false
   }
@@ -959,15 +1045,15 @@ const onDragLeave = (event: DragEvent) => {
 // 拖曳上传 - drop 事件
 const onDrop = async (event: DragEvent) => {
   isDragOver.value = false
-  
+
   // 如果是内部拖曳，不处理
   if (isDraggingFile.value || event.dataTransfer?.types.includes('application/x-mshell-file')) {
     return
   }
-  
+
   const files = event.dataTransfer?.files
   if (!files || files.length === 0) return
-  
+
   // 获取文件路径（Electron 环境下可以获取完整路径）
   const filePaths: string[] = []
   for (let i = 0; i < files.length; i++) {
@@ -977,23 +1063,26 @@ const onDrop = async (event: DragEvent) => {
       filePaths.push(file.path)
     }
   }
-  
+
   if (filePaths.length === 0) {
     ElMessage.warning('无法获取文件路径')
     return
   }
-  
+
   // 上传文件
   for (const localPath of filePaths) {
     const fileName = localPath.split(/[/\\]/).pop()
-    const remotePath = currentPath.value === '/' 
-      ? '/' + fileName 
-      : currentPath.value + '/' + fileName
-    
+    const remotePath =
+      currentPath.value === '/' ? '/' + fileName : currentPath.value + '/' + fileName
+
     ElMessage.info(`正在上传 ${fileName}...`)
-    
+
     try {
-      const uploadResult = await window.electronAPI.sftp.uploadFile(props.connectionId, localPath, remotePath)
+      const uploadResult = await window.electronAPI.sftp.uploadFile(
+        props.connectionId,
+        localPath,
+        remotePath
+      )
       if (uploadResult.success) {
         ElMessage.success(`${fileName} 上传成功`)
       } else {
@@ -1003,7 +1092,7 @@ const onDrop = async (event: DragEvent) => {
       ElMessage.error(`${fileName} 上传失败: ${error.message}`)
     }
   }
-  
+
   refreshDirectory()
 }
 
@@ -1013,26 +1102,30 @@ const onFileDragStart = (event: DragEvent, file: FileInfo) => {
     event.preventDefault()
     return
   }
-  
+
   isDraggingFile.value = true
-  
+
   // 设置拖曳数据
   if (event.dataTransfer) {
     event.dataTransfer.setData('text/plain', file.name)
-    event.dataTransfer.setData('application/x-mshell-file', JSON.stringify({
-      connectionId: props.connectionId,
-      remotePath: file.path,
-      fileName: file.name
-    }))
+    event.dataTransfer.setData(
+      'application/x-mshell-file',
+      JSON.stringify({
+        connectionId: props.connectionId,
+        remotePath: file.path,
+        fileName: file.name
+      })
+    )
     event.dataTransfer.effectAllowed = 'copyMove'
-    
+
     // 设置拖曳图像（使用文件名作为提示）
     const dragImage = document.createElement('div')
     dragImage.textContent = file.name
-    dragImage.style.cssText = 'position: absolute; top: -1000px; padding: 8px 12px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: var(--text-md); box-shadow: 0 2px 8px rgba(0,0,0,0.15);'
+    dragImage.style.cssText =
+      'position: absolute; top: -1000px; padding: 8px 12px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: var(--text-md); box-shadow: 0 2px 8px rgba(0,0,0,0.15);'
     document.body.appendChild(dragImage)
     event.dataTransfer.setDragImage(dragImage, 0, 0)
-    
+
     // 延迟移除拖曳图像元素
     setTimeout(() => {
       document.body.removeChild(dragImage)
@@ -1043,28 +1136,36 @@ const onFileDragStart = (event: DragEvent, file: FileInfo) => {
 // 文件拖曳结束 - 检查是否拖到了外部
 const onFileDragEnd = async (event: DragEvent, file: FileInfo) => {
   isDraggingFile.value = false
-  
+
   // 检查拖曳是否成功（dropEffect 不为 none 表示被接受）
   // 如果拖到了窗口外部，提示用户使用右键下载
   if (event.dataTransfer?.dropEffect === 'none') {
     // 检查鼠标是否在窗口内
     const windowWidth = window.innerWidth
     const windowHeight = window.innerHeight
-    
+
     // 如果拖曳结束时鼠标在窗口外，说明用户想要下载到本地
-    if (event.clientX <= 0 || event.clientX >= windowWidth || 
-        event.clientY <= 0 || event.clientY >= windowHeight) {
+    if (
+      event.clientX <= 0 ||
+      event.clientX >= windowWidth ||
+      event.clientY <= 0 ||
+      event.clientY >= windowHeight
+    ) {
       // 弹出保存对话框
       try {
         const saveDir = await window.electronAPI.dialog.openDirectory({
           properties: ['openDirectory', 'createDirectory']
         })
-        
+
         if (saveDir) {
           const localPath = `${saveDir}/${file.name}`
           ElMessage.info(`正在下载 ${file.name}...`)
-          
-          const result = await window.electronAPI.sftp.downloadFile(props.connectionId, file.path, localPath)
+
+          const result = await window.electronAPI.sftp.downloadFile(
+            props.connectionId,
+            file.path,
+            localPath
+          )
           if (result.success) {
             ElMessage.success(`${file.name} 下载成功`)
           } else {
@@ -1082,21 +1183,25 @@ const onFileDragEnd = async (event: DragEvent, file: FileInfo) => {
 const handleDownload = async () => {
   if (!contextMenuFile.value) return
   hideContextMenu()
-  
+
   try {
     // 选择保存目录
     const saveDir = await window.electronAPI.dialog.openDirectory({
       properties: ['openDirectory', 'createDirectory']
     })
-    
+
     if (!saveDir) return
-    
+
     const file = contextMenuFile.value
     const localPath = `${saveDir}/${file.name}`
-    
+
     ElMessage.info(`正在下载 ${file.name}...`)
-    
-    const result = await window.electronAPI.sftp.downloadFile(props.connectionId, file.path, localPath)
+
+    const result = await window.electronAPI.sftp.downloadFile(
+      props.connectionId,
+      file.path,
+      localPath
+    )
     if (result.success) {
       ElMessage.success(`${file.name} 下载成功`)
     } else {
@@ -1117,13 +1222,14 @@ const handleRename = () => {
 
 const confirmRename = async () => {
   if (!contextMenuFile.value || !renameValue.value.trim()) return
-  
+
   try {
     const oldPath = contextMenuFile.value.path
-    const newPath = currentPath.value === '/'
-      ? '/' + renameValue.value
-      : currentPath.value + '/' + renameValue.value
-    
+    const newPath =
+      currentPath.value === '/'
+        ? '/' + renameValue.value
+        : currentPath.value + '/' + renameValue.value
+
     const result = await window.electronAPI.sftp.renameFile(props.connectionId, oldPath, newPath)
     if (result.success) {
       ElMessage.success('重命名成功')
@@ -1141,7 +1247,7 @@ const confirmRename = async () => {
 const handlePermissions = () => {
   if (!contextMenuFile.value) return
   hideContextMenu()
-  
+
   const perms = contextMenuFile.value.permissions || 0o644
   permissionBits.value = {
     ownerRead: !!(perms & 0o400),
@@ -1159,10 +1265,14 @@ const handlePermissions = () => {
 
 const confirmPermissions = async () => {
   if (!contextMenuFile.value) return
-  
+
   try {
     const mode = parseInt(computedOctalPermission.value, 8)
-    const result = await window.electronAPI.sftp.chmod(props.connectionId, contextMenuFile.value.path, mode)
+    const result = await window.electronAPI.sftp.chmod(
+      props.connectionId,
+      contextMenuFile.value.path,
+      mode
+    )
     if (result.success) {
       ElMessage.success('权限修改成功')
       showPermissionsDialog.value = false
@@ -1179,23 +1289,21 @@ const confirmPermissions = async () => {
 const handleDelete = async () => {
   if (!contextMenuFile.value) return
   hideContextMenu()
-  
+
   const file = contextMenuFile.value
-  
+
   try {
-    await ElMessageBox.confirm(
-      `确定要删除 "${file.name}" 吗？`,
-      '确认删除',
-      { type: 'warning' }
-    )
-    
+    if (confirmBeforeDelete.value) {
+      await ElMessageBox.confirm(`确定要删除 "${file.name}" 吗？`, '确认删除', { type: 'warning' })
+    }
+
     let result
     if (file.type === 'directory') {
       result = await window.electronAPI.sftp.deleteDirectories(props.connectionId, [file.path])
     } else {
       result = await window.electronAPI.sftp.deleteFile(props.connectionId, file.path)
     }
-    
+
     if (result.success) {
       ElMessage.success('删除成功')
       refreshDirectory()
@@ -1213,7 +1321,7 @@ const handleDelete = async () => {
 const handleCompress = () => {
   if (!contextMenuFile.value) return
   hideContextMenu()
-  
+
   const file = contextMenuFile.value
   // 设置默认输出文件名
   compressOutputName.value = `${file.name}.tar.gz`
@@ -1224,10 +1332,10 @@ const handleCompress = () => {
 // 多选压缩
 const handleCompressMultiple = () => {
   hideContextMenu()
-  
+
   const selected = getSelectedFiles()
   if (selected.length === 0) return
-  
+
   // 设置默认输出文件名
   compressOutputName.value = 'archive.tar.gz'
   compressFormat.value = 'tar.gz'
@@ -1237,30 +1345,34 @@ const handleCompressMultiple = () => {
 // 多选下载
 const handleDownloadMultiple = async () => {
   hideContextMenu()
-  
-  const selected = getSelectedFiles().filter(f => f.type === 'file')
+
+  const selected = getSelectedFiles().filter((f) => f.type === 'file')
   if (selected.length === 0) {
     ElMessage.warning('请选择要下载的文件')
     return
   }
-  
+
   try {
     // 选择保存目录
     const saveDir = await window.electronAPI.dialog.openDirectory({
       properties: ['openDirectory', 'createDirectory']
     })
-    
+
     if (!saveDir) return
-    
+
     let successCount = 0
     let failCount = 0
-    
+
     for (const file of selected) {
       const localPath = `${saveDir}/${file.name}`
       ElMessage.info(`正在下载 ${file.name}...`)
-      
+
       try {
-        const result = await window.electronAPI.sftp.downloadFile(props.connectionId, file.path, localPath)
+        const result = await window.electronAPI.sftp.downloadFile(
+          props.connectionId,
+          file.path,
+          localPath
+        )
         if (result.success) {
           successCount++
         } else {
@@ -1270,7 +1382,7 @@ const handleDownloadMultiple = async () => {
         failCount++
       }
     }
-    
+
     if (failCount === 0) {
       ElMessage.success(`成功下载 ${successCount} 个文件`)
     } else {
@@ -1284,20 +1396,22 @@ const handleDownloadMultiple = async () => {
 // 多选删除
 const handleDeleteMultiple = async () => {
   hideContextMenu()
-  
+
   const selected = getSelectedFiles()
   if (selected.length === 0) return
-  
+
   try {
-    await ElMessageBox.confirm(
-      `确定要删除选中的 ${selected.length} 个项目吗？此操作不可恢复！`,
-      '批量删除',
-      { type: 'warning' }
-    )
-    
+    if (confirmBeforeDelete.value) {
+      await ElMessageBox.confirm(
+        `确定要删除选中的 ${selected.length} 个项目吗？此操作不可恢复！`,
+        '批量删除',
+        { type: 'warning' }
+      )
+    }
+
     let successCount = 0
     let failCount = 0
-    
+
     for (const file of selected) {
       try {
         const result = await window.electronAPI.sftp.deleteFile(props.connectionId, file.path)
@@ -1310,13 +1424,13 @@ const handleDeleteMultiple = async () => {
         failCount++
       }
     }
-    
+
     if (failCount === 0) {
       ElMessage.success(`成功删除 ${successCount} 个项目`)
     } else {
       ElMessage.warning(`删除完成：成功 ${successCount} 个，失败 ${failCount} 个`)
     }
-    
+
     refreshDirectory()
   } catch (error) {
     // 用户取消
@@ -1329,25 +1443,29 @@ const confirmCompress = async () => {
     ElMessage.warning('请输入输出文件名')
     return
   }
-  
+
   compressing.value = true
   const selected = getSelectedFiles()
   const isMultiple = selected.length > 1
-  
+
   // 如果是单选，使用 contextMenuFile；如果是多选，使用 selected
-  const filesToCompress = isMultiple ? selected : (contextMenuFile.value ? [contextMenuFile.value] : [])
-  
+  const filesToCompress = isMultiple
+    ? selected
+    : contextMenuFile.value
+      ? [contextMenuFile.value]
+      : []
+
   if (filesToCompress.length === 0) {
     ElMessage.warning('没有选中的文件')
     compressing.value = false
     return
   }
-  
+
   try {
     // 根据格式构建压缩命令
     let command = ''
-    const sourceNames = filesToCompress.map(f => `"${f.name}"`).join(' ')
-    
+    const sourceNames = filesToCompress.map((f) => `"${f.name}"`).join(' ')
+
     switch (compressFormat.value) {
       case 'tar.gz':
         command = `cd "${currentPath.value}" && tar -czvf "${compressOutputName.value}" ${sourceNames}`
@@ -1367,13 +1485,15 @@ const confirmCompress = async () => {
       default:
         command = `cd "${currentPath.value}" && tar -czvf "${compressOutputName.value}" ${sourceNames}`
     }
-    
-    const msg = isMultiple ? `正在压缩 ${filesToCompress.length} 个项目...` : `正在压缩 ${filesToCompress[0].name}...`
+
+    const msg = isMultiple
+      ? `正在压缩 ${filesToCompress.length} 个项目...`
+      : `正在压缩 ${filesToCompress[0].name}...`
     ElMessage.info(msg)
-    
+
     // 通过 SSH 执行压缩命令
     const result = await window.electronAPI.ssh.executeCommand(props.connectionId, command, 60000)
-    
+
     if (result.success) {
       ElMessage.success('压缩完成')
       showCompressDialog.value = false
@@ -1392,7 +1512,7 @@ const confirmCompress = async () => {
 const handleExtract = () => {
   if (!contextMenuFile.value || !isCompressedFile(contextMenuFile.value)) return
   hideContextMenu()
-  
+
   extractTarget.value = 'current'
   extractCustomPath.value = currentPath.value
   showExtractDialog.value = true
@@ -1401,11 +1521,11 @@ const handleExtract = () => {
 // 确认解压
 const confirmExtract = async () => {
   if (!contextMenuFile.value) return
-  
+
   extracting.value = true
   const file = contextMenuFile.value
   const fileName = file.name.toLowerCase()
-  
+
   try {
     // 确定解压目标目录
     let targetDir = currentPath.value
@@ -1413,16 +1533,24 @@ const confirmExtract = async () => {
       const baseName = getBaseName(file.name)
       targetDir = currentPath.value === '/' ? '/' + baseName : currentPath.value + '/' + baseName
       // 先创建目录
-      await window.electronAPI.ssh.executeCommand(props.connectionId, `mkdir -p "${targetDir}"`, 10000)
+      await window.electronAPI.ssh.executeCommand(
+        props.connectionId,
+        `mkdir -p "${targetDir}"`,
+        10000
+      )
     } else if (extractTarget.value === 'custom') {
       targetDir = extractCustomPath.value || currentPath.value
       // 确保目录存在
-      await window.electronAPI.ssh.executeCommand(props.connectionId, `mkdir -p "${targetDir}"`, 10000)
+      await window.electronAPI.ssh.executeCommand(
+        props.connectionId,
+        `mkdir -p "${targetDir}"`,
+        10000
+      )
     }
-    
+
     // 根据文件类型构建解压命令（默认覆盖同名文件）
     let command = ''
-    
+
     if (fileName.endsWith('.tar.gz') || fileName.endsWith('.tgz')) {
       command = `tar -xzvf "${file.path}" -C "${targetDir}"`
     } else if (fileName.endsWith('.tar.bz2')) {
@@ -1448,12 +1576,12 @@ const confirmExtract = async () => {
       extracting.value = false
       return
     }
-    
+
     ElMessage.info(`正在解压 ${file.name}...`)
-    
+
     // 通过 SSH 执行解压命令
     const result = await window.electronAPI.ssh.executeCommand(props.connectionId, command, 120000)
-    
+
     if (result.success) {
       ElMessage.success('解压完成')
       showExtractDialog.value = false
@@ -1498,13 +1626,13 @@ const IMAGE_PREVIEW_SIZE_LIMIT = 10 * 1024 * 1024
 const handlePreview = async () => {
   if (!contextMenuFile.value || contextMenuFile.value.type !== 'file') return
   hideContextMenu()
-  
+
   const file = contextMenuFile.value
   previewLoading.value = true
   previewContent.value = ''
   previewImageSrc.value = ''
   showPreviewDialog.value = true
-  
+
   try {
     // 判断是否为图片文件
     if (isImageFile(file.name)) {
@@ -1515,7 +1643,7 @@ const handlePreview = async () => {
         previewLoading.value = false
         return
       }
-      
+
       previewType.value = 'image'
       // 使用 readFileBuffer 读取二进制数据
       const result = await window.electronAPI.sftp.readFileBuffer(props.connectionId, file.path)
@@ -1549,28 +1677,59 @@ const handlePreview = async () => {
 const handleEdit = async () => {
   if (!contextMenuFile.value || contextMenuFile.value.type !== 'file') return
   hideContextMenu()
-  
+
   const file = contextMenuFile.value
-  
+
   // 检查文件大小，超过 5MB 不建议在线编辑
   if (file.size > 5 * 1024 * 1024) {
     ElMessage.warning('文件过大（超过 5MB），建议下载后使用本地编辑器编辑')
     return
   }
-  
+
   // 检查是否为二进制文件（通过扩展名判断）
-  const binaryExtensions = ['.exe', '.dll', '.so', '.bin', '.img', '.iso', '.zip', '.tar', '.gz', '.bz2', '.xz', '.rar', '.7z', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.mp3', '.mp4', '.avi', '.mkv', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
+  const binaryExtensions = [
+    '.exe',
+    '.dll',
+    '.so',
+    '.bin',
+    '.img',
+    '.iso',
+    '.zip',
+    '.tar',
+    '.gz',
+    '.bz2',
+    '.xz',
+    '.rar',
+    '.7z',
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.gif',
+    '.bmp',
+    '.ico',
+    '.mp3',
+    '.mp4',
+    '.avi',
+    '.mkv',
+    '.pdf',
+    '.doc',
+    '.docx',
+    '.xls',
+    '.xlsx',
+    '.ppt',
+    '.pptx'
+  ]
   const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'))
   if (binaryExtensions.includes(ext)) {
     ElMessage.warning('二进制文件不支持在线编辑')
     return
   }
-  
+
   editLoading.value = true
   editContent.value = ''
   editingFilePath.value = file.path
   showEditDialog.value = true
-  
+
   try {
     const result = await window.electronAPI.sftp.readFile(props.connectionId, file.path)
     if (result.success) {
@@ -1589,8 +1748,8 @@ const handleEdit = async () => {
 
 // 保存编辑的文件
 const saveEditedFile = async () => {
-  if (!editingFilePath.value) return
-  
+  if (!editingFilePath.value || editSaving.value || editLoading.value) return
+
   editSaving.value = true
   try {
     const result = await window.electronAPI.sftp.writeFile(
@@ -1598,7 +1757,7 @@ const saveEditedFile = async () => {
       editingFilePath.value,
       editContent.value
     )
-    
+
     if (result.success) {
       ElMessage.success('保存成功')
       showEditDialog.value = false
@@ -1637,7 +1796,7 @@ const getInitialPath = () => {
 // 初始化 SFTP 连接
 const initSFTP = async () => {
   if (sftpInitialized.value) return true
-  
+
   loading.value = true
   try {
     await window.electronAPI.sftp.init(props.connectionId)
@@ -1654,6 +1813,13 @@ const initSFTP = async () => {
 // 点击外部关闭右键菜单
 onMounted(async () => {
   document.addEventListener('click', hideContextMenu)
+  await loadFilePanelSettings()
+  const cleanupSettings = window.electronAPI.settings.onChange((settings: any) => {
+    applyFilePanelSettings(settings)
+  })
+  if (cleanupSettings) {
+    cleanupFunctions.push(cleanupSettings)
+  }
   // 先初始化 SFTP，然后加载目录（优先使用终端当前目录）
   const initialized = await initSFTP()
   if (initialized) {
@@ -1664,35 +1830,49 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('click', hideContextMenu)
+  cleanupFunctions.forEach((cleanup) => {
+    try {
+      cleanup()
+    } catch {
+      // ignore cleanup errors
+    }
+  })
+  cleanupFunctions.length = 0
 })
 
 // 是否需要同步到终端目录
 const pendingSync = ref(false)
 
 // 监听 connectionId 变化，重新初始化和加载
-watch(() => props.connectionId, async () => {
-  sftpInitialized.value = false
-  pathHistory.value = []
-  const initialized = await initSFTP()
-  if (initialized) {
-    const initialPath = getInitialPath()
-    loadDirectory(initialPath)
-  }
-})
-
-// 监听 currentDir 变化，如果有待同步请求则执行同步
-watch(() => props.currentDir, (newDir) => {
-  if (pendingSync.value && newDir) {
-    pendingSync.value = false
-    const targetPath = getInitialPath()
-    console.log('[TerminalFilePanel] Syncing to:', targetPath)
-    if (targetPath !== currentPath.value) {
-      pathHistory.value.push(currentPath.value)
-      loadDirectory(targetPath)
-      ElMessage.success(`已同步到: ${targetPath}`)
+watch(
+  () => props.connectionId,
+  async () => {
+    sftpInitialized.value = false
+    pathHistory.value = []
+    const initialized = await initSFTP()
+    if (initialized) {
+      const initialPath = getInitialPath()
+      loadDirectory(initialPath)
     }
   }
-})
+)
+
+// 监听 currentDir 变化，如果有待同步请求则执行同步
+watch(
+  () => props.currentDir,
+  (newDir) => {
+    if (pendingSync.value && newDir) {
+      pendingSync.value = false
+      const targetPath = getInitialPath()
+      console.log('[TerminalFilePanel] Syncing to:', targetPath)
+      if (targetPath !== currentPath.value) {
+        pathHistory.value.push(currentPath.value)
+        loadDirectory(targetPath)
+        ElMessage.success(`已同步到: ${targetPath}`)
+      }
+    }
+  }
+)
 </script>
 
 <style scoped>
@@ -1819,11 +1999,11 @@ watch(() => props.currentDir, (newDir) => {
   transition: background 0.2s;
 }
 
-.file-item[draggable="true"] {
+.file-item[draggable='true'] {
   cursor: grab;
 }
 
-.file-item[draggable="true"]:active {
+.file-item[draggable='true']:active {
   cursor: grabbing;
 }
 
@@ -1840,7 +2020,7 @@ watch(() => props.currentDir, (newDir) => {
   flex-shrink: 0;
 }
 
-.file-item:has(.file-icon > .el-icon:first-child[class*="Folder"]) .file-icon {
+.file-item:has(.file-icon > .el-icon:first-child[class*='Folder']) .file-icon {
   color: #f0a020;
 }
 
@@ -1877,7 +2057,7 @@ watch(() => props.currentDir, (newDir) => {
 }
 
 /* 暗色主题下的右键菜单 */
-:root[data-theme="dark"] .context-menu,
+:root[data-theme='dark'] .context-menu,
 .dark .context-menu {
   background-color: #2d2d2d;
   border-color: #404040;

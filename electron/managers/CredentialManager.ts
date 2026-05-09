@@ -1,3 +1,5 @@
+/* global Buffer */
+
 import { safeStorage } from 'electron'
 
 /**
@@ -5,6 +7,10 @@ import { safeStorage } from 'electron'
  * 使用 Electron safeStorage API (Windows 上使用 DPAPI)
  */
 export class CredentialManager {
+  private readonly SAFE_PREFIX = 'safe:v1:'
+  private readonly LEGACY_ENC_PREFIX = 'enc:'
+  private readonly BASE64_PREFIX = 'b64:'
+
   /**
    * 检查加密功能是否可用
    */
@@ -19,18 +25,22 @@ export class CredentialManager {
    */
   encrypt(plaintext: string): string {
     // 已经是加密格式的值直接返回，防止双重加密
-    if (plaintext.startsWith('enc:') || plaintext.startsWith('b64:')) {
+    if (
+      plaintext.startsWith(this.SAFE_PREFIX) ||
+      plaintext.startsWith(this.LEGACY_ENC_PREFIX) ||
+      plaintext.startsWith(this.BASE64_PREFIX)
+    ) {
       return plaintext
     }
 
     if (!this.isEncryptionAvailable()) {
       console.warn('Encryption not available, storing as base64 (NOT SECURE)')
-      return Buffer.from(plaintext).toString('base64')
+      return this.BASE64_PREFIX + Buffer.from(plaintext).toString('base64')
     }
 
     try {
       const encrypted = safeStorage.encryptString(plaintext)
-      return encrypted.toString('base64')
+      return this.SAFE_PREFIX + encrypted.toString('base64')
     } catch (error) {
       console.error('Encryption failed:', error)
       throw new Error('Failed to encrypt data')
@@ -43,9 +53,23 @@ export class CredentialManager {
    * @returns 解密后的明文
    */
   decrypt(ciphertext: string): string {
+    if (ciphertext.startsWith(this.SAFE_PREFIX)) {
+      if (!this.isEncryptionAvailable()) {
+        throw new Error('Encryption is not available on this system')
+      }
+
+      try {
+        const buffer = Buffer.from(ciphertext.slice(this.SAFE_PREFIX.length), 'base64')
+        return safeStorage.decryptString(buffer)
+      } catch (error) {
+        console.error('Decryption failed for safe:v1 value:', error)
+        throw new Error('Failed to decrypt data')
+      }
+    }
+
     // 处理带 enc: 前缀的数据（之前版本错误写入的格式）
-    if (ciphertext.startsWith('enc:')) {
-      const base64Part = ciphertext.slice(4)
+    if (ciphertext.startsWith(this.LEGACY_ENC_PREFIX)) {
+      const base64Part = ciphertext.slice(this.LEGACY_ENC_PREFIX.length)
       if (!this.isEncryptionAvailable()) {
         return Buffer.from(base64Part, 'base64').toString('utf-8')
       }
@@ -59,8 +83,8 @@ export class CredentialManager {
     }
 
     // 处理带 b64: 前缀的数据
-    if (ciphertext.startsWith('b64:')) {
-      return Buffer.from(ciphertext.slice(4), 'base64').toString('utf-8')
+    if (ciphertext.startsWith(this.BASE64_PREFIX)) {
+      return Buffer.from(ciphertext.slice(this.BASE64_PREFIX.length), 'base64').toString('utf-8')
     }
 
     // 标准格式（无前缀，直接 base64 编码的 safeStorage 密文）
@@ -78,11 +102,36 @@ export class CredentialManager {
   }
 
   /**
+   * 尝试解密旧版无前缀 safeStorage 密文。
+   * 只在 Electron 加密可用时尝试，避免把普通明文误当 base64 处理。
+   */
+  decryptLegacyUnprefixed(value: string): string | undefined {
+    if (!value || this.isEncrypted(value) || !this.isEncryptionAvailable()) {
+      return undefined
+    }
+
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) {
+      return undefined
+    }
+
+    try {
+      const buffer = Buffer.from(value, 'base64')
+      return safeStorage.decryptString(buffer)
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
    * 检查字符串是否已加密（用于备份恢复时判断是否为明文）
    * 旧格式无法可靠判断，只能尝试解密
    */
   isEncrypted(_value: string): boolean {
-    return false // 保守策略：始终尝试解密，失败则保留原值
+    return (
+      _value.startsWith(this.SAFE_PREFIX) ||
+      _value.startsWith(this.LEGACY_ENC_PREFIX) ||
+      _value.startsWith(this.BASE64_PREFIX)
+    )
   }
 
   /**
@@ -95,8 +144,12 @@ export class CredentialManager {
     const result = { ...obj }
     for (const field of fields) {
       // 只加密非空字符串（空字符串和 undefined/null 不加密，保持原样）
-      if (result[field] !== undefined && result[field] !== null && 
-          typeof result[field] === 'string' && result[field] !== '') {
+      if (
+        result[field] !== undefined &&
+        result[field] !== null &&
+        typeof result[field] === 'string' &&
+        result[field] !== ''
+      ) {
         result[field] = this.encrypt(result[field] as string) as any
       }
     }

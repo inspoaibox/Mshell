@@ -1,3 +1,5 @@
+/* global Buffer, NodeJS */
+
 import { app } from 'electron'
 import { join } from 'path'
 import { promises as fs } from 'fs'
@@ -37,6 +39,8 @@ export interface BackupData {
   scheduledTasks: any[]
   workflows: any[]
   settings: any
+  backupConfig?: BackupConfig
+  syncConfig?: any
   aiConfig?: any // AI 配置（可选，用于向后兼容）
   aiChatHistory?: any[] // AI 聊天历史（可选）
   aiTerminalChatHistory?: Record<string, any[]> // 终端 AI 聊天历史（可选） { filename: messages }
@@ -64,6 +68,7 @@ export interface BackupConfig {
  * BackupManager - 管理数据备份与恢复
  */
 export class BackupManager {
+  private readonly REDACTED_SECRET = '__mshell_secret_configured__'
   private backupDir: string
   private configPath: string
   private config: BackupConfig
@@ -87,6 +92,7 @@ export class BackupManager {
     try {
       // 加载配置
       await this.loadConfig()
+      await this.saveConfig()
 
       // 如果配置了自定义备份目录，使用它
       if (this.config.backupDir) {
@@ -112,6 +118,9 @@ export class BackupManager {
     try {
       const data = await fs.readFile(this.configPath, 'utf-8')
       this.config = JSON.parse(data)
+      if (this.config.autoBackupPassword) {
+        this.config.autoBackupPassword = this.decryptMaybeEncrypted(this.config.autoBackupPassword)
+      }
     } catch (error: any) {
       if (error.code !== 'ENOENT') {
         logger.logError('system', 'Failed to load backup config', error)
@@ -124,7 +133,11 @@ export class BackupManager {
    */
   private async saveConfig(): Promise<void> {
     try {
-      await fs.writeFile(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8')
+      await fs.writeFile(
+        this.configPath,
+        JSON.stringify(this.encryptConfig(this.config), null, 2),
+        'utf-8'
+      )
     } catch (error) {
       logger.logError('system', 'Failed to save backup config', error as Error)
       throw new Error('保存配置失败')
@@ -137,14 +150,42 @@ export class BackupManager {
   getConfig(): BackupConfig {
     return {
       ...this.config,
+      autoBackupPassword: this.config.autoBackupPassword ? this.REDACTED_SECRET : undefined,
       backupDir: this.config.backupDir || this.backupDir // 返回当前使用的备份目录
     }
+  }
+
+  exportConfigForBackup(): BackupConfig {
+    return { ...this.config }
+  }
+
+  async applyConfigFromBackup(config: Partial<BackupConfig>): Promise<void> {
+    const updates: Partial<BackupConfig> = { ...config }
+
+    if (config.autoBackupPassword) {
+      const restoredPassword = this.restoreSecretForImport(config.autoBackupPassword)
+      if (restoredPassword) {
+        updates.autoBackupPassword = restoredPassword
+      } else {
+        delete updates.autoBackupPassword
+      }
+    }
+
+    if (updates.enabled && !updates.autoBackupPassword && !this.config.autoBackupPassword) {
+      updates.enabled = false
+    }
+
+    await this.updateConfig(updates)
   }
 
   /**
    * 更新备份配置
    */
   async updateConfig(updates: Partial<BackupConfig>): Promise<void> {
+    if (updates.autoBackupPassword === this.REDACTED_SECRET) {
+      delete updates.autoBackupPassword
+    }
+
     this.config = { ...this.config, ...updates }
 
     // 如果更新了备份目录，更新backupDir
@@ -221,45 +262,94 @@ export class BackupManager {
   }
 
   /**
+   * 收集完整备份数据。
+   * 手动备份、自动备份和云同步都走这里，避免不同出口保存的数据集合不一致。
+   */
+  async collectBackupData(options: { includeLocalConfigs?: boolean } = {}): Promise<BackupData> {
+    const { quickCommandManager } = await import('./QuickCommandManager')
+
+    // SessionManager 内存中的敏感字段已经是明文；外层备份/同步会整体加密。
+    const sessions = sessionManager.getAllSessions().map((session) => ({ ...session }))
+
+    return {
+      version: '0.2.0',
+      timestamp: new Date().toISOString(),
+      sessions,
+      sessionGroups: sessionManager.getAllGroups(),
+      snippets: snippetManager.getAll(),
+      commandHistory: commandHistoryManager.getAll(),
+      sshKeys: await this.collectSSHKeysWithPrivateKeys(),
+      portForwards: portForwardManager.getAllForwards(),
+      portForwardTemplates: portForwardManager.getAllTemplates(),
+      sessionTemplates: sessionTemplateManager.getAll(),
+      scheduledTasks: taskSchedulerManager.getAll(),
+      workflows: workflowManager.getAll(),
+      settings: await this.getAppSettings(),
+      backupConfig: options.includeLocalConfigs ? this.exportConfigForBackup() : undefined,
+      syncConfig: options.includeLocalConfigs ? await this.collectSyncConfig() : undefined,
+      aiConfig: await this.collectAIConfig(),
+      aiChatHistory: await this.collectAIChatHistory(),
+      aiTerminalChatHistory: await this.collectAITerminalChatHistory(),
+      connectionStats: connectionStatsManager.getAll(),
+      auditLogs: auditLogManager.getAll(),
+      transferRecords: transferRecordManager.getAllRecords(),
+      lockConfig: sessionLockManager.getConfig(),
+      quickCommands: quickCommandManager.getAll()
+    }
+  }
+
+  private encryptConfig(config: BackupConfig): BackupConfig {
+    const encrypted = { ...config }
+    if (encrypted.autoBackupPassword) {
+      encrypted.autoBackupPassword = credentialManager.encrypt(encrypted.autoBackupPassword)
+    }
+    return encrypted
+  }
+
+  private decryptMaybeEncrypted(value: string): string {
+    if (!credentialManager.isEncrypted(value)) {
+      return credentialManager.decryptLegacyUnprefixed(value) ?? value
+    }
+
+    try {
+      return credentialManager.decrypt(value)
+    } catch (error) {
+      logger.logError('system', 'Failed to decrypt backup config value', error as Error)
+      return value
+    }
+  }
+
+  private restoreSecretForImport(value: string): string | undefined {
+    if (!value || value === this.REDACTED_SECRET) {
+      return undefined
+    }
+
+    if (!credentialManager.isEncrypted(value)) {
+      return credentialManager.decryptLegacyUnprefixed(value) ?? value
+    }
+
+    try {
+      return credentialManager.decrypt(value)
+    } catch (error) {
+      logger.logError(
+        'system',
+        'Skipped encrypted backup config secret from another machine',
+        error as Error
+      )
+      return undefined
+    }
+  }
+
+  /**
    * 创建备份
    */
-  async createBackup(password: string, filePath?: string, isAutoBackup: boolean = false): Promise<string> {
+  async createBackup(
+    password: string,
+    filePath?: string,
+    isAutoBackup: boolean = false
+  ): Promise<string> {
     try {
-      // 动态导入 quickCommandManager
-      const { quickCommandManager } = await import('./QuickCommandManager')
-      
-      // 收集所有数据
-      // 收集所有数据
-      // SessionManager 内存中的密码已经是明文，直接使用即可
-      const sessions = sessionManager.getAllSessions().map(s => {
-        const plain = { ...s }
-        return plain
-      })
-
-      const backupData: BackupData = {
-        version: '0.2.0', // 升级版本号以支持更多数据类型
-        timestamp: new Date().toISOString(),
-        sessions,
-        sessionGroups: sessionManager.getAllGroups(),
-        snippets: snippetManager.getAll(),
-        commandHistory: commandHistoryManager.getAll(),
-        sshKeys: await this.collectSSHKeysWithPrivateKeys(),
-        portForwards: portForwardManager.getAllForwards(),
-        portForwardTemplates: portForwardManager.getAllTemplates(),
-        sessionTemplates: sessionTemplateManager.getAll(),
-        scheduledTasks: taskSchedulerManager.getAll(),
-        workflows: workflowManager.getAll(),
-        settings: await this.getAppSettings(),
-        aiConfig: await this.collectAIConfig(), // 收集 AI 配置
-        aiChatHistory: await this.collectAIChatHistory(), // 收集 AI 聊天历史
-        aiTerminalChatHistory: await this.collectAITerminalChatHistory(), // 收集终端 AI 聊天历史
-        // 新增数据
-        connectionStats: connectionStatsManager.getAll(), // 连接统计
-        auditLogs: auditLogManager.getAll(), // 审计日志
-        transferRecords: transferRecordManager.getAllRecords(), // 传输记录
-        lockConfig: sessionLockManager.getConfig(), // 锁定配置（不包含密码）
-        quickCommands: quickCommandManager.getAll() // 快捷命令
-      }
+      const backupData = await this.collectBackupData({ includeLocalConfigs: true })
 
       // 序列化数据
       const jsonData = JSON.stringify(backupData, null, 2)
@@ -301,19 +391,24 @@ export class BackupManager {
    */
   private async collectAIConfig(): Promise<any | null> {
     try {
-      const aiConfigPath = join(app.getPath('userData'), 'ai-config.json')
-      try {
-        const data = await fs.readFile(aiConfigPath, 'utf-8')
-        return JSON.parse(data)
-      } catch (error: any) {
-        if (error.code === 'ENOENT') {
-          // 配置文件不存在，返回 null
-          return null
-        }
-        throw error
-      }
+      const { aiManager } = await import('./AIManager')
+      return aiManager.exportForBackup()
     } catch (error) {
       logger.logError('system', 'Failed to collect AI config', error as Error)
+      return null
+    }
+  }
+
+  /**
+   * 收集同步配置。配置会进入整体加密的备份包；导出时去掉易变同步状态，
+   * 避免 lastSyncChecksum 影响云同步的稳定校验和。
+   */
+  private async collectSyncConfig(): Promise<any | null> {
+    try {
+      const { syncManager } = await import('./SyncManager')
+      return syncManager.exportConfigForBackup()
+    } catch (error) {
+      logger.logError('system', 'Failed to collect sync config', error as Error)
       return null
     }
   }
@@ -401,7 +496,7 @@ export class BackupManager {
           keysWithContent.push({
             ...key,
             privateKeyContent, // 添加私钥内容
-            publicKeyContent   // 添加公钥内容
+            publicKeyContent // 添加公钥内容
           })
         } catch (error) {
           logger.logError('system', `Failed to read SSH key file: ${key.name}`, error as Error)
@@ -471,25 +566,30 @@ export class BackupManager {
   /**
    * 应用备份数据
    */
-  async applyBackup(backupData: BackupData, options: {
-    restoreSessions: boolean
-    restoreSnippets: boolean
-    restoreSettings: boolean
-    restoreCommandHistory?: boolean
-    restoreSSHKeys?: boolean
-    restorePortForwards?: boolean
-    restoreSessionTemplates?: boolean
-    restoreScheduledTasks?: boolean
-    restoreWorkflows?: boolean
-    restoreAIConfig?: boolean
-    restoreAIChatHistory?: boolean
-    // 新增选项
-    restoreConnectionStats?: boolean
-    restoreAuditLogs?: boolean
-    restoreTransferRecords?: boolean
-    restoreLockConfig?: boolean
-    restoreQuickCommands?: boolean
-  }): Promise<void> {
+  async applyBackup(
+    backupData: BackupData,
+    options: {
+      restoreSessions: boolean
+      restoreSnippets: boolean
+      restoreSettings: boolean
+      restoreBackupConfig?: boolean
+      restoreSyncConfig?: boolean
+      restoreCommandHistory?: boolean
+      restoreSSHKeys?: boolean
+      restorePortForwards?: boolean
+      restoreSessionTemplates?: boolean
+      restoreScheduledTasks?: boolean
+      restoreWorkflows?: boolean
+      restoreAIConfig?: boolean
+      restoreAIChatHistory?: boolean
+      // 新增选项
+      restoreConnectionStats?: boolean
+      restoreAuditLogs?: boolean
+      restoreTransferRecords?: boolean
+      restoreLockConfig?: boolean
+      restoreQuickCommands?: boolean
+    }
+  ): Promise<void> {
     try {
       // 恢复会话（先恢复分组，再恢复会话，确保 groupId 能正确匹配）
       if (options.restoreSessions) {
@@ -498,8 +598,8 @@ export class BackupManager {
           const currentGroups = sessionManager.getAllGroups()
           for (const group of backupData.sessionGroups) {
             try {
-              const existingById = currentGroups.find(g => g.id === group.id)
-              const existingByName = currentGroups.find(g => g.name === group.name)
+              const existingById = currentGroups.find((g) => g.id === group.id)
+              const existingByName = currentGroups.find((g) => g.name === group.name)
 
               if (existingById) {
                 // ID 已存在，确保名称一致
@@ -510,7 +610,9 @@ export class BackupManager {
                 // 名称存在但 ID 不同：用原始 ID 重建，迁移旧分组下的会话
                 const oldId = existingByName.id
                 await sessionManager.createGroup(group.name + '__migrating__', group.id)
-                const sessionsToMigrate = sessionManager.getAllSessions().filter(s => (s as any).group === oldId)
+                const sessionsToMigrate = sessionManager
+                  .getAllSessions()
+                  .filter((s) => (s as any).group === oldId)
                 for (const s of sessionsToMigrate) {
                   await sessionManager.updateSession(s.id, { group: group.id })
                 }
@@ -535,19 +637,27 @@ export class BackupManager {
               // 如果它之前被错误处理成为密文，由 credentialManager 处理是不安全的，因此直接当做明文使用
               const cleanSession = { ...session }
 
-              const existing = currentSessions.find(s =>
-                s.id === session.id ||
-                (s.name === session.name && s.host === session.host && s.username === session.username)
+              const existing = currentSessions.find(
+                (s) =>
+                  s.id === session.id ||
+                  (s.name === session.name &&
+                    s.host === session.host &&
+                    s.username === session.username)
               )
 
               if (existing) {
-                const { id, ...updates } = cleanSession
+                const updates = { ...cleanSession }
+                delete updates.id
                 await sessionManager.updateSession(existing.id, updates)
               } else {
                 await sessionManager.createSession(cleanSession)
               }
             } catch (error) {
-              logger.logError('system', `Failed to restore session: ${session.name}`, error as Error)
+              logger.logError(
+                'system',
+                `Failed to restore session: ${session.name}`,
+                error as Error
+              )
             }
           }
         }
@@ -559,12 +669,13 @@ export class BackupManager {
         for (const snippet of backupData.snippets) {
           try {
             // 检查是否存在相同片段（通过 ID 或 名称 判断）
-            const existing = currentSnippets.find(s =>
-              s.id === snippet.id || s.name === snippet.name
+            const existing = currentSnippets.find(
+              (s) => s.id === snippet.id || s.name === snippet.name
             )
 
             if (existing) {
-              const { id, ...updates } = snippet
+              const updates = { ...snippet }
+              delete updates.id
               await snippetManager.update(existing.id, updates)
             } else {
               await snippetManager.create(snippet)
@@ -590,7 +701,9 @@ export class BackupManager {
       if (options.restoreSSHKeys && backupData.sshKeys) {
         for (const key of backupData.sshKeys) {
           try {
-            const existing = sshKeyManager.getAllKeys().find(k => k.id === key.id || k.name === key.name)
+            const existing = sshKeyManager
+              .getAllKeys()
+              .find((k) => k.id === key.id || k.name === key.name)
 
             // 如果备份中包含私钥内容，恢复完整的密钥
             if (key.privateKeyContent) {
@@ -608,11 +721,17 @@ export class BackupManager {
                 comment: key.comment
               })
 
-              logger.logInfo('system', `SSH key "${key.name}" restored successfully with private key`)
+              logger.logInfo(
+                'system',
+                `SSH key "${key.name}" restored successfully with private key`
+              )
             } else {
               // 如果没有私钥内容（旧版本备份），只恢复元数据
               if (!existing) {
-                logger.logInfo('system', `SSH key "${key.name}" metadata restored, but key file needs manual import`)
+                logger.logInfo(
+                  'system',
+                  `SSH key "${key.name}" metadata restored, but key file needs manual import`
+                )
               }
             }
           } catch (error) {
@@ -625,7 +744,7 @@ export class BackupManager {
       if (options.restorePortForwards && backupData.portForwards) {
         for (const forward of backupData.portForwards) {
           try {
-            const existing = portForwardManager.getAllForwards().find(f => f.id === forward.id)
+            const existing = portForwardManager.getAllForwards().find((f) => f.id === forward.id)
             if (existing) {
               await portForwardManager.updateForward(existing.id, forward)
             } else {
@@ -640,14 +759,20 @@ export class BackupManager {
         if (backupData.portForwardTemplates) {
           for (const template of backupData.portForwardTemplates) {
             try {
-              const existing = portForwardManager.getAllTemplates().find(t => t.id === template.id || t.name === template.name)
+              const existing = portForwardManager
+                .getAllTemplates()
+                .find((t) => t.id === template.id || t.name === template.name)
               if (existing) {
                 await portForwardManager.updateTemplate(existing.id, template)
               } else {
                 await portForwardManager.createTemplate(template)
               }
             } catch (error) {
-              logger.logError('system', `Failed to restore port forward template: ${template.name}`, error as Error)
+              logger.logError(
+                'system',
+                `Failed to restore port forward template: ${template.name}`,
+                error as Error
+              )
             }
           }
         }
@@ -657,14 +782,20 @@ export class BackupManager {
       if (options.restoreSessionTemplates && backupData.sessionTemplates) {
         for (const template of backupData.sessionTemplates) {
           try {
-            const existing = sessionTemplateManager.getAll().find(t => t.id === template.id || t.name === template.name)
+            const existing = sessionTemplateManager
+              .getAll()
+              .find((t) => t.id === template.id || t.name === template.name)
             if (existing) {
               await sessionTemplateManager.updateTemplate(existing.id, template)
             } else {
               await sessionTemplateManager.createTemplate(template)
             }
           } catch (error) {
-            logger.logError('system', `Failed to restore session template: ${template.name}`, error as Error)
+            logger.logError(
+              'system',
+              `Failed to restore session template: ${template.name}`,
+              error as Error
+            )
           }
         }
       }
@@ -673,14 +804,20 @@ export class BackupManager {
       if (options.restoreScheduledTasks && backupData.scheduledTasks) {
         for (const task of backupData.scheduledTasks) {
           try {
-            const existing = taskSchedulerManager.getAll().find(t => t.id === task.id || t.name === task.name)
+            const existing = taskSchedulerManager
+              .getAll()
+              .find((t) => t.id === task.id || t.name === task.name)
             if (existing) {
               taskSchedulerManager.update(existing.id, task)
             } else {
               taskSchedulerManager.create(task)
             }
           } catch (error) {
-            logger.logError('system', `Failed to restore scheduled task: ${task.name}`, error as Error)
+            logger.logError(
+              'system',
+              `Failed to restore scheduled task: ${task.name}`,
+              error as Error
+            )
           }
         }
       }
@@ -689,14 +826,20 @@ export class BackupManager {
       if (options.restoreWorkflows && backupData.workflows) {
         for (const workflow of backupData.workflows) {
           try {
-            const existing = workflowManager.getAll().find(w => w.id === workflow.id || w.name === workflow.name)
+            const existing = workflowManager
+              .getAll()
+              .find((w) => w.id === workflow.id || w.name === workflow.name)
             if (existing) {
               workflowManager.update(existing.id, workflow)
             } else {
               workflowManager.create(workflow)
             }
           } catch (error) {
-            logger.logError('system', `Failed to restore workflow: ${workflow.name}`, error as Error)
+            logger.logError(
+              'system',
+              `Failed to restore workflow: ${workflow.name}`,
+              error as Error
+            )
           }
         }
       }
@@ -711,18 +854,32 @@ export class BackupManager {
         }
       }
 
+      // 恢复备份配置
+      if (options.restoreBackupConfig && backupData.backupConfig) {
+        try {
+          await this.applyConfigFromBackup(backupData.backupConfig)
+          logger.logInfo('system', 'Backup config restored successfully')
+        } catch (error) {
+          logger.logError('system', 'Failed to restore backup config', error as Error)
+        }
+      }
+
+      // 恢复同步配置
+      if (options.restoreSyncConfig && backupData.syncConfig) {
+        try {
+          const { syncManager } = await import('./SyncManager')
+          await syncManager.applyConfigFromBackup(backupData.syncConfig)
+          logger.logInfo('system', 'Sync config restored successfully')
+        } catch (error) {
+          logger.logError('system', 'Failed to restore sync config', error as Error)
+        }
+      }
+
       // 恢复 AI 配置
       if (options.restoreAIConfig && backupData.aiConfig) {
         try {
-          const aiConfigPath = join(app.getPath('userData'), 'ai-config.json')
-          await fs.writeFile(aiConfigPath, JSON.stringify(backupData.aiConfig, null, 2), 'utf-8')
-          // 写入文件后，让 AIManager 重新从文件加载，更新内存中的数据
-          try {
-            const { aiManager } = await import('./AIManager')
-            await aiManager.reloadConfig()
-          } catch (reloadError) {
-            logger.logError('system', 'Failed to reload AI config into memory', reloadError as Error)
-          }
+          const { aiManager } = await import('./AIManager')
+          await aiManager.updateAll(backupData.aiConfig)
           logger.logInfo('system', 'AI config restored successfully')
         } catch (error) {
           logger.logError('system', 'Failed to restore AI config', error as Error)
@@ -736,7 +893,11 @@ export class BackupManager {
       if (options.restoreAIChatHistory && backupData.aiChatHistory) {
         try {
           const chatHistoryPath = join(app.getPath('userData'), 'ai-chat-history.json')
-          await fs.writeFile(chatHistoryPath, JSON.stringify(backupData.aiChatHistory, null, 2), 'utf-8')
+          await fs.writeFile(
+            chatHistoryPath,
+            JSON.stringify(backupData.aiChatHistory, null, 2),
+            'utf-8'
+          )
           logger.logInfo('system', 'AI chat history restored successfully')
         } catch (error) {
           logger.logError('system', 'Failed to restore AI chat history', error as Error)
@@ -752,15 +913,18 @@ export class BackupManager {
           const historyDir = join(app.getPath('userData'), 'ai-terminal-history')
           // 确保目录存在
           await fs.mkdir(historyDir, { recursive: true })
-          
+
           // 恢复每个终端的聊天历史文件
           for (const [filename, messages] of Object.entries(backupData.aiTerminalChatHistory)) {
             const filePath = join(historyDir, filename)
             await fs.writeFile(filePath, JSON.stringify(messages, null, 2), 'utf-8')
           }
-          
+
           const fileCount = Object.keys(backupData.aiTerminalChatHistory).length
-          logger.logInfo('system', `AI terminal chat history restored successfully (${fileCount} files)`)
+          logger.logInfo(
+            'system',
+            `AI terminal chat history restored successfully (${fileCount} files)`
+          )
         } catch (error) {
           logger.logError('system', 'Failed to restore AI terminal chat history', error as Error)
         }
@@ -771,13 +935,16 @@ export class BackupManager {
         try {
           for (const stat of backupData.connectionStats) {
             // ConnectionStatsManager 使用 BaseManager，直接添加记录
-            const existing = connectionStatsManager.getAll().find(s => s.id === stat.id)
+            const existing = connectionStatsManager.getAll().find((s) => s.id === stat.id)
             if (!existing) {
               // 使用内部方法添加记录
               connectionStatsManager.create(stat)
             }
           }
-          logger.logInfo('system', `Connection stats restored: ${backupData.connectionStats.length} records`)
+          logger.logInfo(
+            'system',
+            `Connection stats restored: ${backupData.connectionStats.length} records`
+          )
         } catch (error) {
           logger.logError('system', 'Failed to restore connection stats', error as Error)
         }
@@ -787,7 +954,7 @@ export class BackupManager {
       if (options.restoreAuditLogs && backupData.auditLogs) {
         try {
           for (const log of backupData.auditLogs) {
-            const existing = auditLogManager.getAll().find(l => l.id === log.id)
+            const existing = auditLogManager.getAll().find((l) => l.id === log.id)
             if (!existing) {
               auditLogManager.create(log)
             }
@@ -802,14 +969,21 @@ export class BackupManager {
       if (options.restoreTransferRecords && backupData.transferRecords) {
         try {
           for (const record of backupData.transferRecords) {
-            const existing = transferRecordManager.getAllRecords().find((r: any) => r.id === record.id)
+            const existing = transferRecordManager
+              .getAllRecords()
+              .find((r: any) => r.id === record.id)
             if (!existing) {
               // 移除时间戳字段，让 createRecord 自动生成新的时间戳，保留原始 id
-              const { createdAt, updatedAt, ...recordWithoutTimestamps } = record
+              const recordWithoutTimestamps = { ...record }
+              delete recordWithoutTimestamps.createdAt
+              delete recordWithoutTimestamps.updatedAt
               await transferRecordManager.createRecord(recordWithoutTimestamps)
             }
           }
-          logger.logInfo('system', `Transfer records restored: ${backupData.transferRecords.length} records`)
+          logger.logInfo(
+            'system',
+            `Transfer records restored: ${backupData.transferRecords.length} records`
+          )
         } catch (error) {
           logger.logError('system', 'Failed to restore transfer records', error as Error)
         }
@@ -836,9 +1010,9 @@ export class BackupManager {
         try {
           const { quickCommandManager } = await import('./QuickCommandManager')
           const currentCommands = quickCommandManager.getAll()
-          
+
           for (const cmd of backupData.quickCommands) {
-            const existing = currentCommands.find(c => c.id === cmd.id || c.name === cmd.name)
+            const existing = currentCommands.find((c) => c.id === cmd.id || c.name === cmd.name)
             if (existing) {
               await quickCommandManager.update(existing.id, {
                 command: cmd.command,
@@ -857,7 +1031,10 @@ export class BackupManager {
               })
             }
           }
-          logger.logInfo('system', `Quick commands restored: ${backupData.quickCommands.length} records`)
+          logger.logInfo(
+            'system',
+            `Quick commands restored: ${backupData.quickCommands.length} records`
+          )
         } catch (error) {
           logger.logError('system', 'Failed to restore quick commands', error as Error)
         }
@@ -953,7 +1130,7 @@ export class BackupManager {
 
     // 检查是否需要立即执行备份（距离上次备份超过间隔时间）
     const shouldBackupNow = this.shouldRunBackupNow()
-    
+
     if (shouldBackupNow) {
       // 立即执行一次备份
       this.runAutoBackup()
@@ -982,7 +1159,7 @@ export class BackupManager {
     const now = Date.now()
     const intervalMs = this.config.interval * 60 * 60 * 1000
 
-    return (now - lastBackupTime) >= intervalMs
+    return now - lastBackupTime >= intervalMs
   }
 
   /**
@@ -1001,11 +1178,11 @@ export class BackupManager {
       }
 
       await this.createBackup(this.config.autoBackupPassword, undefined, true)
-      
+
       // 更新最后备份时间
       this.config.lastBackup = new Date().toISOString()
       await this.saveConfig()
-      
+
       try {
         logger.logInfo('system', 'Auto backup completed')
       } catch (error) {

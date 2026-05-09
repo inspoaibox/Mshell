@@ -17,6 +17,9 @@ export interface SSHConnectionOptions {
   keepaliveInterval?: number
   keepaliveCountMax?: number
   readyTimeout?: number
+  autoReconnect?: boolean
+  maxReconnectAttempts?: number
+  reconnectInterval?: number
   sessionName?: string
   proxyJump?: ProxyJumpConfig
   proxy?: ProxyConfig
@@ -105,8 +108,11 @@ export class SSHConnectionManager extends EventEmitter {
         socket,
         lastActivity: new Date(),
         reconnectAttempts: 0,
-        maxReconnectAttempts: this.DEFAULT_MAX_RECONNECT_ATTEMPTS,
-        reconnectInterval: this.DEFAULT_RECONNECT_INTERVAL
+        maxReconnectAttempts:
+          options.autoReconnect === false
+            ? 0
+            : (options.maxReconnectAttempts ?? this.DEFAULT_MAX_RECONNECT_ATTEMPTS),
+        reconnectInterval: options.reconnectInterval ?? this.DEFAULT_RECONNECT_INTERVAL
       }
 
       this.connections.set(id, connection)
@@ -129,16 +135,16 @@ export class SSHConnectionManager extends EventEmitter {
         // Open shell with window and options
         const window = {
           term: 'xterm-256color',
-          cols: 220,  // 使用较大的初始列数，避免服务端按80列折行导致显示错位
-          rows: 50,   // 使用较大的初始行数
+          cols: 220, // 使用较大的初始列数，避免服务端按80列折行导致显示错位
+          rows: 50, // 使用较大的初始行数
           modes: {
             ECHO: 1,
-            ICANON: 1,  // 开启规范模式，避免特殊字符处理异常
+            ICANON: 1, // 开启规范模式，避免特殊字符处理异常
             ISIG: 1,
             ICRNL: 1,
             ONLCR: 1,
             OPOST: 1,
-            VERASE: 127  // 0x7F (DEL) - 匹配 xterm.js 发送的 Backspace 字符
+            VERASE: 127 // 0x7F (DEL) - 匹配 xterm.js 发送的 Backspace 字符
           }
         }
 
@@ -183,13 +189,15 @@ export class SSHConnectionManager extends EventEmitter {
           this.startSessionMonitor(id)
 
           // 获取 shell 的 PID（用于后续获取当前目录）
-          this.getShellPid(id).then(pid => {
-            if (pid) {
-              connection.shellPid = pid
-            }
-          }).catch(() => {
-            // 忽略错误，PID 获取失败不影响正常使用
-          })
+          this.getShellPid(id)
+            .then((pid) => {
+              if (pid) {
+                connection.shellPid = pid
+              }
+            })
+            .catch(() => {
+              // 忽略错误，PID 获取失败不影响正常使用
+            })
 
           resolve()
         })
@@ -221,10 +229,11 @@ export class SSHConnectionManager extends EventEmitter {
       // 但 currently frontend might not pass keepalive correctly via options if it relies on global settings
       // So we merge logic: Priority: Options > Settings > Defaults
 
-      const keepaliveInterval = options.keepaliveInterval ??
+      const keepaliveInterval =
+        options.keepaliveInterval ??
         (settings.ssh.keepalive ? settings.ssh.keepaliveInterval * 1000 : 0)
 
-      const readyTimeout = options.readyTimeout ?? (settings.ssh.timeout * 1000)
+      const readyTimeout = options.readyTimeout ?? settings.ssh.timeout * 1000
 
       // 连接配置
       const connectConfig: any = {
@@ -247,7 +256,10 @@ export class SSHConnectionManager extends EventEmitter {
       }
 
       // 如果使用了代理或跳板机，socket 已经是连接状态，不需要再次 connect
-      if ((options.proxyJump && options.proxyJump.enabled) || (options.proxy && options.proxy.enabled)) {
+      if (
+        (options.proxyJump && options.proxyJump.enabled) ||
+        (options.proxy && options.proxy.enabled)
+      ) {
         client.connect(connectConfig)
       } else {
         // 如果是新创建的 socket（未使用代理/跳板机），需要手动连接
@@ -385,7 +397,7 @@ export class SSHConnectionManager extends EventEmitter {
       // 方法1: 如果有 shell PID，通过 /proc/<pid>/cwd 获取
       if (connection.shellPid) {
         const output = await this.executeCommand(
-          id, 
+          id,
           `readlink /proc/${connection.shellPid}/cwd 2>/dev/null || pwd`,
           3000
         )
@@ -456,7 +468,7 @@ export class SSHConnectionManager extends EventEmitter {
               `会话已超时 (闲置超过 ${timeoutMinutes} 分钟)`
             )
             this.emit('error', id, appError.userMessage)
-            this.disconnect(id).catch(err => {
+            this.disconnect(id).catch((err) => {
               ErrorHandler.handle(err, `Disconnect timeout session ${id}`)
             })
           }
@@ -492,6 +504,11 @@ export class SSHConnectionManager extends EventEmitter {
     const connection = this.connections.get(id)
     if (!connection) return
 
+    if (!connection.maxReconnectAttempts || connection.maxReconnectAttempts <= 0) {
+      console.log(`Reconnect disabled for session ${id}`)
+      return
+    }
+
     // 检查是否超过最大重连次数
     if (connection.reconnectAttempts! >= connection.maxReconnectAttempts!) {
       console.log(`Max reconnect attempts reached for session ${id}`)
@@ -507,7 +524,9 @@ export class SSHConnectionManager extends EventEmitter {
     connection.status = 'reconnecting'
     connection.reconnectAttempts = (connection.reconnectAttempts || 0) + 1
 
-    console.log(`Attempting to reconnect session ${id} (attempt ${connection.reconnectAttempts}/${connection.maxReconnectAttempts})`)
+    console.log(
+      `Attempting to reconnect session ${id} (attempt ${connection.reconnectAttempts}/${connection.maxReconnectAttempts})`
+    )
     this.emit('reconnecting', id, connection.reconnectAttempts, connection.maxReconnectAttempts)
 
     // 延迟重连
@@ -541,7 +560,10 @@ export class SSHConnectionManager extends EventEmitter {
         console.log(`Successfully reconnected session ${id}`)
         this.emit('reconnected', id)
       } catch (error) {
-        console.error(`Reconnect attempt ${connection.reconnectAttempts} failed for session ${id}:`, error)
+        console.error(
+          `Reconnect attempt ${connection.reconnectAttempts} failed for session ${id}:`,
+          error
+        )
 
         // 重新放回旧连接对象以便继续重试
         if (!this.connections.has(id)) {

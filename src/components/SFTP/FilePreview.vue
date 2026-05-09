@@ -5,16 +5,28 @@
     width="80%"
     :close-on-click-modal="false"
     @close="handleClose"
+    @keydown.ctrl.s.prevent="handleSave"
+    @keydown.meta.s.prevent="handleSave"
   >
     <div class="file-preview">
       <!-- 文本文件预览 -->
       <div v-if="isTextFile" class="text-preview">
         <div class="preview-toolbar">
           <el-button-group>
-            <el-button :icon="View" size="small" :type="mode === 'view' ? 'primary' : ''" @click="mode = 'view'">
+            <el-button
+              :icon="View"
+              size="small"
+              :type="mode === 'view' ? 'primary' : ''"
+              @click="mode = 'view'"
+            >
               查看
             </el-button>
-            <el-button :icon="Edit" size="small" :type="mode === 'edit' ? 'primary' : ''" @click="mode = 'edit'">
+            <el-button
+              :icon="Edit"
+              size="small"
+              :type="mode === 'edit' ? 'primary' : ''"
+              @click="mode = 'edit'"
+            >
               编辑
             </el-button>
           </el-button-group>
@@ -62,12 +74,15 @@
 
     <template #footer>
       <el-button @click="handleClose">关闭</el-button>
-      <el-button v-if="isTextFile && mode === 'edit'" type="primary" @click="handleSave" :loading="saving">
+      <el-button
+        v-if="isTextFile && mode === 'edit'"
+        type="primary"
+        @click="handleSave"
+        :loading="saving"
+      >
         保存
       </el-button>
-      <el-button type="success" @click="handleDownload">
-        下载
-      </el-button>
+      <el-button type="success" @click="handleDownload"> 下载 </el-button>
     </template>
   </el-dialog>
 </template>
@@ -112,9 +127,35 @@ const isTextFile = computed(() => {
   if (!props.file) return false
   const ext = props.file.name.split('.').pop()?.toLowerCase()
   const textExtensions = [
-    'txt', 'md', 'json', 'xml', 'html', 'css', 'js', 'ts', 'jsx', 'tsx',
-    'py', 'java', 'c', 'cpp', 'h', 'hpp', 'sh', 'bash', 'yml', 'yaml',
-    'conf', 'config', 'ini', 'log', 'sql', 'php', 'rb', 'go', 'rs'
+    'txt',
+    'md',
+    'json',
+    'xml',
+    'html',
+    'css',
+    'js',
+    'ts',
+    'jsx',
+    'tsx',
+    'py',
+    'java',
+    'c',
+    'cpp',
+    'h',
+    'hpp',
+    'sh',
+    'bash',
+    'yml',
+    'yaml',
+    'conf',
+    'config',
+    'ini',
+    'log',
+    'sql',
+    'php',
+    'rb',
+    'go',
+    'rs'
   ]
   return textExtensions.includes(ext || '')
 })
@@ -130,25 +171,25 @@ const isImageFile = computed(() => {
 const detectLanguage = (filename: string): string => {
   const ext = filename.split('.').pop()?.toLowerCase()
   const languageMap: Record<string, string> = {
-    'js': 'javascript',
-    'ts': 'typescript',
-    'jsx': 'javascript',
-    'tsx': 'typescript',
-    'py': 'python',
-    'java': 'java',
-    'c': 'cpp',
-    'cpp': 'cpp',
-    'h': 'cpp',
-    'hpp': 'cpp',
-    'sh': 'shell',
-    'bash': 'shell',
-    'json': 'json',
-    'xml': 'xml',
-    'html': 'html',
-    'css': 'css',
-    'md': 'markdown',
-    'yml': 'yaml',
-    'yaml': 'yaml'
+    js: 'javascript',
+    ts: 'typescript',
+    jsx: 'javascript',
+    tsx: 'typescript',
+    py: 'python',
+    java: 'java',
+    c: 'cpp',
+    cpp: 'cpp',
+    h: 'cpp',
+    hpp: 'cpp',
+    sh: 'shell',
+    bash: 'shell',
+    json: 'json',
+    xml: 'xml',
+    html: 'html',
+    css: 'css',
+    md: 'markdown',
+    yml: 'yaml',
+    yaml: 'yaml'
   }
   return languageMap[ext || ''] || 'plaintext'
 }
@@ -161,7 +202,7 @@ const loadFile = async () => {
     if (isTextFile.value) {
       const result = await window.electronAPI.sftp.readFile(props.connectionId, props.file.path)
       if (result.success) {
-        content.value = result.data
+        content.value = result.data || ''
         if (language.value === 'auto') {
           language.value = detectLanguage(props.file.name)
         }
@@ -169,10 +210,12 @@ const loadFile = async () => {
         ElMessage.error(`读取文件失败: ${result.error}`)
       }
     } else if (isImageFile.value) {
-      const result = await window.electronAPI.sftp.readFileBuffer(props.connectionId, props.file.path)
+      const result = await window.electronAPI.sftp.readFileBuffer(
+        props.connectionId,
+        props.file.path
+      )
       if (result.success) {
-        // 将 buffer 转换为 base64 URL
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(result.data)))
+        const base64 = result.data || ''
         const ext = props.file.name.split('.').pop()?.toLowerCase()
         imageUrl.value = `data:image/${ext};base64,${base64}`
       } else {
@@ -186,7 +229,7 @@ const loadFile = async () => {
 
 // 保存文件
 const handleSave = async () => {
-  if (!props.file || !props.connectionId) return
+  if (!props.file || !props.connectionId || mode.value !== 'edit' || saving.value) return
 
   saving.value = true
   try {
@@ -195,7 +238,7 @@ const handleSave = async () => {
       props.file.path,
       content.value
     )
-    
+
     if (result.success) {
       ElMessage.success('文件已保存')
       mode.value = 'view'
@@ -235,11 +278,15 @@ const formatSize = (bytes: number): string => {
 }
 
 // 监听文件变化
-watch(() => props.file, (newFile) => {
-  if (newFile && visible.value) {
-    loadFile()
-  }
-}, { immediate: true })
+watch(
+  () => props.file,
+  (newFile) => {
+    if (newFile && visible.value) {
+      loadFile()
+    }
+  },
+  { immediate: true }
+)
 
 watch(visible, (newVisible) => {
   if (newVisible && props.file) {

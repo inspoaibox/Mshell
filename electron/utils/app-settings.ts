@@ -4,7 +4,7 @@ import { app } from 'electron'
 
 // 快捷键配置
 export interface ShortcutConfig {
-  key: string  // 空字符串表示未配置/已清除
+  key: string // 空字符串表示未配置/已清除
   ctrl?: boolean
   alt?: boolean
   shift?: boolean
@@ -27,6 +27,7 @@ export interface AppSettings {
     cursorStyle: 'block' | 'underline' | 'bar'
     cursorBlink: boolean
     rendererType: 'auto' | 'webgl' | 'canvas' | 'dom'
+    copyOnSelect?: boolean
   }
   sftp: {
     maxConcurrentTransfers: number
@@ -38,6 +39,14 @@ export interface AppSettings {
     timeout: number
     keepalive: boolean
     keepaliveInterval: number
+    autoReconnect?: boolean
+    maxReconnectAttempts?: number
+    reconnectInterval?: number
+    commandAutocomplete?: boolean
+    aiCommandSuggest?: boolean
+    riskWarning?: boolean
+    commandCorrection?: boolean
+    commandExplain?: boolean
   }
   security: {
     savePasswords: boolean
@@ -79,7 +88,8 @@ class AppSettingsManager {
         scrollback: 10000,
         cursorStyle: 'block',
         cursorBlink: true,
-        rendererType: 'auto'
+        rendererType: 'auto',
+        copyOnSelect: false
       },
       sftp: {
         maxConcurrentTransfers: 3,
@@ -91,6 +101,9 @@ class AppSettingsManager {
         timeout: 30,
         keepalive: true,
         keepaliveInterval: 60,
+        autoReconnect: true,
+        maxReconnectAttempts: 3,
+        reconnectInterval: 5,
         commandAutocomplete: true,
         aiCommandSuggest: true,
         riskWarning: true,
@@ -114,7 +127,17 @@ class AppSettingsManager {
       if (fs.existsSync(this.settingsFile)) {
         const data = fs.readFileSync(this.settingsFile, 'utf-8')
         const loaded = JSON.parse(data)
-        this.settings = { ...this.settings, ...loaded }
+        this.settings = {
+          ...this.settings,
+          ...loaded,
+          general: { ...this.settings.general, ...loaded.general },
+          terminal: { ...this.settings.terminal, ...loaded.terminal },
+          sftp: { ...this.settings.sftp, ...loaded.sftp },
+          ssh: { ...this.settings.ssh, ...loaded.ssh },
+          security: { ...this.settings.security, ...loaded.security },
+          updates: { ...this.settings.updates, ...loaded.updates },
+          shortcuts: loaded.shortcuts ?? this.settings.shortcuts
+        }
       }
     } catch (error) {
       console.error('Failed to load settings:', error)
@@ -175,11 +198,13 @@ class AppSettingsManager {
   matchShortcut(id: string, key: string, ctrl: boolean, alt: boolean, shift: boolean): boolean {
     const shortcut = this.getShortcut(id)
     if (!shortcut) return false
-    
-    return shortcut.key.toLowerCase() === key.toLowerCase() &&
-           !!shortcut.ctrl === ctrl &&
-           !!shortcut.alt === alt &&
-           !!shortcut.shift === shift
+
+    return (
+      shortcut.key.toLowerCase() === key.toLowerCase() &&
+      !!shortcut.ctrl === ctrl &&
+      !!shortcut.alt === alt &&
+      !!shortcut.shift === shift
+    )
   }
 
   async resetToDefaults(): Promise<void> {

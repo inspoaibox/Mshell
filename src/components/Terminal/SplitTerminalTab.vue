@@ -13,6 +13,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import SplitTerminalContainer from './SplitTerminalContainer.vue'
+import { terminalManager } from '@/utils/terminal-manager'
 import type { SessionConfig } from '@/types/session'
 
 interface Props {
@@ -33,12 +34,12 @@ const activeTerminalId = ref<string>('')
 // 处理新终端创建
 const handleTerminalCreate = async (terminalId: string) => {
   console.log(`[SplitTerminalTab] Creating terminal: ${terminalId}`)
-  
+
   try {
     // 获取 SSH 设置
     const settings = await window.electronAPI.settings.get()
     const sshSettings = settings?.ssh || {}
-    
+
     // 连接到 SSH（每个面板使用独立的连接）
     // 注意：privateKeyId 会在后端 ssh-handlers.ts 中处理
     // 优先使用 privateKeyId，如果没有则使用 privateKeyPath 或 privateKey
@@ -47,22 +48,35 @@ const handleTerminalCreate = async (terminalId: string) => {
       port: props.session.port,
       username: props.session.username,
       password: props.session.password,
-      privateKey: props.session.privateKeyId ? undefined : (props.session.privateKeyPath || props.session.privateKey),
+      privateKey: props.session.privateKeyId
+        ? undefined
+        : props.session.privateKeyPath || props.session.privateKey,
       privateKeyId: props.session.privateKeyId,
       passphrase: props.session.passphrase,
       // 应用 SSH 设置
       readyTimeout: (sshSettings.timeout || 30) * 1000,
-      keepaliveInterval: sshSettings.keepalive ? (sshSettings.keepaliveInterval || 60) * 1000 : undefined,
+      keepaliveInterval: sshSettings.keepalive
+        ? (sshSettings.keepaliveInterval || 60) * 1000
+        : undefined,
       keepaliveCountMax: sshSettings.keepalive ? 3 : undefined,
+      autoReconnect: sshSettings.autoReconnect !== false,
+      maxReconnectAttempts:
+        sshSettings.autoReconnect === false ? 0 : sshSettings.maxReconnectAttempts || 3,
+      reconnectInterval: (sshSettings.reconnectInterval || 5) * 1000,
       sessionName: props.session.name,
       // 跳板机和代理配置 - 序列化以便 IPC 传输
-      proxyJump: props.session.proxyJump ? JSON.parse(JSON.stringify(props.session.proxyJump)) : undefined,
+      proxyJump: props.session.proxyJump
+        ? JSON.parse(JSON.stringify(props.session.proxyJump))
+        : undefined,
       proxy: props.session.proxy ? JSON.parse(JSON.stringify(props.session.proxy)) : undefined
     })
 
     if (result.success) {
       console.log(`[SplitTerminalTab] Terminal ${terminalId} connected`)
       terminalConnections.value.set(terminalId, true)
+      setTimeout(() => {
+        terminalManager.fit(terminalId)
+      }, 100)
     } else {
       ElMessage.error(`连接失败: ${result.error}`)
     }
@@ -75,7 +89,7 @@ const handleTerminalCreate = async (terminalId: string) => {
 // 处理终端关闭
 const handleTerminalClose = async (terminalId: string) => {
   console.log(`[SplitTerminalTab] Closing terminal: ${terminalId}`)
-  
+
   try {
     // 断开 SSH 连接
     await window.electronAPI.ssh.disconnect(terminalId)
@@ -98,7 +112,7 @@ onMounted(() => {
 
 onUnmounted(async () => {
   console.log(`[SplitTerminalTab] Cleaning up all terminals`)
-  
+
   // 清理所有终端连接
   for (const terminalId of terminalConnections.value.keys()) {
     try {
@@ -107,7 +121,7 @@ onUnmounted(async () => {
       console.error(`Error cleaning up terminal ${terminalId}:`, error)
     }
   }
-  
+
   terminalConnections.value.clear()
 })
 

@@ -13,6 +13,8 @@ import { terminalShortcutsManager } from './terminal-shortcuts'
 // 输入回调类型
 export type InputCallback = (data: string, lineBuffer: string) => void
 
+type RendererType = 'auto' | 'webgl' | 'canvas' | 'dom'
+
 interface TerminalInstance {
   terminal: Terminal
   fitAddon: FitAddon
@@ -40,11 +42,7 @@ class TerminalManager {
   /**
    * 获取或创建终端实例
    */
-  getOrCreate(
-    connectionId: string,
-    container: HTMLElement | null,
-    options: any
-  ): TerminalInstance {
+  getOrCreate(connectionId: string, container: HTMLElement | null, options: any): TerminalInstance {
     // 如果已存在，直接返回
     if (this.instances.has(connectionId)) {
       const instance = this.instances.get(connectionId)!
@@ -54,7 +52,7 @@ class TerminalManager {
         console.log(`[TerminalManager] Remounting terminal ${connectionId} to new container`)
         instance.terminal.open(container)
         instance.container = container
-        instance.fitAddon.fit()
+        this.fit(connectionId)
       }
 
       return instance
@@ -100,24 +98,27 @@ class TerminalManager {
         event.stopPropagation()
 
         if (!event.repeat) {
-          navigator.clipboard.readText().then(text => {
-            if (text) {
-              // 统一换行符：将 \r\n 和单独的 \n 都转为 \r（SSH 终端标准）
-              const normalizedText = text.replace(/\r\n/g, '\r').replace(/\n/g, '\r')
-              // 只在远端启用了 bracketed paste mode 时才包裹序列
-              // 否则直接发送原始文本，避免远端显示 ^[[200~ 等乱码
-              const inst = this.instances.get(connectionId)
-              const pasteText = inst?.bracketedPasteEnabled
-                ? `\x1b[200~${normalizedText}\x1b[201~`
-                : normalizedText
-              window.electronAPI.ssh.write(connectionId, pasteText)
-              
-              // 记录粘贴的命令到历史
-              recordPastedCommands(connectionId, text)
-            }
-          }).catch(err => {
-            console.error('[TerminalManager] Clipboard read failed:', err)
-          })
+          navigator.clipboard
+            .readText()
+            .then((text) => {
+              if (text) {
+                // 统一换行符：将 \r\n 和单独的 \n 都转为 \r（SSH 终端标准）
+                const normalizedText = text.replace(/\r\n/g, '\r').replace(/\n/g, '\r')
+                // 只在远端启用了 bracketed paste mode 时才包裹序列
+                // 否则直接发送原始文本，避免远端显示 ^[[200~ 等乱码
+                const inst = this.instances.get(connectionId)
+                const pasteText = inst?.bracketedPasteEnabled
+                  ? `\x1b[200~${normalizedText}\x1b[201~`
+                  : normalizedText
+                window.electronAPI.ssh.write(connectionId, pasteText)
+
+                // 记录粘贴的命令到历史
+                recordPastedCommands(connectionId, text)
+              }
+            })
+            .catch((err) => {
+              console.error('[TerminalManager] Clipboard read failed:', err)
+            })
         }
         return false
       }
@@ -134,9 +135,22 @@ class TerminalManager {
       }
 
       // 特殊按键放行
-      const specialKeys = ['Delete', 'Backspace', 'Home', 'End', 'PageUp', 'PageDown',
-        'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-        'Insert', 'Tab', 'Enter', 'Escape']
+      const specialKeys = [
+        'Delete',
+        'Backspace',
+        'Home',
+        'End',
+        'PageUp',
+        'PageDown',
+        'ArrowUp',
+        'ArrowDown',
+        'ArrowLeft',
+        'ArrowRight',
+        'Insert',
+        'Tab',
+        'Enter',
+        'Escape'
+      ]
 
       if (specialKeys.includes(event.key)) return true
 
@@ -161,13 +175,16 @@ class TerminalManager {
     })
     terminal.loadAddon(webLinksAddon)
 
+    const rendererType: RendererType = options.rendererType || 'auto'
     let webglAddon: WebglAddon | undefined
-    if (options.rendererType === 'webgl') {
+    if (rendererType === 'auto' || rendererType === 'webgl') {
       try {
         webglAddon = new WebglAddon()
         terminal.loadAddon(webglAddon)
       } catch (error) {
-        console.warn('WebGL renderer not available:', error)
+        if (rendererType === 'webgl') {
+          console.warn('WebGL renderer not available:', error)
+        }
       }
     }
 
@@ -196,6 +213,10 @@ class TerminalManager {
       echoEnabled: true // 默认回显开启
     }
 
+    if (container) {
+      this.syncRemoteWindowSize(instance)
+    }
+
     // 设置选中自动复制
     if (options.copyOnSelect) {
       this.setupCopyOnSelect(instance)
@@ -209,7 +230,7 @@ class TerminalManager {
     const unsubData = window.electronAPI.ssh.onData((id: string, data: string | Uint8Array) => {
       if (id === connectionId) {
         instance.terminal.write(data)
-        
+
         // 检测远端是否启用/禁用了 bracketed paste mode
         // \x1b[?2004h = 启用, \x1b[?2004l = 禁用
         let strForDetect: string | undefined
@@ -217,8 +238,12 @@ class TerminalManager {
           strForDetect = data
         } else {
           try {
-            strForDetect = new TextDecoder('utf-8').decode(data instanceof Uint8Array ? data : new Uint8Array(data as any))
-          } catch { /* ignore */ }
+            strForDetect = new TextDecoder('utf-8').decode(
+              data instanceof Uint8Array ? data : new Uint8Array(data as any)
+            )
+          } catch {
+            /* ignore */
+          }
         }
         if (strForDetect) {
           if (strForDetect.includes('\x1b[?2004h')) {
@@ -239,7 +264,7 @@ class TerminalManager {
             instance.echoEnabled = true
           }
         }
-        
+
         // 调用输出回调（用于错误检测等）
         if (instance.outputCallback) {
           // 将数据转换为字符串
@@ -253,7 +278,7 @@ class TerminalManager {
               // 尝试将数据转换为 Uint8Array 并解码
               let uint8Data: Uint8Array
               const anyData = data as any
-              
+
               if (data instanceof Uint8Array) {
                 uint8Data = data
               } else if (ArrayBuffer.isView(anyData)) {
@@ -264,7 +289,9 @@ class TerminalManager {
                 uint8Data = new Uint8Array(anyData)
               } else if (typeof anyData === 'object' && anyData !== null) {
                 // 处理类数组对象（如 {0: 76, 1: 105, ...}）
-                const values = Object.values(anyData).filter(v => typeof v === 'number') as number[]
+                const values = Object.values(anyData).filter(
+                  (v) => typeof v === 'number'
+                ) as number[]
                 if (values.length > 0) {
                   uint8Data = new Uint8Array(values)
                 } else {
@@ -280,13 +307,13 @@ class TerminalManager {
               strData = ''
             }
           }
-          
+
           // 只有非空数据才调用回调
           if (strData) {
             instance.outputCallback(strData)
           }
         }
-        
+
         // 更新流量统计（接收）
         try {
           const dataForBlob = typeof data === 'string' ? data : new Uint8Array(data as Uint8Array)
@@ -317,11 +344,15 @@ class TerminalManager {
     instance.unsubscribers.push(unsubClose)
 
     // 4. Reconnecting
-    const unsubReconnecting = window.electronAPI.ssh.onReconnecting((id: string, attempt: number, maxAttempts: number) => {
-      if (id === connectionId) {
-        instance.terminal.write(`\r\n\x1b[33m正在重连... (尝试 ${attempt}/${maxAttempts})\x1b[0m\r\n`)
+    const unsubReconnecting = window.electronAPI.ssh.onReconnecting(
+      (id: string, attempt: number, maxAttempts: number) => {
+        if (id === connectionId) {
+          instance.terminal.write(
+            `\r\n\x1b[33m正在重连... (尝试 ${attempt}/${maxAttempts})\x1b[0m\r\n`
+          )
+        }
       }
-    })
+    )
     instance.unsubscribers.push(unsubReconnecting)
 
     // 5. Reconnected
@@ -333,11 +364,13 @@ class TerminalManager {
     instance.unsubscribers.push(unsubReconnected)
 
     // 6. Reconnect Failed
-    const unsubReconnectFailed = window.electronAPI.ssh.onReconnectFailed((id: string, reason: string) => {
-      if (id === connectionId) {
-        instance.terminal.write(`\r\n\x1b[31m重连失败: ${reason}\x1b[0m\r\n`)
+    const unsubReconnectFailed = window.electronAPI.ssh.onReconnectFailed(
+      (id: string, reason: string) => {
+        if (id === connectionId) {
+          instance.terminal.write(`\r\n\x1b[31m重连失败: ${reason}\x1b[0m\r\n`)
+        }
       }
-    })
+    )
     instance.unsubscribers.push(unsubReconnectFailed)
 
     this.instances.set(connectionId, instance)
@@ -365,7 +398,10 @@ class TerminalManager {
   /**
    * 设置光标位置回调
    */
-  setCursorCallback(connectionId: string, callback: ((position: { x: number; y: number }) => void) | null): void {
+  setCursorCallback(
+    connectionId: string,
+    callback: ((position: { x: number; y: number }) => void) | null
+  ): void {
     const instance = this.instances.get(connectionId)
     if (instance) {
       instance.cursorCallback = callback
@@ -388,7 +424,9 @@ class TerminalManager {
   setOutputCallback(connectionId: string, callback: ((data: string) => void) | null): void {
     const instance = this.instances.get(connectionId)
     if (instance) {
-      console.log(`[TerminalManager] setOutputCallback for ${connectionId}, callback: ${callback ? 'set' : 'null'}`)
+      console.log(
+        `[TerminalManager] setOutputCallback for ${connectionId}, callback: ${callback ? 'set' : 'null'}`
+      )
       instance.outputCallback = callback
     } else {
       console.warn(`[TerminalManager] setOutputCallback: instance not found for ${connectionId}`)
@@ -409,11 +447,16 @@ class TerminalManager {
       if (instance.copyOnSelect) {
         const selection = instance.terminal.getSelection()
         if (selection && selection.trim()) {
-          navigator.clipboard.writeText(selection).then(() => {
-            console.log(`[TerminalManager] Auto-copied selection: ${selection.substring(0, 50)}...`)
-          }).catch(err => {
-            console.error('[TerminalManager] Failed to auto-copy selection:', err)
-          })
+          navigator.clipboard
+            .writeText(selection)
+            .then(() => {
+              console.log(
+                `[TerminalManager] Auto-copied selection: ${selection.substring(0, 50)}...`
+              )
+            })
+            .catch((err) => {
+              console.error('[TerminalManager] Failed to auto-copy selection:', err)
+            })
         }
       }
     })
@@ -461,7 +504,9 @@ class TerminalManager {
     const linesToCheck = 20
     const currentLine = buffer.cursorY + buffer.viewportY
 
-    console.log(`[TerminalManager] getCurrentWorkingDirectory: checking lines from ${currentLine}, viewportY=${buffer.viewportY}, cursorY=${buffer.cursorY}`)
+    console.log(
+      `[TerminalManager] getCurrentWorkingDirectory: checking lines from ${currentLine}, viewportY=${buffer.viewportY}, cursorY=${buffer.cursorY}`
+    )
 
     for (let i = currentLine; i >= Math.max(0, currentLine - linesToCheck); i--) {
       const line = buffer.getLine(i)
@@ -492,7 +537,7 @@ class TerminalManager {
         return cwd
       }
 
-      // 格式2: [user@host path]$ 
+      // 格式2: [user@host path]$
       const match2 = lineText.match(/\[[\w-]+@[\w.-]+\s+([~\/][^\]]*)\][#$]\s*$/)
       if (match2 && match2[1]) {
         const cwd = match2[1].trim()
@@ -561,6 +606,31 @@ class TerminalManager {
     const instance = this.instances.get(connectionId)
     if (instance?.fitAddon) {
       instance.fitAddon.fit()
+      this.syncRemoteWindowSize(instance)
+    }
+  }
+
+  /**
+   * 将当前 xterm 行列数同步到远端 PTY。
+   * fitAddon.fit() 只有在本地尺寸变化时才会触发 xterm 的 onResize；
+   * 初次挂载时如果 onResize 尚未注册，远端会继续使用初始 PTY 尺寸，
+   * nano/vim/top 这类全屏程序就会按错误行数重绘底部区域。
+   */
+  private syncRemoteWindowSize(instance: TerminalInstance): void {
+    const cols = instance.terminal.cols
+    const rows = instance.terminal.rows
+
+    if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols <= 0 || rows <= 0) {
+      return
+    }
+
+    try {
+      window.electronAPI.ssh.resize(instance.connectionId, cols, rows)
+    } catch (error) {
+      console.warn(
+        `[TerminalManager] Failed to sync terminal size for ${instance.connectionId}:`,
+        error
+      )
     }
   }
 
@@ -593,10 +663,10 @@ async function recordPastedCommands(connectionId: string, text: string): Promise
 
     // 按换行符分割命令
     const lines = text.split(/\r?\n/)
-    
+
     for (const line of lines) {
       const command = line.trim()
-      
+
       // 只记录非空命令
       if (command) {
         // 使用类型断言访问 commandHistory API

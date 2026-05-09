@@ -17,12 +17,7 @@
           popper-class="toolbar-settings-popover"
         >
           <template #reference>
-            <el-button
-              type="primary"
-              link
-              :icon="Setting"
-              class="action-btn"
-            />
+            <el-button type="primary" link :icon="Setting" class="action-btn" />
           </template>
           <div class="toolbar-settings">
             <div class="settings-title">显示工具</div>
@@ -43,12 +38,8 @@
         <!-- 字体 -->
         <el-tooltip v-if="toolbarConfig.font" content="字体" placement="bottom">
           <el-dropdown @command="handleFontChange" trigger="click">
-            <el-button
-              type="primary"
-              link
-              class="action-btn font-btn"
-            >
-              <span style="font-size: var(--text-sm); font-weight: 500;">A</span>
+            <el-button type="primary" link class="action-btn font-btn">
+              <span style="font-size: var(--text-sm); font-weight: 500">A</span>
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
@@ -68,12 +59,7 @@
         <!-- 主题 -->
         <el-tooltip v-if="toolbarConfig.theme" content="主题" placement="bottom">
           <el-dropdown @command="handleThemeChange" trigger="click">
-            <el-button
-              type="primary"
-              link
-              :icon="Brush"
-              class="action-btn"
-            />
+            <el-button type="primary" link :icon="Brush" class="action-btn" />
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item
@@ -125,7 +111,11 @@
         </el-tooltip>
 
         <!-- 监控 -->
-        <el-tooltip v-if="toolbarConfig.monitor" :content="showMonitor ? '隐藏监控' : '显示监控'" placement="bottom">
+        <el-tooltip
+          v-if="toolbarConfig.monitor"
+          :content="showMonitor ? '隐藏监控' : '显示监控'"
+          placement="bottom"
+        >
           <el-button
             type="primary"
             link
@@ -137,7 +127,11 @@
         </el-tooltip>
 
         <!-- 文件管理 -->
-        <el-tooltip v-if="toolbarConfig.file" :content="showFilePanel ? '关闭文件' : '文件管理'" placement="bottom">
+        <el-tooltip
+          v-if="toolbarConfig.file"
+          :content="showFilePanel ? '关闭文件' : '文件管理'"
+          placement="bottom"
+        >
           <el-button
             type="primary"
             link
@@ -149,7 +143,11 @@
         </el-tooltip>
 
         <!-- AI 助手 -->
-        <el-tooltip v-if="toolbarConfig.ai" :content="showTerminalAI ? '关闭 AI 助手' : 'AI 助手'" placement="bottom">
+        <el-tooltip
+          v-if="toolbarConfig.ai"
+          :content="showTerminalAI ? '关闭 AI 助手' : 'AI 助手'"
+          placement="bottom"
+        >
           <el-button
             type="primary"
             link
@@ -161,7 +159,11 @@
         </el-tooltip>
 
         <!-- 快捷命令 -->
-        <el-tooltip v-if="toolbarConfig.quickCommand" :content="showQuickCommand ? '关闭快捷命令' : '快捷命令'" placement="bottom">
+        <el-tooltip
+          v-if="toolbarConfig.quickCommand"
+          :content="showQuickCommand ? '关闭快捷命令' : '快捷命令'"
+          placement="bottom"
+        >
           <el-button
             type="primary"
             link
@@ -173,16 +175,19 @@
         </el-tooltip>
       </div>
     </div>
-    
+
     <!-- 重连通知栏 -->
     <transition name="slide-down">
-      <div v-if="showReconnectNotification && connectionStatus === 'reconnecting'" class="reconnect-notification">
+      <div
+        v-if="showReconnectNotification && connectionStatus === 'reconnecting'"
+        class="reconnect-notification"
+      >
         <div class="reconnect-content">
           <el-icon class="reconnect-icon spinning"><Loading /></el-icon>
           <span class="reconnect-text">{{ reconnectMessage }}</span>
-          <el-button 
-            size="small" 
-            type="danger" 
+          <el-button
+            size="small"
+            type="danger"
             link
             @click="handleCancelReconnect"
             class="cancel-reconnect-btn"
@@ -192,34 +197,40 @@
         </div>
       </div>
     </transition>
-    
+
     <!-- 断线通知栏 -->
     <transition name="slide-down">
       <div v-if="showDisconnectedNotification" class="disconnected-notification">
         <div class="reconnect-content">
           <el-icon class="disconnected-icon"><CircleClose /></el-icon>
           <span class="reconnect-text">连接已断开</span>
-          <el-button 
-            size="small" 
+          <el-button
+            size="small"
             type="primary"
             @click="handleManualReconnect"
             :loading="isManualReconnecting"
           >
             重新连接
           </el-button>
-          <el-button 
-            size="small" 
-            link
-            @click="showDisconnectedNotification = false"
-          >
+          <el-button size="small" link @click="showDisconnectedNotification = false">
             关闭
           </el-button>
         </div>
       </div>
     </transition>
-    
+
     <div class="terminal-body">
-      <div class="terminal-content" :class="{ 'with-monitor': showMonitor, 'with-history': showCommandHistory, 'with-ai': showTerminalAI, 'with-file': showFilePanel, 'with-snippet': showSnippetDialog, 'with-quick-command': showQuickCommand }">
+      <div
+        class="terminal-content"
+        :class="{
+          'with-monitor': showMonitor,
+          'with-history': showCommandHistory,
+          'with-ai': showTerminalAI,
+          'with-file': showFilePanel,
+          'with-snippet': showSnippetDialog,
+          'with-quick-command': showQuickCommand
+        }"
+      >
         <TerminalView
           v-if="isConnected"
           :connection-id="connectionId"
@@ -252,7 +263,7 @@
           @select="handleAutocompleteSelect"
           @close="showAutocomplete = false"
         />
-        
+
         <!-- 内联预览补全 (Ghost Text) -->
         <GhostText
           :visible="showGhostText"
@@ -261,7 +272,7 @@
           :font-size="terminalOptions?.fontSize || 14"
           :font-family="terminalOptions?.fontFamily || 'Consolas, monospace'"
         />
-        
+
         <!-- AI 命令建议 -->
         <AICommandSuggest
           ref="aiCommandSuggestRef"
@@ -273,7 +284,7 @@
           @edit="handleAICommandEdit"
           @close="showAICommandSuggest = false"
         />
-        
+
         <!-- 命令解释 -->
         <CommandExplain
           ref="commandExplainRef"
@@ -283,25 +294,25 @@
           @close="showCommandExplain = false"
         />
       </div>
-      
+
       <!-- 命令历史面板 -->
       <div v-if="showCommandHistory" class="history-sidebar">
         <CommandHistoryPanel @select="handleCommandSelect" />
       </div>
-      
+
       <!-- 服务器监控面板 -->
       <transition name="slide-left">
         <div v-if="showMonitor" class="monitor-sidebar">
           <ServerMonitorPanel :session-id="connectionId" />
         </div>
       </transition>
-      
+
       <!-- 终端 AI 助手面板 -->
       <transition name="slide-left">
         <div v-if="showTerminalAI" class="ai-sidebar">
-          <TerminalAIChatPanel 
+          <TerminalAIChatPanel
             ref="terminalAIRef"
-            :connection-id="connectionId" 
+            :connection-id="connectionId"
             :session-name="session?.name"
             :storage-id="aiStorageId"
             :current-dir="currentWorkingDir"
@@ -309,7 +320,7 @@
           />
         </div>
       </transition>
-      
+
       <!-- 文件管理面板 -->
       <transition name="slide-left">
         <div v-if="showFilePanel" class="file-sidebar">
@@ -323,17 +334,14 @@
           />
         </div>
       </transition>
-      
+
       <!-- 快捷命令面板 -->
       <transition name="slide-left">
         <div v-if="showQuickCommand" class="quick-command-sidebar">
-          <QuickCommandPanel
-            :connection-id="connectionId"
-            @close="showQuickCommand = false"
-          />
+          <QuickCommandPanel :connection-id="connectionId" @close="showQuickCommand = false" />
         </div>
       </transition>
-      
+
       <!-- 命令片段面板 -->
       <transition name="slide-left">
         <div v-if="showSnippetDialog" class="snippet-sidebar">
@@ -347,7 +355,7 @@
               <div class="category-section">
                 <div class="section-title">分类</div>
                 <div class="category-list">
-                  <div 
+                  <div
                     class="category-item"
                     :class="{ active: filterCategory === '' }"
                     @click="filterCategory = ''"
@@ -355,7 +363,7 @@
                     <span>全部</span>
                     <el-tag size="small" round>{{ snippets.length }}</el-tag>
                   </div>
-                  <div 
+                  <div
                     v-for="cat in categories"
                     :key="cat"
                     class="category-item"
@@ -376,7 +384,7 @@
                     :type="filterTags.includes(tag) ? 'primary' : 'info'"
                     size="small"
                     @click="toggleTag(tag)"
-                    style="cursor: pointer; margin: 2px;"
+                    style="cursor: pointer; margin: 2px"
                   >
                     {{ tag }}
                   </el-tag>
@@ -420,9 +428,14 @@
         </div>
       </transition>
     </div>
-    
+
     <!-- Variable Input Dialog -->
-    <el-dialog v-model="showVariableDialog" title="Enter Variables" width="500px" class="custom-dialog">
+    <el-dialog
+      v-model="showVariableDialog"
+      title="Enter Variables"
+      width="500px"
+      class="custom-dialog"
+    >
       <el-form v-if="selectedSnippet" label-position="top">
         <el-form-item
           v-for="variable in selectedSnippet.variables"
@@ -449,7 +462,20 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { Close, Loading, Search, Document, Brush, Monitor, Clock, ChatDotRound, CircleClose, FolderOpened, Promotion, Setting } from '@element-plus/icons-vue'
+import {
+  Close,
+  Loading,
+  Search,
+  Document,
+  Brush,
+  Monitor,
+  Clock,
+  ChatDotRound,
+  CircleClose,
+  FolderOpened,
+  Promotion,
+  Setting
+} from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TerminalView from './TerminalView.vue'
 import TerminalSearch from './TerminalSearch.vue'
@@ -464,7 +490,10 @@ import AICommandSuggest from './AICommandSuggest.vue'
 import CommandExplain from './CommandExplain.vue'
 import { themes } from '@/utils/terminal-themes'
 import { terminalManager } from '@/utils/terminal-manager'
-import { getInlineSuggestion, shouldShowInlineSuggestion } from '@/utils/autocomplete/inline-suggest'
+import {
+  getInlineSuggestion,
+  shouldShowInlineSuggestion
+} from '@/utils/autocomplete/inline-suggest'
 import { isExplainQuery, parseExplainQuery } from '@/utils/command-intelligence'
 import type { SessionConfig as BaseSessionConfig } from '@/types/session'
 import { useAppStore } from '@/stores/app'
@@ -513,7 +542,9 @@ const terminalRef = ref()
 const terminalAIRef = ref()
 const autocompleteRef = ref()
 const isConnected = ref(false)
-const connectionStatus = ref<'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting'>('connecting')
+const connectionStatus = ref<
+  'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting'
+>('connecting')
 const showSearch = ref(false)
 const reconnectAttempt = ref(0)
 const reconnectMaxAttempts = ref(0)
@@ -645,35 +676,38 @@ const fontOptions = [
   { label: 'Lucida Console', value: "'Lucida Console', monospace" },
   { label: 'Monaco', value: 'Monaco, monospace' }
 ]
-const currentFont = computed(() => props.terminalOptions?.fontFamily || "'JetBrains Mono', monospace")
+const currentFont = computed(
+  () => props.terminalOptions?.fontFamily || "'JetBrains Mono', monospace"
+)
 
 // 键盘事件清理函数（在顶层定义，供 onUnmounted 使用）
 let cleanupKeyboard: (() => void) | null = null
 
 // 监听标签页切换，当切换到其他标签页时清理补全状态
 // 这可以防止多标签页时的状态污染
-watch(() => useAppStore().activeTab, (newActiveTab) => {
-  if (newActiveTab !== props.connectionId) {
-    // 当前标签页不再激活，清理所有智能功能状态
-    clearAllIntelligenceStates()
+watch(
+  () => useAppStore().activeTab,
+  (newActiveTab) => {
+    if (newActiveTab !== props.connectionId) {
+      // 当前标签页不再激活，清理所有智能功能状态
+      clearAllIntelligenceStates()
+    }
   }
-})
+)
 
 const filteredSnippets = computed(() => {
   let result = snippets.value
-  
+
   // 按分类过滤
   if (filterCategory.value) {
-    result = result.filter(s => s.category === filterCategory.value)
+    result = result.filter((s) => s.category === filterCategory.value)
   }
-  
+
   // 按标签过滤
   if (filterTags.value.length > 0) {
-    result = result.filter(s => 
-      filterTags.value.some(tag => s.tags?.includes(tag))
-    )
+    result = result.filter((s) => filterTags.value.some((tag) => s.tags?.includes(tag)))
   }
-  
+
   // 按搜索词过滤
   if (snippetSearch.value) {
     const query = snippetSearch.value.toLowerCase()
@@ -685,13 +719,13 @@ const filteredSnippets = computed(() => {
         snippet.description?.toLowerCase().includes(query)
     )
   }
-  
+
   return result
 })
 
 const categories = computed(() => {
   const cats = new Set<string>()
-  snippets.value.forEach(s => {
+  snippets.value.forEach((s) => {
     if (s.category) cats.add(s.category)
   })
   return Array.from(cats)
@@ -699,17 +733,17 @@ const categories = computed(() => {
 
 const allTags = computed(() => {
   const tags = new Set<string>()
-  snippets.value.forEach(s => {
-    s.tags?.forEach(t => tags.add(t))
+  snippets.value.forEach((s) => {
+    s.tags?.forEach((t) => tags.add(t))
   })
   return Array.from(tags)
 })
 
 const finalCommand = computed(() => {
   if (!selectedSnippet.value) return ''
-  
+
   let command = selectedSnippet.value.command
-  
+
   // 替换变量
   if (selectedSnippet.value.variables) {
     for (const variable of selectedSnippet.value.variables) {
@@ -717,7 +751,7 @@ const finalCommand = computed(() => {
       command = command.replace(new RegExp(`\\$\\{${variable.name}\\}`, 'g'), value)
     }
   }
-  
+
   return command
 })
 
@@ -747,22 +781,24 @@ const reconnectListenerCleanups: Array<() => void> = []
 
 const setupReconnectListeners = () => {
   // 监听重连开始事件
-  const u1 = window.electronAPI.ssh.onReconnecting((id: string, attempt: number, maxAttempts: number) => {
-    if (id === props.connectionId) {
-      console.log(`[TerminalTab] Reconnecting ${id}: attempt ${attempt}/${maxAttempts}`)
-      connectionStatus.value = 'reconnecting'
-      reconnectAttempt.value = attempt
-      reconnectMaxAttempts.value = maxAttempts
-      showReconnectNotification.value = true
-      
-      ElMessage.warning({
-        message: `连接断开，正在尝试重连... (${attempt}/${maxAttempts})`,
-        duration: 3000
-      })
+  const u1 = window.electronAPI.ssh.onReconnecting(
+    (id: string, attempt: number, maxAttempts: number) => {
+      if (id === props.connectionId) {
+        console.log(`[TerminalTab] Reconnecting ${id}: attempt ${attempt}/${maxAttempts}`)
+        connectionStatus.value = 'reconnecting'
+        reconnectAttempt.value = attempt
+        reconnectMaxAttempts.value = maxAttempts
+        showReconnectNotification.value = true
+
+        ElMessage.warning({
+          message: `连接断开，正在尝试重连... (${attempt}/${maxAttempts})`,
+          duration: 3000
+        })
+      }
     }
-  })
+  )
   if (u1) reconnectListenerCleanups.push(u1)
-  
+
   // 监听重连成功事件
   const u2 = window.electronAPI.ssh.onReconnected((id: string) => {
     if (id === props.connectionId) {
@@ -771,7 +807,7 @@ const setupReconnectListeners = () => {
       isConnected.value = true
       showReconnectNotification.value = false
       reconnectAttempt.value = 0
-      
+
       ElMessage.success({
         message: '重连成功！',
         duration: 2000
@@ -779,7 +815,7 @@ const setupReconnectListeners = () => {
     }
   })
   if (u2) reconnectListenerCleanups.push(u2)
-  
+
   // 监听重连失败事件
   const u3 = window.electronAPI.ssh.onReconnectFailed((id: string, reason: string) => {
     if (id === props.connectionId) {
@@ -789,7 +825,7 @@ const setupReconnectListeners = () => {
       showReconnectNotification.value = false
       showDisconnectedNotification.value = true
       reconnectAttempt.value = 0
-      
+
       ElMessage.error({
         message: `重连失败: ${reason}`,
         duration: 5000
@@ -817,13 +853,16 @@ const loadCommandIntelligenceSettings = async () => {
   try {
     const settings = await window.electronAPI.settings.get()
     const sshSettings = settings?.ssh || {}
-    
+
     commandIntelligenceSettings.value = {
       commandAutocomplete: sshSettings.commandAutocomplete !== false,
       aiCommandSuggest: sshSettings.aiCommandSuggest !== false,
       commandExplain: sshSettings.commandExplain !== false
     }
-    console.log('[TerminalTab] Loaded command intelligence settings:', commandIntelligenceSettings.value)
+    console.log(
+      '[TerminalTab] Loaded command intelligence settings:',
+      commandIntelligenceSettings.value
+    )
   } catch (error) {
     console.error('Failed to load command intelligence settings:', error)
   }
@@ -833,10 +872,10 @@ const loadCommandIntelligenceSettings = async () => {
 const handleManualReconnect = async () => {
   // 使用 props.session 对象（props 中没有 sessionId，只有 session 对象）
   if (!props.session) return
-  
+
   isManualReconnecting.value = true
   showDisconnectedNotification.value = false
-  
+
   try {
     // 断开旧连接
     try {
@@ -844,12 +883,12 @@ const handleManualReconnect = async () => {
     } catch (e) {
       // 忽略断开错误
     }
-    
+
     // 重新连接 - 序列化 session 以便 IPC 传输
     connectionStatus.value = 'connecting'
     const sessionData = JSON.parse(JSON.stringify(props.session))
     const result = await window.electronAPI.ssh.connect(props.connectionId, sessionData)
-    
+
     if (result.success) {
       connectionStatus.value = 'connected'
       isConnected.value = true
@@ -872,13 +911,13 @@ const handleManualReconnect = async () => {
 onMounted(async () => {
   // Load snippets
   loadSnippets()
-  
+
   // 加载工具栏配置
   loadToolbarConfig()
-  
+
   // 获取 appStore 用于检查当前激活的标签页
   const appStore = useAppStore()
-  
+
   // 添加键盘事件监听（处理补全弹窗、Ghost Text、AI 命令）
   const handleKeyDown = (e: KeyboardEvent) => {
     // 首先检查当前标签页是否激活，避免多标签页时的事件冲突
@@ -886,7 +925,7 @@ onMounted(async () => {
     if (appStore.activeTab !== props.connectionId) {
       return // 不是当前激活的标签页，不处理
     }
-    
+
     // 0. 命令解释模式
     if (showCommandExplain.value) {
       if (e.key === 'Escape') {
@@ -897,7 +936,7 @@ onMounted(async () => {
       }
       return
     }
-    
+
     // 1. AI 命令建议模式
     if (showAICommandSuggest.value) {
       if (e.key === 'Enter') {
@@ -930,7 +969,7 @@ onMounted(async () => {
       }
       return
     }
-    
+
     // 2. Ghost Text 模式 - Tab 接受补全（不拦截 ArrowRight，避免与光标移动冲突）
     if (showGhostText.value && ghostText.value) {
       if (e.key === 'Tab') {
@@ -947,15 +986,15 @@ onMounted(async () => {
       }
       // 其他按键会自动清除 ghost text（在 handleTerminalInput 中处理）
     }
-    
+
     // 3. 弹窗补全模式
     if (!showAutocomplete.value) return
-    
+
     // 检查是否有建议
     const hasSuggestions = autocompleteRef.value?.hasSuggestions?.() || false
     // 检查用户是否主动选择了建议（使用了上下键）
     const hasActiveSelection = autocompleteRef.value?.hasActiveSelection?.() || false
-    
+
     // Enter 键的处理逻辑：
     // - 如果用户主动选择了建议（用上下键），则确认选择
     // - 如果用户没有主动选择，则关闭弹窗并执行命令
@@ -977,17 +1016,17 @@ onMounted(async () => {
       }
       return
     }
-    
+
     // 对于 Tab 键，只有在有建议时才拦截
     if (e.key === 'Tab' && !hasSuggestions) {
       return // 让按键正常传递到终端
     }
-    
+
     // 阻止终端捕获这些按键（除了 Enter）
     if (['ArrowUp', 'ArrowDown', 'Tab', 'Escape'].includes(e.key)) {
       e.preventDefault()
       e.stopPropagation()
-      
+
       // 处理不同的按键
       switch (e.key) {
         case 'ArrowDown':
@@ -1018,19 +1057,21 @@ onMounted(async () => {
       }
     }
   }
-  
+
   // 使用 capture 模式确保优先捕获事件
   window.addEventListener('keydown', handleKeyDown, true)
-  
+
   // 保存 cleanup 函数供 onUnmounted 使用
   cleanupKeyboard = () => {
     window.removeEventListener('keydown', handleKeyDown, true)
   }
-  
+
   // 检查是否已经连接或正在连接（防止重复连接）
   const existingState = globalConnectionState.get(props.connectionId)
   if (existingState) {
-    console.log(`[TerminalTab] Connection ${props.connectionId} already exists or connecting, reusing existing connection`)
+    console.log(
+      `[TerminalTab] Connection ${props.connectionId} already exists or connecting, reusing existing connection`
+    )
     if (existingState === 'connected') {
       isConnected.value = true
       connectionStatus.value = 'connected'
@@ -1048,27 +1089,27 @@ onMounted(async () => {
     }
     // 设置重连事件监听器（即使复用连接也需要监听）
     setupReconnectListeners()
-    
+
     // 复用连接时也需要加载设置
     loadCommandIntelligenceSettings()
-    
+
     return
   }
-  
+
   // 标记为正在连接
   globalConnectionState.set(props.connectionId, 'connecting')
-  
+
   // 设置重连事件监听器
   setupReconnectListeners()
-  
+
   try {
     // 获取 SSH 设置
     const settings = await window.electronAPI.settings.get()
     const sshSettings = settings?.ssh || {}
-    
+
     // 加载命令智能设置（使用统一函数）
     await loadCommandIntelligenceSettings()
-    
+
     // Connect to SSH
     // 注意：privateKeyId 会在后端 ssh-handlers.ts 中处理
     // 优先使用 privateKeyId，如果没有则使用 privateKeyPath 或 privateKey
@@ -1077,16 +1118,26 @@ onMounted(async () => {
       port: props.session.port,
       username: props.session.username,
       password: props.session.password,
-      privateKey: props.session.privateKeyId ? undefined : (props.session.privateKeyPath || props.session.privateKey),
+      privateKey: props.session.privateKeyId
+        ? undefined
+        : props.session.privateKeyPath || props.session.privateKey,
       privateKeyId: props.session.privateKeyId,
       passphrase: props.session.passphrase,
       // 应用 SSH 设置
       readyTimeout: (sshSettings.timeout || 30) * 1000, // 转换为毫秒
-      keepaliveInterval: sshSettings.keepalive ? (sshSettings.keepaliveInterval || 60) * 1000 : undefined,
+      keepaliveInterval: sshSettings.keepalive
+        ? (sshSettings.keepaliveInterval || 60) * 1000
+        : undefined,
       keepaliveCountMax: sshSettings.keepalive ? 3 : undefined,
+      autoReconnect: sshSettings.autoReconnect !== false,
+      maxReconnectAttempts:
+        sshSettings.autoReconnect === false ? 0 : sshSettings.maxReconnectAttempts || 3,
+      reconnectInterval: (sshSettings.reconnectInterval || 5) * 1000,
       sessionName: props.session.name,
       // 跳板机和代理配置 - 序列化以便 IPC 传输
-      proxyJump: props.session.proxyJump ? JSON.parse(JSON.stringify(props.session.proxyJump)) : undefined,
+      proxyJump: props.session.proxyJump
+        ? JSON.parse(JSON.stringify(props.session.proxyJump))
+        : undefined,
       proxy: props.session.proxy ? JSON.parse(JSON.stringify(props.session.proxy)) : undefined
     })
 
@@ -1095,22 +1146,16 @@ onMounted(async () => {
       connectionStatus.value = 'connected'
       globalConnectionState.set(props.connectionId, 'connected')
       ElMessage.success(`Connected to ${props.session.host}`)
-      
+
       // 连接成功后延迟触发 fit，让终端渲染完成后立即同步真实尺寸给服务端
       // 这样可以避免服务端按初始 PTY 尺寸(220x50)折行导致的显示错位
       setTimeout(() => {
-        const instance = terminalManager.get(props.connectionId)
-        if (instance?.fitAddon) {
-          instance.fitAddon.fit()
-        }
+        terminalManager.fit(props.connectionId)
       }, 100)
-      
+
       // 记录连接统计开始
       try {
-        await window.electronAPI.connectionStats?.start?.(
-          props.connectionId,
-          props.session.name
-        )
+        await window.electronAPI.connectionStats?.start?.(props.connectionId, props.session.name)
       } catch (error) {
         console.error('Failed to start connection stats:', error)
       }
@@ -1137,37 +1182,43 @@ onUnmounted(async () => {
     cleanupKeyboard()
     cleanupKeyboard = null
   }
-  
+
   // 清理重连事件监听器
-  reconnectListenerCleanups.forEach(cleanup => {
-    try { cleanup() } catch (e) { /* ignore */ }
+  reconnectListenerCleanups.forEach((cleanup) => {
+    try {
+      cleanup()
+    } catch (e) {
+      /* ignore */
+    }
   })
   reconnectListenerCleanups.length = 0
-  
+
   // 清理 AI 建议防抖定时器
   if (aiSuggestDebounceTimer) {
     clearTimeout(aiSuggestDebounceTimer)
     aiSuggestDebounceTimer = null
   }
-  
+
   // 清理所有智能功能状态，避免状态污染
   clearAllIntelligenceStates()
-  
+
   // 强制重置 autocomplete 组件
   if (autocompleteRef.value?.forceReset) {
     autocompleteRef.value.forceReset()
   }
-  
+
   // 清理资源
   console.log(`[TerminalTab] Cleaning up resources for ${props.connectionId}`)
-  
+
   const appStore = useAppStore()
-  
+
   // 检查是否在 store 中仍然存在该 tab (如果存在，说明只是视图切换导致组件卸载，不需要断开连接)
-  const isTabActive = appStore.tabs.some(t => t.id === props.connectionId)
-  
+  const isTabActive = appStore.tabs.some((t) => t.id === props.connectionId)
+
   if (isTabActive) {
-    console.log(`[TerminalTab] Tab ${props.connectionId} is still active in store, skipping disconnect`)
+    console.log(
+      `[TerminalTab] Tab ${props.connectionId} is still active in store, skipping disconnect`
+    )
     // 清理引用但保持连接
     if (terminalRef.value) {
       try {
@@ -1178,7 +1229,7 @@ onUnmounted(async () => {
     }
     return
   }
-  
+
   // 1. 清理终端引用
   if (terminalRef.value) {
     try {
@@ -1187,41 +1238,41 @@ onUnmounted(async () => {
       console.error('Error clearing terminal ref:', error)
     }
   }
-  
+
   // 2. 断开 SSH 连接（只在最后一个实例时断开）
   if (isConnected.value) {
     try {
       // 从全局状态中移除
       globalConnectionState.delete(props.connectionId)
-      
+
       // 记录连接统计结束
       try {
         await window.electronAPI.connectionStats?.end?.(props.connectionId)
       } catch (error) {
         console.error('Failed to end connection stats:', error)
       }
-      
+
       await window.electronAPI.ssh.disconnect(props.connectionId)
       console.log(`[TerminalTab] Disconnected ${props.connectionId}`)
-      
+
       // 销毁终端实例
       terminalManager.destroy(props.connectionId)
     } catch (error) {
       console.error('Error disconnecting:', error)
     }
   }
-  
+
   // 3. 清理状态
   snippets.value = []
   selectedSnippet.value = null
   variableValues.value = {}
-  
+
   // 4. 清理搜索状态
   currentSearchTerm.value = ''
   showSearch.value = false
   showSnippetDialog.value = false
   showVariableDialog.value = false
-  
+
   console.log(`[TerminalTab] Cleanup completed for ${props.connectionId}`)
 })
 
@@ -1252,7 +1303,7 @@ const handleFontChange = async (fontFamily: string) => {
     })
 
     // 获取字体显示名称
-    const fontLabel = fontOptions.find(f => f.value === fontFamily)?.label || fontFamily
+    const fontLabel = fontOptions.find((f) => f.value === fontFamily)?.label || fontFamily
     ElMessage.success(`字体已切换到 ${fontLabel}`)
   } catch (error: any) {
     ElMessage.error(`切换字体失败: ${error.message}`)
@@ -1314,10 +1365,8 @@ const loadSnippets = async () => {
       snippets.value = rawSnippets.map((snippet: any) => ({
         ...snippet,
         variables: Array.isArray(snippet.variables)
-          ? snippet.variables.map((v: any) => 
-              typeof v === 'string' 
-                ? { name: v, description: '', defaultValue: '' }
-                : v
+          ? snippet.variables.map((v: any) =>
+              typeof v === 'string' ? { name: v, description: '', defaultValue: '' } : v
             )
           : []
       }))
@@ -1354,7 +1403,7 @@ watch([showMonitor, showCommandHistory, showTerminalAI], () => {
 })
 
 const getCategoryCount = (category: string) => {
-  return snippets.value.filter(s => s.category === category).length
+  return snippets.value.filter((s) => s.category === category).length
 }
 
 const toggleTag = (tag: string) => {
@@ -1369,7 +1418,7 @@ const toggleTag = (tag: string) => {
 const selectSnippet = (snippet: CommandSnippet) => {
   selectedSnippet.value = snippet
   showSnippetDialog.value = false
-  
+
   // 如果有变量，显示变量输入对话框
   if (snippet.variables && snippet.variables.length > 0) {
     // 初始化变量值
@@ -1386,13 +1435,13 @@ const selectSnippet = (snippet: CommandSnippet) => {
 
 const executeSnippet = async () => {
   if (!selectedSnippet.value) return
-  
+
   try {
     const command = finalCommand.value
-    
+
     // 发送命令到终端
     await window.electronAPI.ssh.write(props.connectionId, command + '\n')
-    
+
     // 记录命令到历史
     await window.electronAPI.commandHistory?.add?.({
       command,
@@ -1400,10 +1449,10 @@ const executeSnippet = async () => {
       sessionName: props.session.name || 'Unknown Session',
       duration: undefined
     })
-    
+
     // 增加使用计数
     await window.electronAPI.snippet.incrementUsage(selectedSnippet.value.id)
-    
+
     ElMessage.success('命令已执行')
     showVariableDialog.value = false
     selectedSnippet.value = null
@@ -1445,10 +1494,22 @@ const clearAllIntelligenceStates = (except?: 'autocomplete' | 'aiSuggest' | 'exp
 // 处理终端输入（用于智能补全）
 const handleTerminalInput = async (input: string) => {
   console.log(`[TerminalTab] handleTerminalInput called: input="${input}"`)
-  
+
   // 保存原始输入用于各种模式判断
   const rawInput = input
-  
+
+  if (
+    !rawInput ||
+    rawInput === '\r' ||
+    rawInput === '\n' ||
+    rawInput === '\x03' ||
+    rawInput === '\x15'
+  ) {
+    ghostTextRequestId++
+    clearAllIntelligenceStates()
+    return
+  }
+
   // 0. 命令解释模式 (? 开头或结尾) - 需要检查开关
   if (commandIntelligenceSettings.value.commandExplain && isExplainQuery(rawInput)) {
     const command = parseExplainQuery(rawInput)
@@ -1466,28 +1527,28 @@ const handleTerminalInput = async (input: string) => {
       showCommandExplain.value = false
     }
   }
-  
+
   // 1. AI 命令模式 (# 开头) - 检查开关
   if (rawInput.startsWith('#') && commandIntelligenceSettings.value.aiCommandSuggest) {
     const query = rawInput.substring(1).trim()
     console.log('[TerminalTab] AI command mode, input:', rawInput, 'query:', query)
-    
+
     // 更新 autocompleteInput 以便执行时能正确清除输入
     autocompleteInput.value = rawInput
-    
+
     // 只有当 query 有实际内容时才显示 AI 建议
     if (query.length >= 2) {
       // 清除其他状态
       clearAllIntelligenceStates('aiSuggest')
-      
+
       // 防抖：用户停止输入 800ms 后才触发 AI 请求
       if (aiSuggestDebounceTimer) {
         clearTimeout(aiSuggestDebounceTimer)
       }
-      
+
       // 立即显示面板（显示加载状态）
       showAICommandSuggest.value = true
-      
+
       aiSuggestDebounceTimer = setTimeout(() => {
         // 只有当 query 真正变化时才更新（触发 AI 请求）
         if (aiCommandQuery.value !== query) {
@@ -1515,7 +1576,7 @@ const handleTerminalInput = async (input: string) => {
       aiSuggestDebounceTimer = null
     }
   }
-  
+
   // 如果命令补全已关闭，直接返回
   if (!commandIntelligenceSettings.value.commandAutocomplete) {
     showAutocomplete.value = false
@@ -1523,10 +1584,10 @@ const handleTerminalInput = async (input: string) => {
     showGhostText.value = false
     return
   }
-  
+
   // 从这里开始，更新 autocompleteInput（仅用于补全模式）
   autocompleteInput.value = rawInput
-  
+
   // 2. 快捷命令模式 (/ 开头) - 检查开关
   if (rawInput.startsWith('/') && commandIntelligenceSettings.value.commandAutocomplete) {
     showGhostText.value = false
@@ -1538,15 +1599,18 @@ const handleTerminalInput = async (input: string) => {
     showGhostText.value = false
     return
   }
-  
+
   // 3. 内联预览补全 (Ghost Text) - 检查开关
-  if (commandIntelligenceSettings.value.commandAutocomplete && shouldShowInlineSuggestion(rawInput)) {
+  if (
+    commandIntelligenceSettings.value.commandAutocomplete &&
+    shouldShowInlineSuggestion(rawInput)
+  ) {
     const currentRequestId = ++ghostTextRequestId
     try {
       const suggestion = await getInlineSuggestion(rawInput, props.connectionId)
       // 检查请求是否过期
       if (currentRequestId !== ghostTextRequestId) return
-      
+
       if (suggestion && suggestion.ghostText) {
         ghostText.value = suggestion.ghostText
         ghostFullText.value = suggestion.text
@@ -1564,15 +1628,16 @@ const handleTerminalInput = async (input: string) => {
     showGhostText.value = false
     ghostText.value = ''
   }
-  
+
   // 4. 弹窗补全（与内联预览共存）- 检查开关
   if (commandIntelligenceSettings.value.commandAutocomplete) {
-    const shouldShowPopup = rawInput && 
-                       rawInput.length > 0 && 
-                       !rawInput.endsWith('\n') && 
-                       !rawInput.endsWith('\r') &&
-                       rawInput.length >= 2
-    
+    const shouldShowPopup =
+      rawInput &&
+      rawInput.length > 0 &&
+      !rawInput.endsWith('\n') &&
+      !rawInput.endsWith('\r') &&
+      rawInput.length >= 2
+
     if (shouldShowPopup) {
       // 显示补全时清除其他状态
     }
@@ -1600,10 +1665,10 @@ const handleAutocompleteSelect = (text: string) => {
   if (terminalRef.value) {
     // 获取当前输入
     const currentInput = autocompleteInput.value
-    
+
     // 计算需要删除的字符数
     let deleteCount = 0
-    
+
     // 如果是快捷命令（以 / 开头），需要删除整个快捷命令
     if (currentInput.startsWith('/')) {
       deleteCount = currentInput.length
@@ -1617,21 +1682,21 @@ const handleAutocompleteSelect = (text: string) => {
     // 使用 \x7f (DEL) 或 \b 来删除字符
     const backspaces = '\x7f'.repeat(deleteCount)
     window.electronAPI.ssh.write(props.connectionId, backspaces + text)
-    
+
     // 计算补全后的完整命令并更新终端的命令缓冲
     const newCommand = currentInput.slice(0, currentInput.length - deleteCount) + text
     terminalRef.value.updateCommandBuffer?.(newCommand.trim())
-    
+
     // 如果是快捷命令，增加使用次数
     if (currentInput.startsWith('/')) {
       // 尝试找到对应的片段并增加使用次数
-      window.electronAPI.snippet?.getByShortcut?.(currentInput).then(result => {
+      window.electronAPI.snippet?.getByShortcut?.(currentInput).then((result) => {
         if (result?.success && result.data) {
           window.electronAPI.snippet?.incrementUsage?.(result.data.id)
         }
       })
     }
-    
+
     // 自动聚焦终端
     setTimeout(() => {
       if (terminalRef.value) {
@@ -1644,19 +1709,19 @@ const handleAutocompleteSelect = (text: string) => {
     // 我们手动更新 input 状态，并保持弹窗打开
     // 注意：需要检查 commandAutocomplete 开关是否开启
     if (text.endsWith(' ') && commandIntelligenceSettings.value.commandAutocomplete) {
-        autocompleteInput.value = newCommand
-        // 确保符合显示条件 (非空等)，通常来说加上命令后肯定符合
-        showAutocomplete.value = true
-        return // 早期返回，跳过下面的关闭逻辑
+      autocompleteInput.value = newCommand
+      // 确保符合显示条件 (非空等)，通常来说加上命令后肯定符合
+      showAutocomplete.value = true
+      return // 早期返回，跳过下面的关闭逻辑
     }
   }
-  
+
   // 默认：补全结束，关闭弹窗并清理状态
   showAutocomplete.value = false
   autocompleteInput.value = ''
   showGhostText.value = false
   ghostText.value = ''
-  
+
   // 强制重置 CommandAutocomplete 组件的所有状态，确保下次能正常触发
   if (autocompleteRef.value) {
     autocompleteRef.value.forceReset?.()
@@ -1666,32 +1731,32 @@ const handleAutocompleteSelect = (text: string) => {
 // 处理 Ghost Text 接受（Tab 或 → 键）
 const acceptGhostText = () => {
   if (!showGhostText.value || !ghostText.value) return false
-  
+
   // 发送补全文本到终端
   window.electronAPI.ssh.write(props.connectionId, ghostText.value)
-  
+
   // 更新命令缓冲
   if (terminalRef.value) {
     terminalRef.value.updateCommandBuffer?.(ghostFullText.value)
   }
-  
+
   // 清除 ghost text
   showGhostText.value = false
   ghostText.value = ''
   ghostFullText.value = ''
-  
+
   return true
 }
 
 // 处理 AI 命令执行
 const handleAICommandExecute = async (command: string) => {
   if (!command) return
-  
+
   // 使用 Ctrl+U 清除当前行输入，然后发送新命令
   // \x15 = Ctrl+U (清除光标前的所有内容)
   // \x0b = Ctrl+K (清除光标后的所有内容，可选)
   window.electronAPI.ssh.write(props.connectionId, '\x15' + command + '\r')
-  
+
   // 记录 AI 生成的命令到历史
   try {
     await window.electronAPI.commandHistory?.add?.({
@@ -1703,17 +1768,17 @@ const handleAICommandExecute = async (command: string) => {
   } catch (error) {
     console.error('Failed to record AI command:', error)
   }
-  
+
   // 更新命令缓冲
   if (terminalRef.value) {
     terminalRef.value.updateCommandBuffer?.('')
   }
-  
+
   // 关闭 AI 建议
   showAICommandSuggest.value = false
   aiCommandQuery.value = ''
   autocompleteInput.value = ''
-  
+
   // 聚焦终端
   setTimeout(() => terminalRef.value?.focus(), 50)
 }
@@ -1721,20 +1786,20 @@ const handleAICommandExecute = async (command: string) => {
 // 处理 AI 命令编辑（Tab 键）
 const handleAICommandEdit = (command: string) => {
   if (!command) return
-  
+
   // 使用 Ctrl+U 清除当前行输入，然后发送新命令（不执行）
   window.electronAPI.ssh.write(props.connectionId, '\x15' + command)
-  
+
   // 更新命令缓冲
   if (terminalRef.value) {
     terminalRef.value.updateCommandBuffer?.(command)
   }
-  
+
   // 关闭 AI 建议
   showAICommandSuggest.value = false
   aiCommandQuery.value = ''
   autocompleteInput.value = command
-  
+
   // 聚焦终端
   setTimeout(() => terminalRef.value?.focus(), 50)
 }
@@ -1745,7 +1810,7 @@ const handleAICommandEdit = (command: string) => {
 const handleExplainQuery = (input: string) => {
   // 检查开关是否开启
   if (!commandIntelligenceSettings.value.commandExplain) return false
-  
+
   if (isExplainQuery(input)) {
     const command = parseExplainQuery(input)
     if (command) {
@@ -1850,9 +1915,18 @@ defineExpose({
 }
 
 @keyframes pulse {
-  0% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.2); opacity: 0.7; }
-  100% { transform: scale(1); opacity: 1; }
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .connection-info {
@@ -2087,7 +2161,9 @@ defineExpose({
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .loading-text {
@@ -2388,8 +2464,12 @@ defineExpose({
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .reconnect-text {

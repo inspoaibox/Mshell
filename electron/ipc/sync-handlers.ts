@@ -8,7 +8,7 @@ export function registerSyncHandlers(): void {
   // 获取同步配置
   ipcMain.handle('sync:getConfig', async () => {
     try {
-      return { success: true, data: syncManager.getConfig() }
+      return { success: true, data: syncManager.getConfigForRenderer() }
     } catch (error: any) {
       return { success: false, error: error.message }
     }
@@ -18,6 +18,15 @@ export function registerSyncHandlers(): void {
   ipcMain.handle('sync:updateConfig', async (_event, updates) => {
     try {
       await syncManager.updateConfig(updates)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('sync:setEncryptionPassword', async (_event, password: string) => {
+    try {
+      await syncManager.setEncryptionPassword(password)
       return { success: true }
     } catch (error: any) {
       return { success: false, error: error.message }
@@ -85,14 +94,17 @@ export function registerSyncHandlers(): void {
   })
 
   // 查找已存在的 GitLab Snippet
-  ipcMain.handle('sync:findExistingSnippet', async (_event, token: string, instanceUrl?: string) => {
-    try {
-      const result = await syncManager.findExistingSnippet(token, instanceUrl)
-      return { success: true, data: result }
-    } catch (error: any) {
-      return { success: false, error: error.message }
+  ipcMain.handle(
+    'sync:findExistingSnippet',
+    async (_event, token: string, instanceUrl?: string) => {
+      try {
+        const result = await syncManager.findExistingSnippet(token, instanceUrl)
+        return { success: true, data: result }
+      } catch (error: any) {
+        return { success: false, error: error.message }
+      }
     }
-  })
+  )
 
   // 上传到 GitLab
   ipcMain.handle('sync:uploadToGitLab', async () => {

@@ -40,24 +40,20 @@
       </el-form-item>
 
       <el-form-item label="Scrollback Lines">
-        <el-input-number
-          v-model="settings.scrollback"
-          :min="100"
-          :max="50000"
-          :step="1000"
-        />
+        <el-input-number v-model="settings.scrollback" :min="100" :max="50000" :step="1000" />
       </el-form-item>
 
       <el-form-item label="Renderer">
         <el-radio-group v-model="settings.rendererType">
+          <el-radio value="auto">Auto</el-radio>
           <el-radio value="webgl">WebGL (Fastest)</el-radio>
           <el-radio value="canvas">Canvas</el-radio>
           <el-radio value="dom">DOM</el-radio>
         </el-radio-group>
       </el-form-item>
 
-      <el-form-item label="Transparency">
-        <el-slider v-model="settings.transparency" :min="0" :max="100" :step="5" show-input />
+      <el-form-item label="Copy on Select">
+        <el-switch v-model="settings.copyOnSelect" />
       </el-form-item>
     </el-form>
 
@@ -80,8 +76,8 @@ interface TerminalSettings {
   cursorStyle: 'block' | 'underline' | 'bar'
   cursorBlink: boolean
   scrollback: number
-  rendererType: 'dom' | 'canvas' | 'webgl'
-  transparency: number
+  rendererType: 'auto' | 'dom' | 'canvas' | 'webgl'
+  copyOnSelect: boolean
 }
 
 interface Props {
@@ -105,8 +101,8 @@ const defaultSettings: TerminalSettings = {
   cursorStyle: 'block',
   cursorBlink: true,
   scrollback: 10000,
-  rendererType: 'webgl',
-  transparency: 0
+  rendererType: 'auto',
+  copyOnSelect: false
 }
 
 const settings = reactive<TerminalSettings>({ ...props.currentSettings })
@@ -115,6 +111,9 @@ watch(
   () => props.modelValue,
   (newValue) => {
     visible.value = newValue
+    if (newValue) {
+      Object.assign(settings, props.currentSettings)
+    }
   }
 )
 

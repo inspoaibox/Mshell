@@ -2,41 +2,52 @@
   <div id="app">
     <!-- 锁定屏幕 -->
     <LockScreen v-if="isLocked" @unlock="handleUnlock" />
-    
+
     <div class="app-layout" v-show="!isLocked">
       <Sidebar @menu-select="handleMenuSelect" />
-      
+
       <div class="app-main">
         <div class="app-header">
-           <div class="app-title-drag"></div>
-           <div class="header-actions">
-              <el-tooltip content="分屏视图" placement="bottom">
-                <el-button 
-                  size="small" 
-                  :icon="Grid" 
-                  @click="toggleSplitView" 
-                  :disabled="appStore.tabs.length < 2"
-                  :type="showSplitView ? 'primary' : ''"
-                  circle 
-                />
-              </el-tooltip>
-              <el-tooltip content="AI 助手" placement="bottom">
-                <el-button 
-                  size="small" 
-                  :icon="ChatDotRound" 
-                  @click="appStore.showAIChat = !appStore.showAIChat" 
-                  :type="appStore.showAIChat ? 'primary' : ''"
-                  circle 
-                />
-              </el-tooltip>
-              <el-button type="primary" size="small" :icon="Plus" @click="appStore.openSessionForm()" circle />
-              <el-tooltip content="批量导入" placement="bottom">
-                <el-button size="small" :icon="Upload" @click="showBatchImport = true" circle />
-              </el-tooltip>
-              <el-button size="small" :icon="Lightning" @click="appStore.showQuickConnect = true" circle />
-           </div>
+          <div class="app-title-drag"></div>
+          <div class="header-actions">
+            <el-tooltip content="分屏视图" placement="bottom">
+              <el-button
+                size="small"
+                :icon="Grid"
+                @click="toggleSplitView"
+                :disabled="appStore.tabs.length < 2"
+                :type="showSplitView ? 'primary' : ''"
+                circle
+              />
+            </el-tooltip>
+            <el-tooltip content="AI 助手" placement="bottom">
+              <el-button
+                size="small"
+                :icon="ChatDotRound"
+                @click="appStore.showAIChat = !appStore.showAIChat"
+                :type="appStore.showAIChat ? 'primary' : ''"
+                circle
+              />
+            </el-tooltip>
+            <el-button
+              type="primary"
+              size="small"
+              :icon="Plus"
+              @click="appStore.openSessionForm()"
+              circle
+            />
+            <el-tooltip content="批量导入" placement="bottom">
+              <el-button size="small" :icon="Upload" @click="showBatchImport = true" circle />
+            </el-tooltip>
+            <el-button
+              size="small"
+              :icon="Lightning"
+              @click="appStore.showQuickConnect = true"
+              circle
+            />
+          </div>
         </div>
-        
+
         <!-- AI 聊天面板 -->
         <transition name="slide-right">
           <AIChatPanel v-if="appStore.showAIChat" />
@@ -45,7 +56,7 @@
         <div class="app-content">
           <div v-show="appStore.activeView === 'sessions'" class="content-panel">
             <!-- 会话列表折叠按钮 -->
-            <div 
+            <div
               class="session-panel-toggle"
               :class="{ collapsed: !showSessionList }"
               @click="toggleSessionList"
@@ -55,25 +66,31 @@
                 <ArrowRight v-else />
               </el-icon>
             </div>
-            
+
             <!-- 会话列表面板 -->
             <transition name="slide-session-panel">
               <div v-show="showSessionList" class="sessions-panel glass-panel">
-                <SessionList
-                  @connect="handleConnect"
-                  @edit="handleEditSession"
-                />
+                <SessionList @connect="handleConnect" @edit="handleEditSession" />
               </div>
             </transition>
-            
-            <div class="terminal-panel" :class="{ 'split-mode': showSplitView && sshTerminals.length >= 2, 'expanded': !showSessionList }">
+
+            <div
+              class="terminal-panel"
+              :class="{
+                'split-mode': showSplitView && sshTerminals.length >= 2,
+                expanded: !showSessionList
+              }"
+            >
               <!-- 分屏工具栏 -->
               <div v-show="showSplitView && sshTerminals.length >= 2" class="split-toolbar">
                 <div class="toolbar-left">
                   <span class="terminal-count">{{ sshTerminals.length }} 个终端</span>
                   <div class="divider-vertical"></div>
                   <!-- 广播模式开关 -->
-                  <el-tooltip content="开启/关闭广播模式 (Ctrl+B) - 输入将同步到所有终端" placement="bottom">
+                  <el-tooltip
+                    content="开启/关闭广播模式 (Ctrl+B) - 输入将同步到所有终端"
+                    placement="bottom"
+                  >
                     <el-button
                       :type="broadcastMode ? 'warning' : ''"
                       size="small"
@@ -115,27 +132,28 @@
                       </el-button>
                     </el-tooltip>
                   </el-button-group>
-                  
+
                   <div class="divider-vertical"></div>
 
-                  <el-button size="small" @click="showSplitView = false">
-                    退出分屏
-                  </el-button>
+                  <el-button size="small" @click="showSplitView = false"> 退出分屏 </el-button>
                 </div>
               </div>
 
               <!-- 分屏内容区域 -->
-              <div 
-                v-if="showSplitView && sshTerminals.length >= 2" 
+              <div
+                v-if="showSplitView && sshTerminals.length >= 2"
                 class="split-terminals-container"
-                :class="{ 'broadcast-active': broadcastMode, 'has-maximized': maximizedPaneId !== null }"
+                :class="{
+                  'broadcast-active': broadcastMode,
+                  'has-maximized': maximizedPaneId !== null
+                }"
                 :style="maximizedPaneId ? {} : gridStyle"
               >
                 <div
                   v-for="(tab, index) in sshTerminals"
                   :key="`split-${tab.id}`"
                   class="split-terminal-pane"
-                  :class="{ 
+                  :class="{
                     active: appStore.activeTab === tab.id,
                     maximized: maximizedPaneId === tab.id,
                     hidden: maximizedPaneId !== null && maximizedPaneId !== tab.id
@@ -145,22 +163,23 @@
                   <div class="pane-header" @dblclick="toggleMaximize(tab.id)">
                     <div class="pane-info">
                       <span class="pane-index">{{ index + 1 }}</span>
-                      <span class="pane-title">{{ tab.session?.username }}@{{ tab.session?.host }}</span>
+                      <span class="pane-title"
+                        >{{ tab.session?.username }}@{{ tab.session?.host }}</span
+                      >
                       <span class="pane-name">({{ tab.name }})</span>
                     </div>
                     <div class="pane-actions">
-                      <el-tooltip :content="maximizedPaneId === tab.id ? '还原' : '最大化'" placement="top">
-                        <el-button 
-                          link 
-                          size="small"
-                          @click.stop="toggleMaximize(tab.id)"
-                        >
+                      <el-tooltip
+                        :content="maximizedPaneId === tab.id ? '还原' : '最大化'"
+                        placement="top"
+                      >
+                        <el-button link size="small" @click.stop="toggleMaximize(tab.id)">
                           {{ maximizedPaneId === tab.id ? '🗗' : '🗖' }}
                         </el-button>
                       </el-tooltip>
-                      <el-button 
-                        type="danger" 
-                        link 
+                      <el-button
+                        type="danger"
+                        link
                         size="small"
                         @click.stop="handleCloseTab(tab.id)"
                       >
@@ -181,7 +200,7 @@
                   </div>
                 </div>
               </div>
-              
+
               <!-- 标签页视图 -->
               <el-tabs
                 v-if="!showSplitView || sshTerminals.length < 2"
@@ -191,11 +210,7 @@
                 class="premium-tabs"
                 @tab-remove="appStore.removeTab"
               >
-                <el-tab-pane
-                  v-for="(tab, index) in appStore.tabs"
-                  :key="tab.id"
-                  :name="tab.id"
-                >
+                <el-tab-pane v-for="(tab, index) in appStore.tabs" :key="tab.id" :name="tab.id">
                   <template #label>
                     <DraggableTab
                       :tab-id="tab.id"
@@ -227,17 +242,21 @@
                     :terminal-options="appStore.terminalOptions"
                   />
                 </el-tab-pane>
-                
+
                 <template v-if="appStore.tabs.length === 0">
                   <div class="empty-state">
                     <div class="empty-state-content">
                       <div class="empty-icon-wrapper">
-                         <el-icon :size="48"><Connection /></el-icon>
+                        <el-icon :size="48"><Connection /></el-icon>
                       </div>
                       <h3>{{ t('home.readyToConnect') }}</h3>
                       <p>{{ t('home.selectSessionHint') }}</p>
                       <div class="empty-actions">
-                        <el-button type="primary" @click="appStore.showSessionForm = true" size="large">
+                        <el-button
+                          type="primary"
+                          @click="appStore.showSessionForm = true"
+                          size="large"
+                        >
                           {{ t('home.createNewSession') }}
                         </el-button>
                         <el-button @click="appStore.showQuickConnect = true" size="large">
@@ -250,21 +269,21 @@
               </el-tabs>
             </div>
           </div>
-          
+
           <div v-show="appStore.activeView === 'sftp'" class="content-panel">
             <SFTPPanel />
           </div>
-          
+
           <div v-show="appStore.activeView === 'port-forward'" class="content-panel">
             <PortForwardPanel v-if="appStore.activeTab" :connection-id="appStore.activeTab" />
             <div v-else class="empty-state">
-               <div class="empty-state-content">
-                  <el-icon :size="64"><Connection /></el-icon>
-                  <p>Please establish an SSH connection first.</p>
-               </div>
+              <div class="empty-state-content">
+                <el-icon :size="64"><Connection /></el-icon>
+                <p>Please establish an SSH connection first.</p>
+              </div>
             </div>
           </div>
-          
+
           <div v-show="appStore.activeView === 'snippets'" class="content-panel">
             <SnippetPanel />
           </div>
@@ -272,32 +291,32 @@
           <div v-show="appStore.activeView === 'statistics'" class="content-panel">
             <StatisticsPanel />
           </div>
-          
+
           <div v-show="appStore.activeView === 'tasks'" class="content-panel">
             <TaskSchedulerPanel />
           </div>
-          
+
           <div v-show="appStore.activeView === 'workflows'" class="content-panel">
             <WorkflowPanel />
           </div>
-          
+
           <div v-show="appStore.activeView === 'keys'" class="content-panel">
             <SSHKeyPanel />
           </div>
-          
+
           <div v-show="appStore.activeView === 'logs'" class="content-panel">
             <LogPanel />
           </div>
-          
+
           <div v-show="appStore.activeView === 'templates'" class="content-panel">
             <SessionTemplatePanel />
           </div>
-          
+
           <div v-show="appStore.activeView === 'settings'" class="content-panel">
             <SettingsPanel />
           </div>
         </div>
-        
+
         <StatusBar
           :active-connections="appStore.tabs.length"
           :current-session="appStore.currentSession"
@@ -306,25 +325,22 @@
         />
       </div>
     </div>
-    
+
     <!-- Dialogs -->
     <SessionForm
       v-model="appStore.showSessionForm"
       :session="appStore.editingSession"
       @save="handleSaveSession"
     />
-    
-    <QuickConnect 
-      v-model="appStore.showQuickConnect" 
-      @connect="handleQuickConnectSubmit" 
-    />
-    
+
+    <QuickConnect v-model="appStore.showQuickConnect" @connect="handleQuickConnectSubmit" />
+
     <BatchImport
       v-model="showBatchImport"
       :groups="appStore.groups"
       @imported="handleBatchImported"
     />
-    
+
     <TerminalSettings
       v-model="appStore.showTerminalSettings"
       :current-settings="appStore.terminalOptions"
@@ -336,7 +352,16 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, Plus, Lightning, Grid, ChatDotRound, Upload, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import {
+  Connection,
+  Plus,
+  Lightning,
+  Grid,
+  ChatDotRound,
+  Upload,
+  ArrowLeft,
+  ArrowRight
+} from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 import { useAIStore } from '@/stores/ai'
 import { v4 as uuidv4 } from 'uuid'
@@ -431,8 +456,8 @@ const gridStyle = computed(() => {
 // 计算属性：获取所有SSH终端标签（排除分屏标签）
 const sshTerminals = computed(() => {
   return appStore.tabs
-    .filter(tab => !tab.isSplit)
-    .map(tab => ({
+    .filter((tab) => !tab.isSplit)
+    .map((tab) => ({
       id: tab.id,
       name: tab.name,
       session: tab.session
@@ -446,7 +471,7 @@ const toggleSplitView = () => {
     return
   }
   showSplitView.value = !showSplitView.value
-  
+
   // 退出分屏时重置状态
   if (!showSplitView.value) {
     broadcastMode.value = false
@@ -472,9 +497,9 @@ const toggleBroadcastMode = () => {
 // 处理广播输入 - 通过 TerminalTab 的 @broadcast-input 事件触发
 const handleBroadcastInput = (data: string, sourceId: string) => {
   if (!broadcastMode.value || !showSplitView.value) return
-  
+
   // 向所有其他终端发送相同的输入
-  sshTerminals.value.forEach(terminal => {
+  sshTerminals.value.forEach((terminal) => {
     if (terminal.id !== sourceId) {
       window.electronAPI.ssh.write(terminal.id, data)
     }
@@ -494,7 +519,7 @@ const toggleMaximize = (paneId: string) => {
 const handlePaneClick = (tabId: string) => {
   appStore.activeTab = tabId
   // 更新焦点索引
-  const index = sshTerminals.value.findIndex(t => t.id === tabId)
+  const index = sshTerminals.value.findIndex((t) => t.id === tabId)
   if (index !== -1) {
     focusedPaneIndex.value = index
   }
@@ -503,7 +528,7 @@ const handlePaneClick = (tabId: string) => {
 // 快捷键切换焦点到下一个面板
 const focusNextPane = () => {
   if (!showSplitView.value || sshTerminals.value.length < 2) return
-  
+
   focusedPaneIndex.value = (focusedPaneIndex.value + 1) % sshTerminals.value.length
   const nextTab = sshTerminals.value[focusedPaneIndex.value]
   if (nextTab) {
@@ -514,8 +539,9 @@ const focusNextPane = () => {
 // 快捷键切换焦点到上一个面板
 const focusPrevPane = () => {
   if (!showSplitView.value || sshTerminals.value.length < 2) return
-  
-  focusedPaneIndex.value = (focusedPaneIndex.value - 1 + sshTerminals.value.length) % sshTerminals.value.length
+
+  focusedPaneIndex.value =
+    (focusedPaneIndex.value - 1 + sshTerminals.value.length) % sshTerminals.value.length
   const prevTab = sshTerminals.value[focusedPaneIndex.value]
   if (prevTab) {
     appStore.activeTab = prevTab.id
@@ -525,15 +551,18 @@ const focusPrevPane = () => {
 // 快捷键切换焦点（按方向）
 const focusPaneByDirection = (direction: 'up' | 'down' | 'left' | 'right') => {
   if (!showSplitView.value || sshTerminals.value.length < 2) return
-  
+
   const count = sshTerminals.value.length
-  const cols = layoutMode.value === 'vertical' ? 1 : 
-               layoutMode.value === 'horizontal' ? count :
-               Math.ceil(Math.sqrt(count))
-  
+  const cols =
+    layoutMode.value === 'vertical'
+      ? 1
+      : layoutMode.value === 'horizontal'
+        ? count
+        : Math.ceil(Math.sqrt(count))
+
   const currentIndex = focusedPaneIndex.value
   let newIndex = currentIndex
-  
+
   switch (direction) {
     case 'left':
       if (currentIndex % cols > 0) newIndex = currentIndex - 1
@@ -548,7 +577,7 @@ const focusPaneByDirection = (direction: 'up' | 'down' | 'left' | 'right') => {
       if (currentIndex + cols < count) newIndex = currentIndex + cols
       break
   }
-  
+
   if (newIndex !== currentIndex && newIndex >= 0 && newIndex < count) {
     focusedPaneIndex.value = newIndex
     appStore.activeTab = sshTerminals.value[newIndex].id
@@ -558,12 +587,12 @@ const focusPaneByDirection = (direction: 'up' | 'down' | 'left' | 'right') => {
 // 在分屏模式下关闭标签
 const handleCloseTab = (tabId: string) => {
   appStore.removeTab(tabId)
-  
+
   // 如果关闭的是最大化的面板，取消最大化
   if (maximizedPaneId.value === tabId) {
     maximizedPaneId.value = null
   }
-  
+
   // 如果关闭后标签数量少于2个，退出分屏模式
   if (sshTerminals.value.length < 2) {
     showSplitView.value = false
@@ -586,10 +615,10 @@ const ipcCleanups: Array<() => void> = []
 onMounted(async () => {
   // 初始化应用状态
   await appStore.initialize()
-  
+
   // 加载 AI 聊天记录
   aiStore.loadChatHistory()
-  
+
   // 监听设置变化（保存取消函数）
   const unsubSettings = window.electronAPI.settings.onChange((newSettings) => {
     appStore.applySettings(newSettings)
@@ -598,26 +627,28 @@ onMounted(async () => {
 
   // 注册快捷键
   setupKeyboardShortcuts()
-  
+
   // 监听主进程发送的快捷键事件
   setupMainProcessShortcuts()
-  
+
   // 监听锁定事件（从后端触发）
   const unsubLocked = window.electronAPI.sessionLock?.onLocked?.(() => {
     isLocked.value = true
   })
   if (unsubLocked) ipcCleanups.push(unsubLocked)
-  
+
   const unsubUnlocked = window.electronAPI.sessionLock?.onUnlocked?.(() => {
     isLocked.value = false
   })
   if (unsubUnlocked) ipcCleanups.push(unsubUnlocked)
-  
+
   // 监听自定义锁定事件（从前端触发）
-  const handleSessionLocked = () => { isLocked.value = true }
+  const handleSessionLocked = () => {
+    isLocked.value = true
+  }
   window.addEventListener('session-locked', handleSessionLocked)
   ipcCleanups.push(() => window.removeEventListener('session-locked', handleSessionLocked))
-  
+
   // 检查初始锁定状态
   try {
     const status = await window.electronAPI.sessionLock?.getStatus?.()
@@ -631,8 +662,12 @@ onMounted(async () => {
 
 onUnmounted(() => {
   // 清理所有 IPC 监听器
-  ipcCleanups.forEach(cleanup => {
-    try { cleanup() } catch (e) { /* ignore */ }
+  ipcCleanups.forEach((cleanup) => {
+    try {
+      cleanup()
+    } catch (e) {
+      /* ignore */
+    }
   })
   ipcCleanups.length = 0
 })
@@ -643,34 +678,36 @@ onUnmounted(() => {
  */
 function setupMainProcessShortcuts() {
   console.log('[App] Setting up main process shortcuts...')
-  
+
   // Ctrl+N: 新建会话
   const u1 = window.electronAPI.onShortcut('new-connection', () => {
     console.log('[Shortcut IPC] New connection triggered')
     appStore.showSessionForm = true
   })
   if (u1) ipcCleanups.push(u1)
-  
+
   // Ctrl+T: 快速连接
   const u2 = window.electronAPI.onShortcut('quick-connect', () => {
     console.log('[Shortcut IPC] Quick connect triggered')
     appStore.showQuickConnect = true
   })
   if (u2) ipcCleanups.push(u2)
-  
+
   // Ctrl+F: 搜索
   const u3 = window.electronAPI.onShortcut('search', () => {
     console.log('[Shortcut IPC] Search triggered')
     appStore.activeView = 'sessions'
     setTimeout(() => {
-      const searchInput = document.querySelector('.session-list .el-input__inner') as HTMLInputElement
+      const searchInput = document.querySelector(
+        '.session-list .el-input__inner'
+      ) as HTMLInputElement
       if (searchInput) {
         searchInput.focus()
       }
     }, 100)
   })
   if (u3) ipcCleanups.push(u3)
-  
+
   // Ctrl+W: 关闭当前标签
   const u4 = window.electronAPI.onShortcut('close-tab', () => {
     console.log('[Shortcut IPC] Close tab triggered')
@@ -679,28 +716,28 @@ function setupMainProcessShortcuts() {
     }
   })
   if (u4) ipcCleanups.push(u4)
-  
+
   // Ctrl+,: 打开设置
   const u5 = window.electronAPI.onShortcut('settings', () => {
     console.log('[Shortcut IPC] Settings triggered')
     appStore.activeView = 'settings'
   })
   if (u5) ipcCleanups.push(u5)
-  
+
   // Ctrl+Tab: 下一个标签
   const u6 = window.electronAPI.onShortcut('next-tab', () => {
     console.log('[Shortcut IPC] Next tab triggered')
     appStore.nextTab()
   })
   if (u6) ipcCleanups.push(u6)
-  
+
   // Ctrl+Shift+Tab: 上一个标签
   const u7 = window.electronAPI.onShortcut('prev-tab', () => {
     console.log('[Shortcut IPC] Previous tab triggered')
     appStore.prevTab()
   })
   if (u7) ipcCleanups.push(u7)
-  
+
   // Ctrl+Alt+L: 锁定会话
   const u8 = window.electronAPI.onShortcut('lock-session', async () => {
     console.log('[Shortcut IPC] Lock session triggered')
@@ -716,7 +753,7 @@ function setupMainProcessShortcuts() {
     }
   })
   if (u8) ipcCleanups.push(u8)
-  
+
   // Ctrl+1~9: 切换到指定标签
   const u9 = window.electronAPI.onShortcut('switch-tab', (tabNum: string) => {
     console.log('[Shortcut IPC] Switch tab triggered:', tabNum)
@@ -726,7 +763,7 @@ function setupMainProcessShortcuts() {
     }
   })
   if (u9) ipcCleanups.push(u9)
-  
+
   console.log('[App] Main process shortcuts registered')
 }
 
@@ -735,7 +772,7 @@ function setupMainProcessShortcuts() {
  */
 async function setupKeyboardShortcuts() {
   console.log('[App] Setting up keyboard shortcuts...')
-  
+
   // 获取保存的快捷键配置
   let savedShortcuts: Record<string, any> = {}
   try {
@@ -745,17 +782,27 @@ async function setupKeyboardShortcuts() {
   } catch (error) {
     console.error('[App] Failed to load saved shortcuts:', error)
   }
-  
+
   // 辅助函数：注册快捷键，考虑保存的配置
-  const registerShortcut = (id: string, defaultConfig: { key: string, ctrl?: boolean, alt?: boolean, shift?: boolean, description: string, action: () => void }) => {
+  const registerShortcut = (
+    id: string,
+    defaultConfig: {
+      key: string
+      ctrl?: boolean
+      alt?: boolean
+      shift?: boolean
+      description: string
+      action: () => void
+    }
+  ) => {
     const saved = savedShortcuts[id]
-    
+
     // 如果保存的配置中 key 为空，表示用户清除了该快捷键，不注册
     if (saved && !saved.key) {
       console.log(`[App] Shortcut ${id} is cleared, skipping registration`)
       return
     }
-    
+
     const config = {
       ...defaultConfig,
       key: saved?.key || defaultConfig.key,
@@ -763,10 +810,10 @@ async function setupKeyboardShortcuts() {
       alt: saved?.alt !== undefined ? saved.alt : defaultConfig.alt,
       shift: saved?.shift !== undefined ? saved.shift : defaultConfig.shift
     }
-    
+
     keyboardShortcutManager.register(id, config)
   }
-  
+
   // Ctrl+N: 新建会话
   registerShortcut('new-session', {
     key: 'n',
@@ -835,7 +882,9 @@ async function setupKeyboardShortcuts() {
       appStore.activeView = 'sessions'
       // 聚焦到搜索框
       setTimeout(() => {
-        const searchInput = document.querySelector('.session-list .el-input__inner') as HTMLInputElement
+        const searchInput = document.querySelector(
+          '.session-list .el-input__inner'
+        ) as HTMLInputElement
         if (searchInput) {
           searchInput.focus()
         }
@@ -889,7 +938,7 @@ async function setupKeyboardShortcuts() {
       }
     })
   }
-  
+
   // Ctrl+G: 切换分屏视图
   registerShortcut('toggle-split-view', {
     key: 'g',
@@ -900,7 +949,7 @@ async function setupKeyboardShortcuts() {
       toggleSplitView()
     }
   })
-  
+
   // Ctrl+\\: 切换会话列表显示
   registerShortcut('toggle-session-list', {
     key: '\\',
@@ -911,7 +960,7 @@ async function setupKeyboardShortcuts() {
       toggleSessionList()
     }
   })
-  
+
   // Ctrl+B: 切换广播模式
   registerShortcut('toggle-broadcast', {
     key: 'b',
@@ -924,7 +973,7 @@ async function setupKeyboardShortcuts() {
       }
     }
   })
-  
+
   // Alt+方向键: 在分屏面板间切换焦点
   registerShortcut('focus-pane-left', {
     key: 'ArrowLeft',
@@ -936,7 +985,7 @@ async function setupKeyboardShortcuts() {
       }
     }
   })
-  
+
   registerShortcut('focus-pane-right', {
     key: 'ArrowRight',
     alt: true,
@@ -947,7 +996,7 @@ async function setupKeyboardShortcuts() {
       }
     }
   })
-  
+
   registerShortcut('focus-pane-up', {
     key: 'ArrowUp',
     alt: true,
@@ -958,7 +1007,7 @@ async function setupKeyboardShortcuts() {
       }
     }
   })
-  
+
   registerShortcut('focus-pane-down', {
     key: 'ArrowDown',
     alt: true,
@@ -969,7 +1018,7 @@ async function setupKeyboardShortcuts() {
       }
     }
   })
-  
+
   // Alt+]: 下一个分屏面板
   registerShortcut('focus-next-pane', {
     key: ']',
@@ -981,7 +1030,7 @@ async function setupKeyboardShortcuts() {
       }
     }
   })
-  
+
   // Alt+[: 上一个分屏面板
   registerShortcut('focus-prev-pane', {
     key: '[',
@@ -993,7 +1042,7 @@ async function setupKeyboardShortcuts() {
       }
     }
   })
-  
+
   console.log('[App] Keyboard shortcuts registered:', keyboardShortcutManager.getAll().size)
 }
 
@@ -1016,7 +1065,7 @@ const handleConnect = async (session: SessionConfig) => {
     session,
     isSplit: false
   }
-  
+
   appStore.addTab(tab)
 
   // 更新使用统计
@@ -1035,10 +1084,9 @@ const handleConvertToSplit = (connectionId: string, session: SessionConfig) => {
     ElMessage.warning('至少需要2个打开的SSH会话才能使用分屏视图')
     return
   }
-  
-  
+
   showSplitView.value = true
-  
+
   ElMessage.success('已切换到分屏模式')
 }
 
@@ -1059,7 +1107,7 @@ const handleQuickConnectSubmit = (config: {
     createdAt: new Date(),
     updatedAt: new Date()
   }
-  
+
   handleConnect(session)
 }
 
@@ -1088,9 +1136,16 @@ const handleSaveSession = async (sessionData: Partial<SessionConfig>) => {
   }
 }
 
-const handleSaveTerminalSettings = (settings: any) => {
-  appStore.updateTerminalOptions(settings)
-  ElMessage.success('Terminal settings saved')
+const handleSaveTerminalSettings = async (settings: any) => {
+  try {
+    appStore.updateTerminalOptions(settings)
+    await window.electronAPI.settings.update({
+      terminal: settings
+    })
+    ElMessage.success('终端设置已保存')
+  } catch (error: any) {
+    ElMessage.error(`保存终端设置失败: ${error.message}`)
+  }
 }
 </script>
 
@@ -1290,7 +1345,9 @@ body,
   color: var(--text-secondary);
   font-size: var(--text-sm);
   font-weight: 500;
-  transition: color var(--transition-fast), background-color var(--transition-fast);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
   background: transparent;
   position: relative;
   margin-right: 4px;
@@ -1356,11 +1413,7 @@ body,
   align-items: center;
   justify-content: center;
   height: 100%;
-  background: radial-gradient(
-    ellipse at center,
-    var(--bg-secondary) 0%,
-    var(--bg-main) 70%
-  );
+  background: radial-gradient(ellipse at center, var(--bg-secondary) 0%, var(--bg-main) 70%);
   position: relative;
   overflow: hidden;
 }
@@ -1370,11 +1423,7 @@ body,
   position: absolute;
   width: 500px;
   height: 500px;
-  background: radial-gradient(
-    circle,
-    rgba(14, 165, 233, 0.05) 0%,
-    transparent 70%
-  );
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.05) 0%, transparent 70%);
   border-radius: 50%;
   animation: pulse 4s ease-in-out infinite;
 }
@@ -1391,11 +1440,7 @@ body,
 .empty-icon-wrapper {
   width: 120px;
   height: 120px;
-  background: linear-gradient(
-    135deg,
-    rgba(14, 165, 233, 0.15),
-    rgba(99, 102, 241, 0.15)
-  );
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.15), rgba(99, 102, 241, 0.15));
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -1411,11 +1456,7 @@ body,
   position: absolute;
   inset: -2px;
   border-radius: 50%;
-  background: linear-gradient(
-    135deg,
-    var(--primary-color),
-    var(--accent-color)
-  );
+  background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
   opacity: 0.2;
   filter: blur(20px);
   z-index: -1;
@@ -1468,17 +1509,17 @@ body,
   .sessions-panel {
     width: 240px;
   }
-  
+
   .app-header {
     height: 48px;
     padding: 0 var(--spacing-md);
   }
-  
+
   .empty-icon-wrapper {
     width: 96px;
     height: 96px;
   }
-  
+
   .empty-state h3 {
     font-size: var(--text-xl);
   }
@@ -1486,7 +1527,8 @@ body,
 
 /* 动画 */
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     opacity: 0.5;
   }
