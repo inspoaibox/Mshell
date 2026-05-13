@@ -544,6 +544,17 @@ h5, h6 { font-size: var(--text-sm); }
   border-color: var(--info-color);
 }
 
+.terminal-connection-notification {
+  max-width: min(420px, calc(100vw - 32px));
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.terminal-connection-notification .el-notification__content {
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 /* Alert 提示框优化 */
 .el-alert {
   background-color: var(--bg-tertiary) !important;

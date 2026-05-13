@@ -53,11 +53,14 @@
             :group-name="group.name"
             @drop="handleSessionDropToGroup"
           >
-            <div class="session-items">
+            <div
+              class="session-items"
+              :style="getSessionItemsStyle(getGroupSessions(group.id).length)"
+            >
               <VirtualList
                 v-if="getGroupSessions(group.id).length > 0"
                 :items="getGroupSessions(group.id)"
-                :item-height="54"
+                :item-height="SESSION_ITEM_HEIGHT"
                 :buffer="3"
                 key-field="id"
               >
@@ -155,11 +158,14 @@
             </div>
           </template>
           
-          <div class="session-items">
+          <div
+            class="session-items"
+            :style="getSessionItemsStyle(ungroupedSessions.length)"
+          >
             <VirtualList
               v-if="ungroupedSessions.length > 0"
               :items="ungroupedSessions"
-              :item-height="54"
+              :item-height="SESSION_ITEM_HEIGHT"
               :buffer="3"
               key-field="id"
             >
@@ -353,6 +359,7 @@ const emit = defineEmits<{
 
 const searchQuery = ref('')
 const activeGroups = ref<string[]>(['ungrouped'])
+const SESSION_ITEM_HEIGHT = 54
 const showGroupDialog = ref(false)
 const showRenameDialog = ref(false)
 const showMoveDialog = ref(false)
@@ -400,6 +407,10 @@ const getGroupSessions = (groupId: string) => {
   const sessionIds = new Set(group.sessions)
   return filteredSessions.value.filter((session) => sessionIds.has(session.id))
 }
+
+const getSessionItemsStyle = (count: number) => ({
+  height: `${count * SESSION_ITEM_HEIGHT}px`
+})
 
 const handleSessionClick = (session: SessionConfig) => {
   // 根据会话类型选择不同的连接方式
@@ -828,7 +839,7 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
   display: flex;
   flex-direction: column;
   padding: 5px; /* 统一为 5px */
-  max-height: 600px;
+  min-height: 0;
   width: 100%;
 }
 

@@ -605,9 +605,22 @@ class TerminalManager {
   fit(connectionId: string): void {
     const instance = this.instances.get(connectionId)
     if (instance?.fitAddon) {
+      if (!this.hasUsableContainerSize(instance)) {
+        return
+      }
+
       instance.fitAddon.fit()
       this.syncRemoteWindowSize(instance)
     }
+  }
+
+  private hasUsableContainerSize(instance: TerminalInstance): boolean {
+    if (!instance.container || !instance.container.isConnected) {
+      return false
+    }
+
+    const rect = instance.container.getBoundingClientRect()
+    return rect.width > 20 && rect.height > 20
   }
 
   /**

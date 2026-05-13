@@ -2,9 +2,10 @@ import { Client, ClientChannel } from 'ssh2'
 import { EventEmitter } from 'node:events'
 import * as net from 'net'
 import { appSettingsManager } from '../utils/app-settings'
-import { ErrorHandler, AppError } from '../utils/error-handler'
+import { ErrorHandler } from '../utils/error-handler'
 import { ProxyJumpHelper } from '../utils/proxy-jump'
 import { ProxyHelper } from '../utils/proxy'
+import { verifySshHostKey } from '../utils/known-hosts'
 import type { ProxyJumpConfig, ProxyConfig } from '../../src/types/session'
 
 export interface SSHConnectionOptions {
@@ -52,6 +53,10 @@ export class SSHConnectionManager extends EventEmitter {
   constructor() {
     super()
     this.connections = new Map()
+  }
+
+  private verifyHostKey(options: SSHConnectionOptions, key: Buffer): boolean {
+    return verifySshHostKey(options.host, options.port, key)
   }
 
   /**
@@ -241,7 +246,8 @@ export class SSHConnectionManager extends EventEmitter {
         username: options.username,
         readyTimeout: readyTimeout || 20000,
         keepaliveInterval: keepaliveInterval,
-        keepaliveCountMax: options.keepaliveCountMax || 3
+        keepaliveCountMax: options.keepaliveCountMax || 3,
+        hostVerifier: (key: Buffer) => this.verifyHostKey(options, key)
       }
 
       if (options.password) {

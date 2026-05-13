@@ -11,6 +11,14 @@ export interface ShortcutConfig {
   description: string
 }
 
+export interface TerminalShortcutConfig {
+  key: string
+  ctrl: boolean
+  alt: boolean
+  shift: boolean
+  description: string
+}
+
 export interface AppSettings {
   general: {
     language: 'zh-CN' | 'en-US'
@@ -59,6 +67,8 @@ export interface AppSettings {
   }
   // 全局快捷键配置
   shortcuts?: Record<string, ShortcutConfig>
+  // 终端内快捷键配置
+  terminalShortcuts?: Record<string, TerminalShortcutConfig>
 }
 
 class AppSettingsManager {
@@ -136,7 +146,8 @@ class AppSettingsManager {
           ssh: { ...this.settings.ssh, ...loaded.ssh },
           security: { ...this.settings.security, ...loaded.security },
           updates: { ...this.settings.updates, ...loaded.updates },
-          shortcuts: loaded.shortcuts ?? this.settings.shortcuts
+          shortcuts: loaded.shortcuts ?? this.settings.shortcuts,
+          terminalShortcuts: loaded.terminalShortcuts ?? this.settings.terminalShortcuts
         }
       }
     } catch (error) {
@@ -167,7 +178,11 @@ class AppSettingsManager {
       ssh: { ...this.settings.ssh, ...updates.ssh },
       security: { ...this.settings.security, ...updates.security },
       updates: { ...this.settings.updates, ...updates.updates },
-      shortcuts: updates.shortcuts !== undefined ? updates.shortcuts : this.settings.shortcuts
+      shortcuts: updates.shortcuts !== undefined ? updates.shortcuts : this.settings.shortcuts,
+      terminalShortcuts:
+        updates.terminalShortcuts !== undefined
+          ? updates.terminalShortcuts
+          : this.settings.terminalShortcuts
     }
     await this.save()
   }

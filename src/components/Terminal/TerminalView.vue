@@ -3,7 +3,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { getTheme } from '@/utils/terminal-themes'
@@ -58,6 +58,9 @@ const appStore = useAppStore()
 // 计算属性：检查是否有默认模型
 const hasDefaultModel = computed(() => aiStore.hasDefaultModel)
 const isActiveTerminal = computed(() => appStore.activeTab === props.connectionId)
+const isVisibleActiveTerminal = computed(
+  () => appStore.activeView === 'sessions' && isActiveTerminal.value
+)
 
 const terminalContainer = ref<HTMLElement>()
 let terminal: Terminal | null = null
@@ -67,12 +70,20 @@ let resizeObserver: ResizeObserver | null = null
 let currentLineBuffer = '' // 当前行的输入缓冲
 let currentCommand = ''
 let commandStartTime: number | null = null
+let scheduledFitTimers: ReturnType<typeof setTimeout>[] = []
 
 const normalizeDataForRemote = (data: string) => (data === '\b' ? '\x7F' : data)
 const removeLastInputCharacter = (value: string) => Array.from(value).slice(0, -1).join('')
 
+const hasUsableTerminalSize = () => {
+  if (!terminalContainer.value) return false
+
+  const rect = terminalContainer.value.getBoundingClientRect()
+  return rect.width > 20 && rect.height > 20
+}
+
 const fitAndSyncRemote = () => {
-  if (!isActiveTerminal.value) return
+  if (!isVisibleActiveTerminal.value || !hasUsableTerminalSize()) return
 
   const instance = terminalManager.get(props.connectionId)
   if (instance) {
@@ -82,6 +93,35 @@ const fitAndSyncRemote = () => {
     if (terminal && terminal.cols > 0 && terminal.rows > 0) {
       window.electronAPI.ssh.resize(props.connectionId, terminal.cols, terminal.rows)
     }
+  }
+}
+
+const clearScheduledFits = () => {
+  for (const timer of scheduledFitTimers) {
+    clearTimeout(timer)
+  }
+  scheduledFitTimers = []
+}
+
+const scheduleFitAndFocus = (delays = [50]) => {
+  clearScheduledFits()
+
+  for (const delay of delays) {
+    const timer = setTimeout(() => {
+      requestAnimationFrame(() => {
+        try {
+          fitAndSyncRemote()
+
+          if (isVisibleActiveTerminal.value && hasUsableTerminalSize()) {
+            terminal?.focus()
+          }
+        } catch (e) {
+          console.error('Scheduled fit error:', e)
+        }
+      })
+    }, delay)
+
+    scheduledFitTimers.push(timer)
   }
 }
 
@@ -374,7 +414,7 @@ onMounted(() => {
   let lastHeight = 0
 
   resizeObserver = new ResizeObserver((entries) => {
-    if (!fitAddon || !terminal || !terminalContainer.value || !isActiveTerminal.value) return
+    if (!fitAddon || !terminal || !terminalContainer.value || !isVisibleActiveTerminal.value) return
 
     for (const entry of entries) {
       const { width, height } = entry.contentRect
@@ -410,7 +450,7 @@ onMounted(() => {
 
   setTimeout(() => {
     try {
-      if (!isActiveTerminal.value) return
+      if (!isVisibleActiveTerminal.value) return
       console.log(`[TerminalView] Delayed initial fit for ${props.connectionId}`)
       fitAndSyncRemote()
       terminal?.focus() // 自动聚焦
@@ -422,6 +462,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   console.log(`[TerminalView] Unmounting terminal view for ${props.connectionId}`)
+
+  clearScheduledFits()
 
   // 清理回调引用
   console.log(`[TerminalView] Clearing callbacks for ${props.connectionId}`)
@@ -567,6 +609,9 @@ watch(
     if (newOptions.cursorBlink !== undefined) {
       terminal.options.cursorBlink = newOptions.cursorBlink
     }
+    if (newOptions.scrollback) {
+      terminal.options.scrollback = newOptions.scrollback
+    }
     if (newOptions.theme) {
       terminal.options.theme =
         typeof newOptions.theme === 'string' ? getTheme(newOptions.theme) : newOptions.theme
@@ -578,22 +623,18 @@ watch(
     }
 
     // Refit after options change
-    if (fitAddon && isActiveTerminal.value) {
-      fitAndSyncRemote()
+    if (fitAddon && isVisibleActiveTerminal.value) {
+      scheduleFitAndFocus([50, 200])
     }
   },
   { deep: true }
 )
 
-watch(isActiveTerminal, (active) => {
-  if (!active) return
+watch(isVisibleActiveTerminal, async (visible) => {
+  if (!visible) return
 
-  setTimeout(() => {
-    requestAnimationFrame(() => {
-      fitAndSyncRemote()
-      terminal?.focus()
-    })
-  }, 50)
+  await nextTick()
+  scheduleFitAndFocus([50, 200, 400])
 })
 
 // Expose methods for parent components
@@ -609,7 +650,7 @@ defineExpose({
     }
   },
   focus: () => {
-    if (terminal && isActiveTerminal.value) {
+    if (terminal && isVisibleActiveTerminal.value) {
       terminal.focus()
     }
   },

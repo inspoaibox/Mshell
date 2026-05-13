@@ -1,7 +1,8 @@
 import { Client } from 'ssh2'
 import * as net from 'net'
-import { ProxyJumpConfig, ProxyConfig } from '../../src/types/session'
+import type { ProxyJumpConfig, ProxyConfig } from '../../src/types/session'
 import { ProxyHelper } from './proxy'
+import { verifySshHostKey } from './known-hosts'
 
 /**
  * 跳板机连接辅助类
@@ -57,7 +58,8 @@ export class ProxyJumpHelper {
         username: proxyConfig.username,
         keepaliveInterval: 30000,
         keepaliveCountMax: 3,
-        readyTimeout: 30000
+        readyTimeout: 30000,
+        hostVerifier: (key: Buffer) => verifySshHostKey(proxyConfig.host, proxyConfig.port, key)
       }
 
       // 认证方式

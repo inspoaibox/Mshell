@@ -3,7 +3,14 @@ import { join } from 'path'
 import { promises as fs } from 'fs'
 import { credentialManager } from './CredentialManager'
 import { v4 as uuidv4 } from 'uuid'
-import type { ProxyJumpConfig, ProxyConfig, SessionType, RDPOptions, VNCOptions } from '../../src/types/session'
+import type {
+  ProxyJumpConfig,
+  ProxyConfig,
+  SessionType,
+  RDPOptions,
+  VNCOptions
+} from '../../src/types/session'
+import { appSettingsManager } from '../utils/app-settings'
 
 export interface SessionConfig {
   id: string
@@ -110,6 +117,11 @@ export class SessionManager {
           this.groups.set(group.id, group)
         }
       }
+
+      if (appSettingsManager.getSettings().security.savePasswords === false) {
+        this.clearStoredSecrets()
+        await this.saveSessions()
+      }
     } catch (error: any) {
       if (error.code === 'ENOENT') {
         // 文件不存在，创建新的
@@ -155,7 +167,8 @@ export class SessionManager {
    */
   private encryptSession(session: SessionConfig): any {
     const sensitiveFields = ['password', 'passphrase'] as (keyof SessionConfig)[]
-    const encrypted = credentialManager.encryptFields(session, sensitiveFields)
+    const sessionToEncrypt = this.sanitizeSavedSecrets(session) as SessionConfig
+    const encrypted = credentialManager.encryptFields(sessionToEncrypt, sensitiveFields)
     
     // 处理跳板机配置中的敏感字段
     if (encrypted.proxyJump) {
@@ -234,6 +247,62 @@ export class SessionManager {
     return credentialManager.decryptFields({ ...config }, sensitiveFields)
   }
 
+  private sanitizeProxyJumpSecrets(config?: ProxyJumpConfig): ProxyJumpConfig | undefined {
+    if (!config) return undefined
+
+    const sanitized: ProxyJumpConfig = { ...config }
+    sanitized.password = undefined
+    sanitized.passphrase = undefined
+
+    if (sanitized.nextJump) {
+      sanitized.nextJump = this.sanitizeProxyJumpSecrets(sanitized.nextJump)
+    }
+
+    return sanitized
+  }
+
+  private sanitizeProxySecrets(config?: ProxyConfig): ProxyConfig | undefined {
+    if (!config) return undefined
+
+    const sanitized: ProxyConfig = { ...config }
+    sanitized.password = undefined
+    return sanitized
+  }
+
+  private sanitizeSavedSecrets<T extends Partial<SessionConfig>>(config: T): T {
+    const shouldSavePasswords = appSettingsManager.getSettings().security.savePasswords !== false
+    if (shouldSavePasswords) return config
+
+    const sanitized = { ...config } as any
+    if ('password' in sanitized) {
+      sanitized.password = undefined
+    }
+    if ('passphrase' in sanitized) {
+      sanitized.passphrase = undefined
+    }
+
+    if (sanitized.proxyJump) {
+      sanitized.proxyJump = this.sanitizeProxyJumpSecrets(sanitized.proxyJump)
+    }
+
+    if (sanitized.proxy) {
+      sanitized.proxy = this.sanitizeProxySecrets(sanitized.proxy)
+    }
+
+    return sanitized
+  }
+
+  private clearStoredSecrets(): void {
+    for (const [id, session] of this.sessions.entries()) {
+      this.sessions.set(id, this.sanitizeSavedSecrets(session) as SessionConfig)
+    }
+  }
+
+  async removeSavedSecrets(): Promise<void> {
+    this.clearStoredSecrets()
+    await this.saveSessions()
+  }
+
   /**
    * 自动检测区域
    */
@@ -263,6 +332,8 @@ export class SessionManager {
    * 创建新会话
    */
   async createSession(config: Omit<SessionConfig, 'id' | 'createdAt' | 'updatedAt'>): Promise<SessionConfig> {
+    config = this.sanitizeSavedSecrets(config)
+
     // 如果没有指定地区，尝试根据Host自动检测
     if (!config.region && config.host) {
       config.region = await this.detectRegion(config.host)
@@ -295,6 +366,8 @@ export class SessionManager {
     if (!session) {
       throw new Error(`Session not found: ${id}`)
     }
+
+    updates = this.sanitizeSavedSecrets(updates)
 
     // 如果当前没有地区且更新中也没指定，尝试自动检测
     if (!updates.region && !session.region) {

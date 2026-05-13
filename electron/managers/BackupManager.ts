@@ -1,6 +1,6 @@
 /* global Buffer, NodeJS */
 
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import { createCipheriv, createDecipheriv, randomBytes, scrypt } from 'crypto'
@@ -83,6 +83,12 @@ export class BackupManager {
       interval: 24, // 默认24小时
       maxBackups: 10
     }
+  }
+
+  private broadcastSettingsChanged(settings: any): void {
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send('settings:changed', settings)
+    })
   }
 
   /**
@@ -848,7 +854,11 @@ export class BackupManager {
       if (options.restoreSettings && backupData.settings) {
         try {
           const { appSettingsManager } = await import('../utils/app-settings')
-          appSettingsManager.updateSettings(backupData.settings)
+          await appSettingsManager.updateSettings(backupData.settings)
+          if (appSettingsManager.getSettings().security.savePasswords === false) {
+            await sessionManager.removeSavedSecrets()
+          }
+          this.broadcastSettingsChanged(appSettingsManager.getSettings())
         } catch (error) {
           logger.logError('system', 'Failed to restore settings', error as Error)
         }
@@ -993,11 +1003,39 @@ export class BackupManager {
       if (options.restoreLockConfig && backupData.lockConfig) {
         try {
           // 只恢复配置，不恢复密码
-          const { enabled, autoLockTimeout, lockOnMinimize } = backupData.lockConfig
+          const {
+            enabled,
+            autoLockTimeout,
+            lockOnMinimize,
+            lockOnSuspend,
+            requirePasswordOnUnlock,
+            maxUnlockAttempts,
+            lockoutDuration
+          } = backupData.lockConfig
+          const currentLockConfig = sessionLockManager.getConfig()
           sessionLockManager.updateConfig({
-            enabled: enabled || false,
-            autoLockTimeout: autoLockTimeout || 0,
-            lockOnMinimize: lockOnMinimize || false
+            enabled: enabled === true,
+            autoLockTimeout:
+              typeof autoLockTimeout === 'number'
+                ? autoLockTimeout
+                : currentLockConfig.autoLockTimeout,
+            lockOnMinimize: lockOnMinimize === true,
+            lockOnSuspend:
+              lockOnSuspend !== undefined
+                ? lockOnSuspend === true
+                : currentLockConfig.lockOnSuspend,
+            requirePasswordOnUnlock:
+              requirePasswordOnUnlock !== undefined
+                ? requirePasswordOnUnlock !== false
+                : currentLockConfig.requirePasswordOnUnlock,
+            maxUnlockAttempts:
+              typeof maxUnlockAttempts === 'number'
+                ? maxUnlockAttempts
+                : currentLockConfig.maxUnlockAttempts,
+            lockoutDuration:
+              typeof lockoutDuration === 'number'
+                ? lockoutDuration
+                : currentLockConfig.lockoutDuration
           })
           logger.logInfo('system', 'Lock config restored (password not restored for security)')
         } catch (error) {

@@ -3,7 +3,7 @@
     <!-- 锁定屏幕 -->
     <LockScreen v-if="isLocked" @unlock="handleUnlock" />
 
-    <div class="app-layout" v-show="!isLocked">
+    <div class="app-layout" v-show="lockStatusReady && !isLocked">
       <Sidebar @menu-select="handleMenuSelect" />
 
       <div class="app-main">
@@ -326,6 +326,12 @@
       </div>
     </div>
 
+    <div v-if="!lockStatusReady" class="app-boot-screen">
+      <img class="boot-logo" :src="logoImg" alt="MShell" />
+      <div class="boot-title">MShell</div>
+      <div class="boot-status">正在验证安全状态...</div>
+    </div>
+
     <!-- Dialogs -->
     <SessionForm
       v-model="appStore.showSessionForm"
@@ -393,6 +399,7 @@ import WorkflowPanel from './components/Workflows/WorkflowPanel.vue'
 import SessionTemplatePanel from './components/Session/SessionTemplatePanel.vue'
 import LockScreen from './components/Security/LockScreen.vue'
 import AIChatPanel from './components/AI/AIChatPanel.vue'
+import logoImg from '@/assets/logo.png'
 
 import type { SessionConfig } from './types/session'
 
@@ -405,6 +412,7 @@ const aiStore = useAIStore()
 
 // 锁定状态
 const isLocked = ref(false)
+const lockStatusReady = ref(false)
 
 // 搜索框引用
 const searchInputRef = ref<HTMLElement | null>(null)
@@ -613,6 +621,18 @@ const handleTabReorder = (fromIndex: number, toIndex: number) => {
 const ipcCleanups: Array<() => void> = []
 
 onMounted(async () => {
+  // 先检查锁定状态，再渲染主界面，避免启动时先闪出内容再出现锁屏
+  try {
+    const status = await window.electronAPI.sessionLock?.getStatus?.()
+    if (status?.success && status.data?.isLocked) {
+      isLocked.value = true
+    }
+  } catch (error) {
+    console.error('Failed to check lock status:', error)
+  } finally {
+    lockStatusReady.value = true
+  }
+
   // 初始化应用状态
   await appStore.initialize()
 
@@ -649,15 +669,6 @@ onMounted(async () => {
   window.addEventListener('session-locked', handleSessionLocked)
   ipcCleanups.push(() => window.removeEventListener('session-locked', handleSessionLocked))
 
-  // 检查初始锁定状态
-  try {
-    const status = await window.electronAPI.sessionLock?.getStatus?.()
-    if (status?.success && status.data?.isLocked) {
-      isLocked.value = true
-    }
-  } catch (error) {
-    console.error('Failed to check lock status:', error)
-  }
 })
 
 onUnmounted(() => {
@@ -1184,6 +1195,40 @@ body,
   display: flex;
   height: 100%;
   background: var(--bg-main);
+}
+
+.app-boot-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(24, 201, 149, 0.12), transparent 260px),
+    var(--bg-main);
+  color: var(--text-primary);
+}
+
+.boot-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  object-fit: contain;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+}
+
+.boot-title {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.boot-status {
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 .app-main {

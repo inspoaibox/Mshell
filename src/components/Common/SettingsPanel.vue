@@ -20,10 +20,12 @@
                 <el-switch v-model="settings.general.startWithSystem" />
               </el-form-item>
               <el-form-item label="最小化到托盘">
-                <el-switch v-model="settings.general.minimizeToTray" />
+                <el-switch v-model="settings.general.minimizeToTray" @change="saveSettings" />
+                <span class="form-hint">最小化按钮和关闭按钮都会隐藏到托盘</span>
               </el-form-item>
-              <el-form-item label="关闭时最小化">
-                <el-switch v-model="settings.general.closeToTray" />
+              <el-form-item label="关闭按钮到托盘">
+                <el-switch v-model="settings.general.closeToTray" @change="saveSettings" />
+                <span class="form-hint">仅关闭按钮隐藏到托盘</span>
               </el-form-item>
               <el-form-item label="主题">
                 <el-select v-model="settings.general.theme" style="width: 200px">
@@ -217,6 +219,7 @@
                   <el-option label="Canvas" value="canvas" />
                   <el-option label="DOM (慢 兼容性好)" value="dom" />
                 </el-select>
+                <span class="form-hint">新打开的终端生效</span>
               </el-form-item>
               <el-form-item label="滚动行数">
                 <el-input-number
@@ -1552,6 +1555,10 @@ const loadSettings = async () => {
         security: { ...settings.value.security, ...saved.security },
         updates: { ...settings.value.updates, ...saved.updates }
       }
+      if (saved.terminalShortcuts) {
+        terminalShortcutsManager.replaceAll(saved.terminalShortcuts)
+        terminalShortcuts.value = terminalShortcutsManager.getAll()
+      }
     }
   } catch (error) {
     console.error('Failed to load settings:', error)
@@ -2806,7 +2813,7 @@ const checkTerminalShortcutConflict = () => {
   terminalShortcutConflict.value = ''
 }
 
-const saveTerminalShortcut = () => {
+const saveTerminalShortcut = async () => {
   if (!editingTerminalShortcutKey.value) {
     ElMessage.warning('请设置快捷键')
     return
@@ -2827,15 +2834,27 @@ const saveTerminalShortcut = () => {
 
   // 更新本地显示
   terminalShortcuts.value = terminalShortcutsManager.getAll()
+  await saveTerminalShortcutsToSettings()
 
   ElMessage.success('终端快捷键已更新')
   showEditTerminalShortcutDialog.value = false
 }
 
-const resetTerminalShortcut = (id: string) => {
+const resetTerminalShortcut = async (id: string) => {
   terminalShortcutsManager.reset(id as keyof TerminalShortcutsConfig)
   terminalShortcuts.value = terminalShortcutsManager.getAll()
+  await saveTerminalShortcutsToSettings()
   ElMessage.success('终端快捷键已重置')
+}
+
+const saveTerminalShortcutsToSettings = async () => {
+  try {
+    await window.electronAPI.settings.update({
+      terminalShortcuts: terminalShortcutsManager.getAll()
+    })
+  } catch (error) {
+    console.error('Failed to save terminal shortcuts to settings:', error)
+  }
 }
 
 // 会话锁定相关函数

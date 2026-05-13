@@ -98,6 +98,18 @@ class TerminalShortcutsManager {
   }
 
   /**
+   * 替换全部配置，用于从应用设置、备份或同步数据恢复
+   */
+  replaceAll(config: Partial<TerminalShortcutsConfig>): void {
+    this.shortcuts = {
+      ...defaultShortcuts,
+      ...config
+    }
+    this.saveToStorage()
+    this.notifyListeners()
+  }
+
+  /**
    * 获取单个快捷键配置
    */
   get<K extends keyof TerminalShortcutsConfig>(id: K): TerminalShortcut {

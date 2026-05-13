@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SessionConfig, SessionGroup } from '@/types/session'
+import { terminalShortcutsManager } from '@/utils/terminal-shortcuts'
 
 export interface Tab {
   id: string
@@ -250,6 +251,10 @@ export const useAppStore = defineStore('app', () => {
         rendererType: settings.terminal.rendererType || 'auto',
         copyOnSelect: settings.terminal.copyOnSelect || false
       })
+    }
+
+    if (settings.terminalShortcuts) {
+      terminalShortcutsManager.replaceAll(settings.terminalShortcuts)
     }
   }
 

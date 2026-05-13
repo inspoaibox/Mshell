@@ -754,11 +754,44 @@ const handleProxyUpdate = (config: ProxyConfigType) => {
   form.proxy = config.enabled ? config : undefined
 }
 
+const stripProxyJumpSecrets = (config?: ProxyJumpConfigType): ProxyJumpConfigType | undefined => {
+  if (!config) return undefined
+
+  const sanitized: ProxyJumpConfigType = { ...config }
+  delete sanitized.password
+  delete sanitized.passphrase
+
+  if (sanitized.nextJump) {
+    sanitized.nextJump = stripProxyJumpSecrets(sanitized.nextJump)
+  }
+
+  return sanitized
+}
+
+const stripProxySecrets = (config?: ProxyConfigType): ProxyConfigType | undefined => {
+  if (!config) return undefined
+
+  const sanitized: ProxyConfigType = { ...config }
+  delete sanitized.password
+  return sanitized
+}
+
+const loadSavePasswordsSetting = async () => {
+  try {
+    const settings = await window.electronAPI.settings.get()
+    return settings?.security?.savePasswords !== false
+  } catch (error) {
+    console.error('Failed to load savePasswords setting:', error)
+    return true
+  }
+}
+
 const handleSave = async () => {
   if (!formRef.value) return
 
-  await formRef.value.validate((valid) => {
+  await formRef.value.validate(async (valid) => {
     if (valid) {
+      const shouldSavePasswords = await loadSavePasswordsSetting()
       const sessionData: Partial<SessionConfig> = {
         type: form.type,
         name: form.name,
@@ -781,7 +814,11 @@ const handleSave = async () => {
       if (form.type === 'ssh') {
         // SSH 特有配置
         if (form.authType === 'password') {
-          sessionData.password = form.password
+          if (shouldSavePasswords) {
+            sessionData.password = form.password
+          } else {
+            ;(sessionData as any).password = null
+          }
         } else {
           // 优先使用SSH密钥ID，其次使用本地文件路径
           // 使用 null 显式清除另一个字段，防止旧值在 merge 时被保留
@@ -796,24 +833,36 @@ const handleSave = async () => {
             ;(sessionData as any).privateKeyId = null
             ;(sessionData as any).privateKeyPath = null
           }
-          sessionData.passphrase = form.passphrase || undefined
+          if (shouldSavePasswords) {
+            sessionData.passphrase = form.passphrase || undefined
+          } else {
+            ;(sessionData as any).passphrase = null
+          }
         }
         // 跳板机配置 - 转换为普通对象以便 IPC 传输
         // 使用 null 而非 undefined，因为 IPC 和 JSON.stringify 会丢弃 undefined
         if (form.proxyJump) {
-          sessionData.proxyJump = JSON.parse(JSON.stringify(form.proxyJump))
+          const proxyJump = shouldSavePasswords
+            ? form.proxyJump
+            : stripProxyJumpSecrets(form.proxyJump)
+          sessionData.proxyJump = JSON.parse(JSON.stringify(proxyJump))
         } else {
           (sessionData as any).proxyJump = null
         }
         // 代理配置 - 转换为普通对象以便 IPC 传输
         if (form.proxy) {
-          sessionData.proxy = JSON.parse(JSON.stringify(form.proxy))
+          const proxy = shouldSavePasswords ? form.proxy : stripProxySecrets(form.proxy)
+          sessionData.proxy = JSON.parse(JSON.stringify(proxy))
         } else {
           (sessionData as any).proxy = null
         }
       } else if (form.type === 'rdp') {
         // RDP 特有配置
-        sessionData.password = form.password || undefined
+        if (shouldSavePasswords) {
+          sessionData.password = form.password || undefined
+        } else {
+          ;(sessionData as any).password = null
+        }
         
         // 解析分辨率
         let width: number | undefined
@@ -842,7 +891,11 @@ const handleSave = async () => {
         }
       } else if (form.type === 'vnc') {
         // VNC 特有配置
-        sessionData.password = form.password || undefined
+        if (shouldSavePasswords) {
+          sessionData.password = form.password || undefined
+        } else {
+          ;(sessionData as any).password = null
+        }
         sessionData.vncOptions = {
           viewOnly: form.vncViewOnly,
           sharedConnection: form.vncShared,

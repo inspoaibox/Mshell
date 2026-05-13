@@ -489,7 +489,7 @@ import {
   Setting,
   CopyDocument
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import TerminalView from './TerminalView.vue'
 import TerminalSearch from './TerminalSearch.vue'
 import CommandAutocomplete from './CommandAutocomplete.vue'
@@ -697,6 +697,7 @@ const isActiveTab = computed(() => appStore.activeTab === props.connectionId)
 
 // 键盘事件清理函数（在顶层定义，供 onUnmounted 使用）
 let cleanupKeyboard: (() => void) | null = null
+let cleanupSettingsChange: (() => void) | null = null
 
 // 监听标签页切换，当切换到其他标签页时清理补全状态
 // 这可以防止多标签页时的状态污染
@@ -788,6 +789,25 @@ const copyConnectionHost = async () => {
   }
 }
 
+type ConnectionNoticeType = 'success' | 'warning' | 'error' | 'info'
+
+const showConnectionNotice = (
+  type: ConnectionNoticeType,
+  title: string,
+  message: string,
+  duration = 3000
+) => {
+  ElNotification({
+    type,
+    title,
+    message,
+    duration,
+    position: 'bottom-right',
+    showClose: true,
+    customClass: 'terminal-connection-notification'
+  })
+}
+
 const statusClass = computed(() => {
   return {
     'status-connecting': connectionStatus.value === 'connecting',
@@ -819,10 +839,12 @@ const setupReconnectListeners = () => {
         reconnectMaxAttempts.value = maxAttempts
         showReconnectNotification.value = true
 
-        ElMessage.warning({
-          message: `连接断开，正在尝试重连... (${attempt}/${maxAttempts})`,
-          duration: 3000
-        })
+        showConnectionNotice(
+          'warning',
+          '连接断开',
+          `正在尝试重连... (${attempt}/${maxAttempts})`,
+          3000
+        )
       }
     }
   )
@@ -837,10 +859,7 @@ const setupReconnectListeners = () => {
       showReconnectNotification.value = false
       reconnectAttempt.value = 0
 
-      ElMessage.success({
-        message: '重连成功！',
-        duration: 2000
-      })
+      showConnectionNotice('success', '重连成功', 'SSH 会话已重新连接', 2500)
     }
   })
   if (u2) reconnectListenerCleanups.push(u2)
@@ -855,10 +874,7 @@ const setupReconnectListeners = () => {
       showDisconnectedNotification.value = true
       reconnectAttempt.value = 0
 
-      ElMessage.error({
-        message: `重连失败: ${reason}`,
-        duration: 5000
-      })
+      showConnectionNotice('error', '重连失败', reason, 5000)
     }
   })
   if (u3) reconnectListenerCleanups.push(u3)
@@ -871,9 +887,9 @@ const handleCancelReconnect = async () => {
     showReconnectNotification.value = false
     showDisconnectedNotification.value = true
     reconnectAttempt.value = 0
-    ElMessage.info('已取消重连')
+    showConnectionNotice('info', '已取消重连', '当前会话已停止自动重连', 2500)
   } catch (error: any) {
-    ElMessage.error(`取消重连失败: ${error.message}`)
+    showConnectionNotice('error', '取消重连失败', error.message, 4000)
   }
 }
 
@@ -881,19 +897,23 @@ const handleCancelReconnect = async () => {
 const loadCommandIntelligenceSettings = async () => {
   try {
     const settings = await window.electronAPI.settings.get()
-    const sshSettings = settings?.ssh || {}
-
-    commandIntelligenceSettings.value = {
-      commandAutocomplete: sshSettings.commandAutocomplete !== false,
-      aiCommandSuggest: sshSettings.aiCommandSuggest !== false,
-      commandExplain: sshSettings.commandExplain !== false
-    }
+    applyCommandIntelligenceSettings(settings)
     console.log(
       '[TerminalTab] Loaded command intelligence settings:',
       commandIntelligenceSettings.value
     )
   } catch (error) {
     console.error('Failed to load command intelligence settings:', error)
+  }
+}
+
+const applyCommandIntelligenceSettings = (settings: any) => {
+  const sshSettings = settings?.ssh || {}
+
+  commandIntelligenceSettings.value = {
+    commandAutocomplete: sshSettings.commandAutocomplete !== false,
+    aiCommandSuggest: sshSettings.aiCommandSuggest !== false,
+    commandExplain: sshSettings.commandExplain !== false
   }
 }
 
@@ -922,16 +942,16 @@ const handleManualReconnect = async () => {
       connectionStatus.value = 'connected'
       isConnected.value = true
       globalConnectionState.set(props.connectionId, 'connected')
-      ElMessage.success('重连成功！')
+      showConnectionNotice('success', '重连成功', 'SSH 会话已重新连接', 2500)
     } else {
       connectionStatus.value = 'error'
       showDisconnectedNotification.value = true
-      ElMessage.error(result.error || '重连失败')
+      showConnectionNotice('error', '重连失败', result.error || '重连失败', 5000)
     }
   } catch (error: any) {
     connectionStatus.value = 'error'
     showDisconnectedNotification.value = true
-    ElMessage.error(`重连失败: ${error.message}`)
+    showConnectionNotice('error', '重连失败', error.message, 5000)
   } finally {
     isManualReconnecting.value = false
   }
@@ -1095,6 +1115,11 @@ onMounted(async () => {
     window.removeEventListener('keydown', handleKeyDown, true)
   }
 
+  cleanupSettingsChange = window.electronAPI.settings.onChange((settings: any) => {
+    applyCommandIntelligenceSettings(settings)
+    clearAllIntelligenceStates()
+  })
+
   // 检查是否已经连接或正在连接（防止重复连接）
   const existingState = globalConnectionState.get(props.connectionId)
   if (existingState) {
@@ -1174,7 +1199,7 @@ onMounted(async () => {
       isConnected.value = true
       connectionStatus.value = 'connected'
       globalConnectionState.set(props.connectionId, 'connected')
-      ElMessage.success(`Connected to ${props.session.host}`)
+      showConnectionNotice('success', '连接成功', `已连接到 ${props.session.host}`, 2500)
 
       // 连接成功后延迟触发 fit，让终端渲染完成后立即同步真实尺寸给服务端
       // 这样可以避免服务端按初始 PTY 尺寸(220x50)折行导致的显示错位
@@ -1191,12 +1216,12 @@ onMounted(async () => {
     } else {
       connectionStatus.value = 'error'
       globalConnectionState.delete(props.connectionId)
-      ElMessage.error(`Connection failed: ${result.error}`)
+      showConnectionNotice('error', '连接失败', result.error || '连接失败', 6000)
     }
   } catch (error: any) {
     connectionStatus.value = 'error'
     globalConnectionState.delete(props.connectionId)
-    ElMessage.error(`Connection error: ${error.message}`)
+    showConnectionNotice('error', '连接错误', error.message, 6000)
   } finally {
     // 如果还是 connecting 状态（连接失败），清除标记
     if (globalConnectionState.get(props.connectionId) === 'connecting') {
@@ -1210,6 +1235,11 @@ onUnmounted(async () => {
   if (cleanupKeyboard) {
     cleanupKeyboard()
     cleanupKeyboard = null
+  }
+
+  if (cleanupSettingsChange) {
+    cleanupSettingsChange()
+    cleanupSettingsChange = null
   }
 
   // 清理重连事件监听器

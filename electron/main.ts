@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
+import { existsSync } from 'fs'
 import { registerSSHHandlers } from './ipc/ssh-handlers'
 import { registerSessionHandlers } from './ipc/session-handlers'
 import { registerSFTPHandlers } from './ipc/sftp-handlers'
@@ -37,6 +38,7 @@ let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
 const INSTALLER_QUIT_ARG = '--mshell-installer-quit'
+const TRAY_ICON_SIZE = 16
 
 const isInstallerQuitRequest = (argv: string[] = process.argv) =>
   argv.some((arg) => arg === INSTALLER_QUIT_ARG)
@@ -63,6 +65,16 @@ const requestAppQuit = () => {
     tray = null
   }
   app.quit()
+}
+
+const ensureTray = () => {
+  if (tray) return true
+  return createTray()
+}
+
+const shouldHideToTrayOnClose = () => {
+  const settings = appSettingsManager.getSettings()
+  return !isQuitting && (settings.general.closeToTray || settings.general.minimizeToTray)
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
@@ -308,12 +320,16 @@ function createWindow() {
 
   // 处理窗口关闭事件
   mainWindow.on('close', async (event) => {
-    const settings = appSettingsManager.getSettings()
-    
     // 只有启用了"关闭时最小化"且不是真正退出时，才最小化到托盘
-    if (settings.general.closeToTray && !isQuitting) {
+    if (shouldHideToTrayOnClose()) {
       event.preventDefault()
-      
+
+      if (!ensureTray()) {
+        console.error('[Main] Cannot close to tray because tray is unavailable; minimizing window instead')
+        mainWindow?.minimize()
+        return false
+      }
+
       // 检查是否需要锁定（关闭到托盘时锁定）
       try {
         const lockConfig = sessionLockManager.getConfig()
@@ -335,6 +351,11 @@ function createWindow() {
   mainWindow.on('minimize', (event: Electron.Event) => {
     const settings = appSettingsManager.getSettings()
     if (settings.general.minimizeToTray) {
+      if (!ensureTray()) {
+        console.error('[Main] Cannot minimize to tray because tray is unavailable; using taskbar minimize')
+        return
+      }
+
       event.preventDefault()
       mainWindow?.hide()
       console.log('[Main] Window minimized to tray')
@@ -405,6 +426,11 @@ if (gotSingleInstanceLock && !isInstallerQuitRequest()) {
 }
 
 app.on('window-all-closed', () => {
+  if (shouldHideToTrayOnClose()) {
+    ensureTray()
+    return
+  }
+
   if (process.platform !== 'darwin') {
     app.quit()
   }
@@ -422,44 +448,85 @@ app.on('before-quit', () => {
   aiManager.cleanup()
 })
 
+function getTrayIconPaths() {
+  const iconNames =
+    process.platform === 'win32'
+      ? ['icon.ico', 'icon.png']
+      : ['icon.png', 'icon.ico']
+
+  const baseDirs = app.isPackaged
+    ? [
+        join(process.resourcesPath, 'build'),
+        join(process.resourcesPath, 'app.asar.unpacked', 'build'),
+        join(__dirname, '../build'),
+        join(process.cwd(), 'build')
+      ]
+    : [join(__dirname, '../build'), join(process.cwd(), 'build')]
+
+  return baseDirs.flatMap((baseDir) => iconNames.map((iconName) => join(baseDir, iconName)))
+}
+
+function createFallbackTrayIcon() {
+  const buffer = Buffer.alloc(TRAY_ICON_SIZE * TRAY_ICON_SIZE * 4)
+
+  for (let y = 0; y < TRAY_ICON_SIZE; y++) {
+    for (let x = 0; x < TRAY_ICON_SIZE; x++) {
+      const index = (y * TRAY_ICON_SIZE + x) * 4
+      const inMark = x >= 4 && x <= 11 && y >= 4 && y <= 11
+
+      buffer[index] = inMark ? 0x18 : 0x0f
+      buffer[index + 1] = inMark ? 0xc9 : 0x8a
+      buffer[index + 2] = inMark ? 0x95 : 0xff
+      buffer[index + 3] = 0xff
+    }
+  }
+
+  return nativeImage.createFromBitmap(buffer, {
+    width: TRAY_ICON_SIZE,
+    height: TRAY_ICON_SIZE,
+    scaleFactor: 1
+  })
+}
+
+function loadTrayIcon() {
+  const iconPaths = getTrayIconPaths()
+
+  for (const iconPath of iconPaths) {
+    const icon = nativeImage.createFromPath(iconPath)
+
+    if (!icon.isEmpty()) {
+      console.log('[Main] Loaded tray icon from:', iconPath)
+      return icon.resize({ width: TRAY_ICON_SIZE, height: TRAY_ICON_SIZE })
+    }
+  }
+
+  console.error(
+    '[Main] Failed to load tray icon. Tried:',
+    iconPaths.map((iconPath) => `${iconPath} exists=${existsSync(iconPath)}`).join('; ')
+  )
+  console.warn('[Main] Using generated fallback tray icon')
+
+  return createFallbackTrayIcon()
+}
+
 // 创建托盘图标
 function createTray() {
-  if (tray) return
+  if (tray) return true
 
-  // 使用应用图标作为托盘图标
-  // 开发环境和生产环境的路径不同
-  let iconPath: string
-  
-  if (app.isPackaged) {
-    // 生产环境：打包后的路径
-    iconPath = process.platform === 'win32'
-      ? join(process.resourcesPath, 'build', 'icon.ico')
-      : join(process.resourcesPath, 'build', 'icon.png')
-  } else {
-    // 开发环境：项目根目录
-    iconPath = process.platform === 'win32'
-      ? join(__dirname, '../build/icon.ico')
-      : join(__dirname, '../build/icon.png')
-  }
-  
-  const icon = nativeImage.createFromPath(iconPath)
-  
-  // 检查图标是否加载成功
+  const icon = loadTrayIcon()
+
   if (icon.isEmpty()) {
-    console.error('Failed to load tray icon from:', iconPath)
-    return
+    console.error('[Main] Failed to create tray icon')
+    return false
   }
-  
-  // Windows 托盘图标不需要 resize，使用原始大小
-  tray = process.platform === 'win32' 
-    ? new Tray(icon)
-    : new Tray(icon.resize({ width: 16, height: 16 }))
-  
+
+  tray = new Tray(icon)
+
   const contextMenu = Menu.buildFromTemplate([
     {
       label: '显示窗口',
       click: () => {
-        mainWindow?.show()
+        restoreMainWindow()
       }
     },
     {
@@ -478,14 +545,16 @@ function createTray() {
     if (mainWindow?.isVisible()) {
       mainWindow.hide()
     } else {
-      mainWindow?.show()
+      restoreMainWindow()
     }
   })
-  
+
   // 双击托盘图标显示窗口
   tray.on('double-click', () => {
-    mainWindow?.show()
+    restoreMainWindow()
   })
+
+  return true
 }
 
 

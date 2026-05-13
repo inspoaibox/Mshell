@@ -1,125 +1,213 @@
-import * as fs from 'fs'
-import * as path from 'path'
-import * as crypto from 'crypto'
 import { app } from 'electron'
+import { createHash } from 'crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { dirname, join } from 'path'
+import { appSettingsManager } from './app-settings'
 
-export interface HostKey {
+type KnownHostStatus = 'trusted' | 'unknown' | 'changed'
+
+interface KnownHostRecord {
   host: string
   port: number
-  keyType: string
-  key: string
+  keyType?: string
+  key?: string
   fingerprint: string
-  addedAt: Date
+  addedAt?: string
+  createdAt: string
+  updatedAt: string
 }
 
-class KnownHostsManager {
-  private knownHostsFile: string
-  private hosts: Map<string, HostKey>
+type KnownHosts = Record<string, string | KnownHostRecord>
 
-  constructor() {
-    const userDataPath = app.getPath('userData')
-    this.knownHostsFile = path.join(userDataPath, 'known_hosts')
-    this.hosts = new Map()
-    this.load()
+const knownHostsPath = join(app.getPath('userData'), 'known-hosts.json')
+const legacyKnownHostsPath = join(app.getPath('userData'), 'known_hosts')
+
+const getHostKeyId = (host: string, port: number): string => `${host}:${port}`
+
+const parseHostKeyId = (hostKeyId: string) => {
+  const separatorIndex = hostKeyId.lastIndexOf(':')
+  if (separatorIndex <= 0) {
+    return { host: hostKeyId, port: 22 }
   }
 
-  private load(): void {
-    if (!fs.existsSync(this.knownHostsFile)) return
-    
-    try {
-      const content = fs.readFileSync(this.knownHostsFile, 'utf-8')
-      const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#'))
-      
-      for (const line of lines) {
-        const parts = line.split(' ')
-        if (parts.length >= 3) {
-          const [hostPort, keyType, key] = parts
-          const [host, port] = hostPort.split(':')
-          
-          const hostKey: HostKey = {
-            host,
-            port: parseInt(port) || 22,
-            keyType,
-            key,
-            fingerprint: this.calculateFingerprint(key),
-            addedAt: new Date()
-          }
-          
-          this.hosts.set(this.getHostKey(host, parseInt(port) || 22), hostKey)
-        }
+  const host = hostKeyId.slice(0, separatorIndex)
+  const port = Number(hostKeyId.slice(separatorIndex + 1)) || 22
+  return { host, port }
+}
+
+const getHostKeyFingerprint = (key: Buffer): string => {
+  const digest = createHash('sha256').update(key).digest('base64').replace(/=+$/, '')
+  return `SHA256:${digest}`
+}
+
+const loadKnownHosts = (): KnownHosts => {
+  try {
+    if (!existsSync(knownHostsPath)) {
+      return loadLegacyKnownHosts()
+    }
+    return JSON.parse(readFileSync(knownHostsPath, 'utf-8'))
+  } catch (error) {
+    console.error('[KnownHosts] Failed to load known hosts:', error)
+    return {}
+  }
+}
+
+const loadLegacyKnownHosts = (): KnownHosts => {
+  const knownHosts: KnownHosts = {}
+  if (!existsSync(legacyKnownHostsPath)) return knownHosts
+
+  try {
+    const now = new Date().toISOString()
+    const lines = readFileSync(legacyKnownHostsPath, 'utf-8')
+      .split('\n')
+      .filter((line) => line.trim() && !line.trim().startsWith('#'))
+
+    for (const line of lines) {
+      const [hostPort, keyType, key] = line.trim().split(/\s+/)
+      if (!hostPort || !key) continue
+
+      const { host, port } = parseHostKeyId(hostPort)
+      const keyBuffer = Buffer.from(key, 'base64')
+      knownHosts[getHostKeyId(host, port)] = {
+        host,
+        port,
+        keyType,
+        key,
+        fingerprint: getHostKeyFingerprint(keyBuffer),
+        addedAt: now,
+        createdAt: now,
+        updatedAt: now
       }
-    } catch (error) {
-      console.error('Failed to load known hosts:', error)
+    }
+
+    if (Object.keys(knownHosts).length > 0) {
+      saveKnownHosts(knownHosts)
+    }
+  } catch (error) {
+    console.error('[KnownHosts] Failed to migrate legacy known hosts:', error)
+  }
+
+  return knownHosts
+}
+
+const saveKnownHosts = (knownHosts: KnownHosts): void => {
+  try {
+    mkdirSync(dirname(knownHostsPath), { recursive: true })
+    writeFileSync(knownHostsPath, JSON.stringify(knownHosts, null, 2), 'utf-8')
+  } catch (error) {
+    console.error('[KnownHosts] Failed to save known hosts:', error)
+  }
+}
+
+const toKnownHostRecord = (host: string, port: number, value?: string | KnownHostRecord) => {
+  if (!value) return undefined
+
+  if (typeof value === 'string') {
+    return {
+      host,
+      port,
+      fingerprint: value,
+      addedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     }
   }
 
-  private save(): void {
-    try {
-      const lines: string[] = ['# MShell Known Hosts File']
-      
-      for (const hostKey of this.hosts.values()) {
-        lines.push(`${hostKey.host}:${hostKey.port} ${hostKey.keyType} ${hostKey.key}`)
-      }
-      
-      fs.writeFileSync(this.knownHostsFile, lines.join('\n') + '\n')
-    } catch (error) {
-      console.error('Failed to save known hosts:', error)
-    }
-  }
+  return value
+}
 
-  private getHostKey(host: string, port: number): string {
-    return `${host}:${port}`
-  }
+export const knownHostsManager = {
+  verifyHost(host: string, port: number, keyType: string | undefined, key: Buffer): KnownHostStatus {
+    const hostKeyId = getHostKeyId(host, port)
+    const fingerprint = getHostKeyFingerprint(key)
+    const knownHosts = loadKnownHosts()
+    const knownHost = toKnownHostRecord(host, port, knownHosts[hostKeyId])
 
-  private calculateFingerprint(key: string): string {
-    const hash = crypto.createHash('sha256')
-    hash.update(Buffer.from(key, 'base64'))
-    return hash.digest('hex')
-  }
-
-  verifyHost(host: string, port: number, keyType: string, key: Buffer): 'trusted' | 'changed' | 'unknown' {
-    const keyStr = key.toString('base64')
-    const hostKey = this.getHostKey(host, port)
-    const existing = this.hosts.get(hostKey)
-    
-    if (!existing) {
+    if (!knownHost) {
       return 'unknown'
     }
-    
-    if (existing.key === keyStr && existing.keyType === keyType) {
-      return 'trusted'
-    }
-    
-    return 'changed'
-  }
 
-  addHost(host: string, port: number, keyType: string, key: Buffer): void {
-    const keyStr = key.toString('base64')
-    const hostKey: HostKey = {
+    if (knownHost.fingerprint !== fingerprint) {
+      return 'changed'
+    }
+
+    if (knownHost.keyType !== keyType && keyType) {
+      knownHosts[hostKeyId] = {
+        ...knownHost,
+        keyType,
+        updatedAt: new Date().toISOString()
+      }
+      saveKnownHosts(knownHosts)
+    }
+
+    return 'trusted'
+  },
+
+  addHost(host: string, port: number, keyType: string | undefined, key: Buffer): KnownHostRecord {
+    const hostKeyId = getHostKeyId(host, port)
+    const fingerprint = getHostKeyFingerprint(key)
+    const knownHosts = loadKnownHosts()
+    const existing = toKnownHostRecord(host, port, knownHosts[hostKeyId])
+    const now = new Date().toISOString()
+    const record: KnownHostRecord = {
       host,
       port,
       keyType,
-      key: keyStr,
-      fingerprint: this.calculateFingerprint(keyStr),
-      addedAt: new Date()
+      key: key.toString('base64'),
+      fingerprint,
+      addedAt: existing?.addedAt || existing?.createdAt || now,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
     }
-    
-    this.hosts.set(this.getHostKey(host, port), hostKey)
-    this.save()
-  }
+
+    knownHosts[hostKeyId] = record
+    saveKnownHosts(knownHosts)
+    return record
+  },
+
+  getHost(host: string, port: number): KnownHostRecord | undefined {
+    const hostKeyId = getHostKeyId(host, port)
+    return toKnownHostRecord(host, port, loadKnownHosts()[hostKeyId])
+  },
+
+  getAllHosts(): KnownHostRecord[] {
+    return Object.entries(loadKnownHosts()).map(([hostKeyId, value]) => {
+      const { host, port } = parseHostKeyId(hostKeyId)
+      return toKnownHostRecord(host, port, value)!
+    })
+  },
 
   removeHost(host: string, port: number): void {
-    this.hosts.delete(this.getHostKey(host, port))
-    this.save()
-  }
-
-  getHost(host: string, port: number): HostKey | undefined {
-    return this.hosts.get(this.getHostKey(host, port))
-  }
-
-  getAllHosts(): HostKey[] {
-    return Array.from(this.hosts.values())
+    const hostKeyId = getHostKeyId(host, port)
+    const knownHosts = loadKnownHosts()
+    delete knownHosts[hostKeyId]
+    saveKnownHosts(knownHosts)
   }
 }
 
-export const knownHostsManager = new KnownHostsManager()
+export const verifySshHostKey = (host: string, port: number, key: Buffer): boolean => {
+  const settings = appSettingsManager.getSettings()
+  if (settings.security.verifyHostKey === false) {
+    return true
+  }
+
+  const hostKeyId = getHostKeyId(host, port)
+  const result = knownHostsManager.verifyHost(host, port, undefined, key)
+
+  if (result === 'unknown') {
+    const hostKey = knownHostsManager.addHost(host, port, undefined, key)
+    console.log(`[KnownHosts] Trusting new host key ${hostKeyId} ${hostKey.fingerprint}`)
+    return true
+  }
+
+  if (result === 'changed') {
+    const knownHost = knownHostsManager.getHost(host, port)
+    const receivedFingerprint = getHostKeyFingerprint(key)
+    console.error(
+      `[KnownHosts] Host key mismatch for ${hostKeyId}. Known=${knownHost?.fingerprint}, received=${receivedFingerprint}`
+    )
+    return false
+  }
+
+  return true
+}

@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow, app } from 'electron'
 import { appSettingsManager, AppSettings } from '../utils/app-settings'
 import { auditLogManager, AuditAction } from '../managers/AuditLogManager'
+import { sessionManager } from '../managers/SessionManager'
 
 // 缓存上一次的开机启动设置值，避免重复调用
 let lastStartWithSystem: boolean | undefined = undefined
@@ -11,7 +12,16 @@ export function registerSettingsHandlers() {
   })
 
   ipcMain.handle('settings:update', async (_event, updates: Partial<AppSettings>) => {
+    const previousSettings = appSettingsManager.getSettings()
     await appSettingsManager.updateSettings(updates)
+    const settings = appSettingsManager.getSettings()
+
+    if (
+      previousSettings.security.savePasswords !== false &&
+      settings.security.savePasswords === false
+    ) {
+      await sessionManager.removeSavedSecrets()
+    }
 
     // 记录审计日志
     auditLogManager.log(AuditAction.SETTINGS_UPDATE, {
@@ -34,7 +44,6 @@ export function registerSettingsHandlers() {
     }
 
     // Broadcast change to all windows
-    const settings = appSettingsManager.getSettings()
     BrowserWindow.getAllWindows().forEach(win => {
       win.webContents.send('settings:changed', settings)
     })
