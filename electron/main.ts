@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron'
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { registerSSHHandlers } from './ipc/ssh-handlers'
@@ -99,8 +99,8 @@ registerSFTPHandlers()
 registerSettingsHandlers()
 registerLogHandlers()
 registerDialogHandlers()
-import { ipcMain } from 'electron'
 ipcMain.handle('app:getVersion', () => app.getVersion())
+ipcMain.handle('app:getDownloadsPath', () => app.getPath('downloads'))
 registerFsHandlers()
 registerPortForwardHandlers()
 registerSnippetHandlers()

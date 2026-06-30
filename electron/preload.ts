@@ -389,7 +389,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // App info
   app: {
-    getVersion: () => ipcRenderer.invoke('app:getVersion')
+    getVersion: () => ipcRenderer.invoke('app:getVersion'),
+    getDownloadsPath: () => ipcRenderer.invoke('app:getDownloadsPath')
   },
 
   // Server Monitor operations
@@ -816,5 +817,6 @@ export interface ElectronAPI {
   }
   app: {
     getVersion: () => Promise<string>
+    getDownloadsPath: () => Promise<string>
   }
 }

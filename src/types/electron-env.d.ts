@@ -376,6 +376,7 @@ export interface ElectronAPI {
   onShortcut: (name: string, callback: (...args: any[]) => void) => () => void
   app: {
     getVersion: () => Promise<string>
+    getDownloadsPath: () => Promise<string>
   }
   logs: {
     get: (filter?: any) => Promise<any[]>

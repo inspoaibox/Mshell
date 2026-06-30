@@ -1,18 +1,27 @@
 <template>
-  <div class="virtual-table">
+  <div :class="['virtual-table', { resizing: Boolean(resizingState) }]">
     <!-- 表头 -->
     <div class="table-header" :style="{ paddingRight: scrollbarWidth + 'px' }">
       <div
-        v-for="column in columns"
+        v-for="(column, columnIndex) in columns"
         :key="column.key"
         :class="['table-header-cell', { sortable: column.sortable }]"
-        :style="{ width: column.width || 'auto', minWidth: column.minWidth }"
+        :style="getColumnStyle(column)"
         @click="column.sortable && handleSort(column.key)"
       >
-        <span>{{ column.label }}</span>
+        <span class="header-label">{{ column.label }}</span>
         <span v-if="column.sortable && sortKey === column.key" class="sort-icon">
           {{ sortOrder === 'asc' ? '↑' : '↓' }}
         </span>
+        <button
+          v-if="resizable && columnIndex < columns.length - 1"
+          class="column-resize-handle"
+          type="button"
+          aria-label="调整列宽"
+          @click.stop
+          @dblclick.stop
+          @mousedown.stop.prevent="startColumnResize(columnIndex, $event)"
+        />
       </div>
     </div>
 
@@ -38,7 +47,7 @@
             v-for="column in columns"
             :key="column.key"
             class="table-cell"
-            :style="{ width: column.width || 'auto', minWidth: column.minWidth }"
+            :style="getColumnStyle(column)"
           >
             <slot
               v-if="column.slot"
@@ -64,7 +73,8 @@
 </template>
 
 <script setup lang="ts" generic="T extends Record<string, any>">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import type { CSSProperties } from 'vue'
 import VirtualScroll from './VirtualScroll.vue'
 import type { Column } from './virtual-table.types'
 
@@ -81,13 +91,17 @@ interface Props {
   buffer?: number
   selectable?: boolean
   selectedKey?: string
+  resizable?: boolean
+  storageKey?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   rowHeight: 48,
   buffer: 5,
   selectable: false,
-  selectedKey: 'id'
+  selectedKey: 'id',
+  resizable: false,
+  storageKey: ''
 })
 
 const emit = defineEmits<{
@@ -105,6 +119,19 @@ const hoverIndex = ref(-1)
 const scrollbarWidth = ref(8) // 滚动条宽度
 const lastSelectedIndex = ref<number>(-1) // 记录上次选中的索引，用于 Shift 多选
 const dataKey = ref(0) // 用于强制刷新虚拟滚动
+const columnWidths = ref<Record<string, number>>({})
+const suppressNextHeaderClick = ref(false)
+const resizingState = ref<{
+  startX: number
+  currentIndex: number
+  nextIndex: number
+  currentKey: string
+  nextKey: string
+  currentWidth: number
+  nextWidth: number
+} | null>(null)
+let previousBodyCursor = ''
+let previousBodyUserSelect = ''
 
 // 监听数据变化，清空选择并刷新
 watch(() => props.data, () => {
@@ -135,8 +162,156 @@ const getCellValue = (row: T, key: string): any => {
   return key.split('.').reduce((obj, k) => obj?.[k], row)
 }
 
+const parsePixelValue = (value?: string) => {
+  if (!value) return undefined
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)px$/)
+  return match ? Number(match[1]) : undefined
+}
+
+const getColumnMinWidth = (column: Column) => {
+  return parsePixelValue(column.minWidth) || 72
+}
+
+const getStoredColumnWidthsKey = () =>
+  props.storageKey ? `virtual-table:${props.storageKey}:column-widths` : ''
+
+const loadPersistedColumnWidths = () => {
+  const storageKey = getStoredColumnWidthsKey()
+  if (!storageKey) {
+    columnWidths.value = {}
+    return
+  }
+
+  try {
+    const stored = window.localStorage.getItem(storageKey)
+    const parsed = stored ? JSON.parse(stored) : {}
+    const nextWidths: Record<string, number> = {}
+
+    props.columns.forEach((column) => {
+      const width = Number(parsed[column.key])
+      if (Number.isFinite(width) && width >= getColumnMinWidth(column)) {
+        nextWidths[column.key] = Math.round(width)
+      }
+    })
+
+    columnWidths.value = nextWidths
+  } catch (error) {
+    console.warn('[VirtualTable] Failed to load persisted column widths:', error)
+    columnWidths.value = {}
+  }
+}
+
+const persistColumnWidths = () => {
+  const storageKey = getStoredColumnWidthsKey()
+  if (!storageKey) return
+
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(columnWidths.value))
+  } catch (error) {
+    console.warn('[VirtualTable] Failed to persist column widths:', error)
+  }
+}
+
+const getColumnStyle = (column: Column): CSSProperties => {
+  const savedWidth = columnWidths.value[column.key]
+  const width = Number.isFinite(savedWidth) ? savedWidth : parsePixelValue(column.width)
+
+  if (width) {
+    const widthValue = `${width}px`
+    return {
+      width: widthValue,
+      minWidth: widthValue,
+      flex: `0 0 ${widthValue}`
+    }
+  }
+
+  return {
+    width: '0',
+    minWidth: column.minWidth || '0',
+    flex: '1 1 0'
+  }
+}
+
+const startColumnResize = (columnIndex: number, event: MouseEvent) => {
+  const currentColumn = props.columns[columnIndex]
+  const nextColumn = props.columns[columnIndex + 1]
+  const currentCell = (event.currentTarget as HTMLElement).parentElement as HTMLElement | null
+  const nextCell = currentCell?.nextElementSibling as HTMLElement | null
+  if (!currentColumn || !nextColumn || !currentCell || !nextCell) return
+
+  resizingState.value = {
+    startX: event.clientX,
+    currentIndex: columnIndex,
+    nextIndex: columnIndex + 1,
+    currentKey: currentColumn.key,
+    nextKey: nextColumn.key,
+    currentWidth: currentCell.getBoundingClientRect().width,
+    nextWidth: nextCell.getBoundingClientRect().width
+  }
+
+  previousBodyCursor = document.body.style.cursor
+  previousBodyUserSelect = document.body.style.userSelect
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', handleColumnResize)
+  window.addEventListener('mouseup', stopColumnResize)
+}
+
+const handleColumnResize = (event: MouseEvent) => {
+  const state = resizingState.value
+  if (!state) return
+
+  const currentColumn = props.columns[state.currentIndex]
+  const nextColumn = props.columns[state.nextIndex]
+  if (!currentColumn || !nextColumn) return
+
+  const minCurrentWidth = getColumnMinWidth(currentColumn)
+  const minNextWidth = getColumnMinWidth(nextColumn)
+  const rawDelta = event.clientX - state.startX
+  const minDelta = minCurrentWidth - state.currentWidth
+  const maxDelta = state.nextWidth - minNextWidth
+  const delta = Math.max(minDelta, Math.min(rawDelta, maxDelta))
+
+  columnWidths.value = {
+    ...columnWidths.value,
+    [state.currentKey]: Math.round(state.currentWidth + delta),
+    [state.nextKey]: Math.round(state.nextWidth - delta)
+  }
+}
+
+const stopColumnResize = () => {
+  if (resizingState.value) {
+    persistColumnWidths()
+    suppressNextHeaderClick.value = true
+  }
+
+  resizingState.value = null
+  document.body.style.cursor = previousBodyCursor
+  document.body.style.userSelect = previousBodyUserSelect
+  window.removeEventListener('mousemove', handleColumnResize)
+  window.removeEventListener('mouseup', stopColumnResize)
+}
+
+onMounted(() => {
+  loadPersistedColumnWidths()
+})
+
+onUnmounted(() => {
+  stopColumnResize()
+})
+
+watch(
+  () => [props.storageKey, props.columns.map((column) => column.key).join('|')],
+  () => loadPersistedColumnWidths()
+)
+
 // 处理排序
 const handleSort = (key: string) => {
+  if (suppressNextHeaderClick.value) {
+    suppressNextHeaderClick.value = false
+    return
+  }
+
   if (sortKey.value === key) {
     sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
   } else {
@@ -275,6 +450,7 @@ defineExpose({
 }
 
 .table-header-cell {
+  position: relative;
   padding: 12px 16px;
   font-size: var(--text-base);
   font-weight: 600;
@@ -285,6 +461,7 @@ defineExpose({
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .table-header-cell.sortable {
@@ -299,6 +476,44 @@ defineExpose({
 .sort-icon {
   font-size: var(--text-sm);
   color: var(--primary-color);
+  flex-shrink: 0;
+}
+
+.header-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  z-index: 20;
+  width: 8px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.column-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 3px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.column-resize-handle:hover::after,
+.virtual-table.resizing .column-resize-handle::after {
+  background: var(--primary-color);
 }
 
 .table-body {

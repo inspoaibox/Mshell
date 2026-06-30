@@ -63,6 +63,8 @@
             :buffer="10"
             selectable
             selected-key="path"
+            resizable
+            storage-key="sftp-local-files"
             @row-click="handleLocalClick"
             @row-dblclick="handleLocalDoubleClick"
             @row-contextmenu="handleLocalContextMenu"
@@ -225,6 +227,8 @@
               :buffer="10"
               selectable
               selected-key="path"
+              resizable
+              storage-key="sftp-remote-files"
               @row-click="handleRemoteClick"
               @row-dblclick="handleRemoteDoubleClick"
               @row-contextmenu="handleRemoteContextMenu"
@@ -1255,6 +1259,49 @@ const applySftpSettings = (settings: any) => {
   }
 }
 
+const isExistingDirectory = async (path: string) => {
+  if (!path) return false
+
+  try {
+    const result = await window.electronAPI.fs.stat(path)
+    return result.success && Boolean(result.stats?.isDirectory)
+  } catch {
+    return false
+  }
+}
+
+const getSystemDownloadsPath = async () => {
+  try {
+    const downloadsPath = await window.electronAPI.app.getDownloadsPath()
+    if (downloadsPath) {
+      return downloadsPath
+    }
+  } catch (error) {
+    console.warn('[SFTPPanel] Failed to get system downloads path:', error)
+  }
+
+  return ''
+}
+
+const resolveInitialLocalPath = async () => {
+  const configuredPath = sftpSettings.value.defaultLocalPath
+
+  if (await isExistingDirectory(configuredPath)) {
+    return configuredPath
+  }
+
+  if (configuredPath) {
+    console.warn('[SFTPPanel] Ignoring unavailable default local path:', configuredPath)
+  }
+
+  const downloadsPath = await getSystemDownloadsPath()
+  if (await isExistingDirectory(downloadsPath)) {
+    return downloadsPath
+  }
+
+  return 'C:\\'
+}
+
 const normalizeRemotePath = (path: string) => {
   const trimmed = path.trim()
   if (!trimmed) return '/'
@@ -1303,18 +1350,13 @@ const computedOctalPermission = computed(() => {
 onMounted(async () => {
   try {
     await loadSftpSettings()
-    // 设置默认本地路径为用户目录
-    const userProfile =
-      sftpSettings.value.defaultLocalPath ||
-      (window as any).electronAPI.process?.env?.USERPROFILE ||
-      (window as any).electronAPI.process?.env?.HOME ||
-      'C:\\'
-    localPath.value = userProfile
-    localPathInput.value = userProfile
+    const initialLocalPath = await resolveInitialLocalPath()
+    localPath.value = initialLocalPath
+    localPathInput.value = initialLocalPath
 
     // 检测当前盘符
-    if (userProfile.match(/^[A-Z]:/i)) {
-      currentDrive.value = userProfile.substring(0, 2).toUpperCase()
+    if (initialLocalPath.match(/^[A-Z]:/i)) {
+      currentDrive.value = initialLocalPath.substring(0, 2).toUpperCase()
     }
 
     await loadSessions()
@@ -3707,7 +3749,16 @@ const extractRemoteFileTo = async (file: FileInfo) => {
   color: var(--text-secondary);
 }
 
+.file-list :deep(.table-body) {
+  padding: 6px 0 8px;
+  box-sizing: border-box;
+}
+
 .file-list :deep(.table-row) {
+  height: 100%;
+  min-height: 40px;
+  align-items: center;
+  box-sizing: border-box;
   border-bottom: 1px solid var(--border-light);
 }
 
@@ -3718,7 +3769,8 @@ const extractRemoteFileTo = async (file: FileInfo) => {
 
 .file-list :deep(.table-row.selected) {
   background: rgba(var(--primary-color-rgb), 0.12) !important;
-  border-left: 3px solid var(--primary-color);
+  border-left: 0;
+  box-shadow: inset 3px 0 0 var(--primary-color);
 }
 
 .file-list :deep(.table-row.selected:hover) {
@@ -3729,6 +3781,7 @@ const extractRemoteFileTo = async (file: FileInfo) => {
   padding: 0 14px;
   font-size: var(--text-sm);
   color: var(--text-secondary);
+  min-width: 0;
 }
 
 .file-list :deep(.table-empty) {
@@ -3775,6 +3828,8 @@ const extractRemoteFileTo = async (file: FileInfo) => {
 }
 
 .file-name-cell span {
+  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
