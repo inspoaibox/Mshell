@@ -187,9 +187,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Log operations
   logs: {
-    get: (filter?: any) => ipcRenderer.invoke('logs:get', filter),
-    enableSession: (sessionId: string) => ipcRenderer.invoke('logs:enableSession', sessionId),
-    disableSession: (sessionId: string) => ipcRenderer.invoke('logs:disableSession', sessionId)
+    get: (filter?: any) => ipcRenderer.invoke('log:getLogs', filter),
+    clear: () => ipcRenderer.invoke('log:clearLogs'),
+    enableSession: (sessionId: string) => ipcRenderer.invoke('log:enableSessionLogging', sessionId),
+    disableSession: (sessionId: string) => ipcRenderer.invoke('log:disableSessionLogging', sessionId)
   },
 
   // Known hosts operations
@@ -381,6 +382,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Log operations
   log: {
     getLogs: (filter?: any) => ipcRenderer.invoke('log:getLogs', filter),
+    clearLogs: () => ipcRenderer.invoke('log:clearLogs'),
     enableSessionLogging: (sessionId: string) =>
       ipcRenderer.invoke('log:enableSessionLogging', sessionId),
     disableSessionLogging: (sessionId: string) =>

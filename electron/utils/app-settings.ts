@@ -27,6 +27,8 @@ export interface AppSettings {
     startWithSystem: boolean
     minimizeToTray: boolean
     closeToTray: boolean
+    enableAuditLog: boolean
+    enableSystemLog: boolean
   }
   terminal: {
     fontSize: number
@@ -91,7 +93,9 @@ class AppSettingsManager {
         appearance: 'modern',
         startWithSystem: false,
         minimizeToTray: false,
-        closeToTray: false
+        closeToTray: false,
+        enableAuditLog: true,
+        enableSystemLog: true
       },
       terminal: {
         fontSize: 14,

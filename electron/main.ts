@@ -33,6 +33,7 @@ import { appSettingsManager } from './utils/app-settings'
 import { sessionLockManager } from './managers/SessionLockManager'
 import { aiManager } from './managers/AIManager'
 import { updateManager } from './managers/UpdateManager'
+import { auditLogManager } from './managers/AuditLogManager'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -379,6 +380,9 @@ if (gotSingleInstanceLock && !isInstallerQuitRequest()) {
     if (crashCheck.crashed) {
       logger.logError('system', 'Application crashed on previous run', new Error('Crash detected'))
     }
+
+    // 初始化审计日志管理器，避免启动后首次写入覆盖旧日志
+    await auditLogManager.initialize()
 
     // 初始化备份管理器
     await backupManager.initialize()

@@ -5,9 +5,14 @@ import { auditLogManager, AuditAction, AuditLevel } from '../managers/AuditLogMa
  * Register audit log IPC handlers
  */
 export function registerAuditLogHandlers() {
+  const initAuditLogs = auditLogManager.initialize().catch((error) => {
+    console.error('Failed to initialize audit log manager:', error)
+  })
+
   // Get all logs
   ipcMain.handle('auditLog:getAll', async () => {
     try {
+      await initAuditLogs
       const logs = auditLogManager.getAll()
       return { success: true, data: logs }
     } catch (error) {
@@ -19,6 +24,7 @@ export function registerAuditLogHandlers() {
   // Get log by ID
   ipcMain.handle('auditLog:get', async (_event, id: string) => {
     try {
+      await initAuditLogs
       const log = auditLogManager.get(id)
       if (!log) {
         return { success: false, error: 'Log not found' }
@@ -33,6 +39,7 @@ export function registerAuditLogHandlers() {
   // Filter logs
   ipcMain.handle('auditLog:filter', async (_event, filter: any) => {
     try {
+      await initAuditLogs
       const logs = auditLogManager.filter(filter)
       return { success: true, data: logs }
     } catch (error) {
@@ -44,6 +51,7 @@ export function registerAuditLogHandlers() {
   // Get by time range
   ipcMain.handle('auditLog:getByTimeRange', async (_event, startDate: string, endDate: string) => {
     try {
+      await initAuditLogs
       const logs = auditLogManager.getByTimeRange(startDate, endDate)
       return { success: true, data: logs }
     } catch (error) {
@@ -55,6 +63,7 @@ export function registerAuditLogHandlers() {
   // Get by level
   ipcMain.handle('auditLog:getByLevel', async (_event, level: AuditLevel) => {
     try {
+      await initAuditLogs
       const logs = auditLogManager.getByLevel(level)
       return { success: true, data: logs }
     } catch (error) {
@@ -66,6 +75,7 @@ export function registerAuditLogHandlers() {
   // Get by action
   ipcMain.handle('auditLog:getByAction', async (_event, action: AuditAction) => {
     try {
+      await initAuditLogs
       const logs = auditLogManager.getByAction(action)
       return { success: true, data: logs }
     } catch (error) {
@@ -77,6 +87,7 @@ export function registerAuditLogHandlers() {
   // Get by session
   ipcMain.handle('auditLog:getBySession', async (_event, sessionId: string) => {
     try {
+      await initAuditLogs
       const logs = auditLogManager.getBySession(sessionId)
       return { success: true, data: logs }
     } catch (error) {
@@ -88,6 +99,7 @@ export function registerAuditLogHandlers() {
   // Get by success status
   ipcMain.handle('auditLog:getBySuccess', async (_event, success: boolean) => {
     try {
+      await initAuditLogs
       const logs = auditLogManager.getBySuccess(success)
       return { success: true, data: logs }
     } catch (error) {
@@ -99,6 +111,7 @@ export function registerAuditLogHandlers() {
   // Get statistics
   ipcMain.handle('auditLog:getStatistics', async (_event, startDate?: string, endDate?: string) => {
     try {
+      await initAuditLogs
       const stats = auditLogManager.getStatistics(startDate, endDate)
       return { success: true, data: stats }
     } catch (error) {
@@ -110,6 +123,7 @@ export function registerAuditLogHandlers() {
   // Get today's logs
   ipcMain.handle('auditLog:getToday', async () => {
     try {
+      await initAuditLogs
       const logs = auditLogManager.getToday()
       return { success: true, data: logs }
     } catch (error) {
@@ -121,6 +135,7 @@ export function registerAuditLogHandlers() {
   // Get this week's logs
   ipcMain.handle('auditLog:getWeek', async () => {
     try {
+      await initAuditLogs
       const logs = auditLogManager.getWeek()
       return { success: true, data: logs }
     } catch (error) {
@@ -132,6 +147,7 @@ export function registerAuditLogHandlers() {
   // Get this month's logs
   ipcMain.handle('auditLog:getMonth', async () => {
     try {
+      await initAuditLogs
       const logs = auditLogManager.getMonth()
       return { success: true, data: logs }
     } catch (error) {
@@ -143,6 +159,7 @@ export function registerAuditLogHandlers() {
   // Export logs
   ipcMain.handle('auditLog:export', async (_event, filter?: any) => {
     try {
+      await initAuditLogs
       const filepath = auditLogManager.exportLogs(filter)
       return { success: true, data: filepath }
     } catch (error) {
@@ -154,6 +171,7 @@ export function registerAuditLogHandlers() {
   // Export to CSV
   ipcMain.handle('auditLog:exportToCSV', async (_event, filter?: any) => {
     try {
+      await initAuditLogs
       const filepath = auditLogManager.exportToCSV(filter)
       return { success: true, data: filepath }
     } catch (error) {
@@ -165,7 +183,8 @@ export function registerAuditLogHandlers() {
   // Clear all logs
   ipcMain.handle('auditLog:clearAll', async () => {
     try {
-      auditLogManager.clearAll()
+      await initAuditLogs
+      await auditLogManager.clearAll()
       return { success: true }
     } catch (error) {
       console.error('Failed to clear audit logs:', error)
@@ -176,7 +195,8 @@ export function registerAuditLogHandlers() {
   // Delete log
   ipcMain.handle('auditLog:delete', async (_event, id: string) => {
     try {
-      auditLogManager.delete(id)
+      await initAuditLogs
+      await auditLogManager.delete(id)
       return { success: true }
     } catch (error) {
       console.error('Failed to delete audit log:', error)

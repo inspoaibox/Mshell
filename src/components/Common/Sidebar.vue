@@ -94,7 +94,7 @@ import {
 import logoImg from '@/assets/logo.png'
 
 const activeMenu = ref('sessions')
-const appVersion = ref('v0.2.7')
+const appVersion = ref('v0.2.8')
 
 onMounted(async () => {
   if (window.electronAPI.app && window.electronAPI.app.getVersion) {

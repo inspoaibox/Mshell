@@ -9,6 +9,8 @@ export interface AppSettings {
     startWithSystem: boolean
     minimizeToTray: boolean
     closeToTray: boolean
+    enableAuditLog: boolean
+    enableSystemLog: boolean
   }
   terminal: {
     defaultFontSize: number
@@ -40,7 +42,9 @@ export const useSettingsStore = defineStore('settings', () => {
       appearance: 'modern',
       startWithSystem: false,
       minimizeToTray: false,
-      closeToTray: false
+      closeToTray: false,
+      enableAuditLog: true,
+      enableSystemLog: true
     },
     terminal: {
       defaultFontSize: 14,

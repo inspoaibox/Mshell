@@ -551,16 +551,27 @@ const emit = defineEmits<{
   'broadcast-input': [data: string, sourceId: string]
 }>()
 
+const getInitialConnectionState = () => {
+  if (terminalManager.get(props.connectionId)) {
+    globalConnectionState.set(props.connectionId, 'connected')
+    return 'connected'
+  }
+
+  return 'connecting'
+}
+
+const initialConnectionState = getInitialConnectionState()
+
 // AI 历史记录存储 ID：优先使用 session ID（如果是保存的会话），否则使用连接 ID
 const aiStorageId = computed(() => props.session?.id || props.connectionId)
 
 const terminalRef = ref()
 const terminalAIRef = ref()
 const autocompleteRef = ref()
-const isConnected = ref(false)
+const isConnected = ref(initialConnectionState === 'connected')
 const connectionStatus = ref<
   'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting'
->('connecting')
+>(initialConnectionState === 'connected' ? 'connected' : 'connecting')
 const showSearch = ref(false)
 const reconnectAttempt = ref(0)
 const reconnectMaxAttempts = ref(0)
@@ -710,6 +721,7 @@ const isActiveTab = computed(() => appStore.activeTab === props.connectionId)
 // 键盘事件清理函数（在顶层定义，供 onUnmounted 使用）
 let cleanupKeyboard: (() => void) | null = null
 let cleanupSettingsChange: (() => void) | null = null
+let terminalTabMounted = false
 
 // 监听标签页切换，当切换到其他标签页时清理补全状态
 // 这可以防止多标签页时的状态污染
@@ -978,7 +990,75 @@ const handleManualReconnect = async () => {
   }
 }
 
+const getExistingBackendConnection = async () => {
+  try {
+    return await window.electronAPI.ssh.getConnection(props.connectionId)
+  } catch (error) {
+    console.error(`[TerminalTab] Failed to check existing connection ${props.connectionId}:`, error)
+    return null
+  }
+}
+
+const waitForExistingConnectionReady = async () => {
+  for (let i = 0; i < 40 && terminalTabMounted; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 250))
+
+    const backendConnection = await getExistingBackendConnection()
+    const backendStatus = backendConnection?.status
+
+    if (backendStatus === 'connected' || backendStatus === 'reconnecting') {
+      globalConnectionState.set(props.connectionId, 'connected')
+      isConnected.value = true
+      connectionStatus.value = backendStatus
+      return
+    }
+
+    if (backendStatus === 'disconnected' || backendStatus === 'error' || !backendConnection) {
+      globalConnectionState.delete(props.connectionId)
+      connectionStatus.value = backendStatus || 'disconnected'
+      return
+    }
+  }
+}
+
+const reuseExistingConnectionIfAvailable = async () => {
+  const existingTerminal = terminalManager.get(props.connectionId)
+  if (existingTerminal) {
+    globalConnectionState.set(props.connectionId, 'connected')
+    isConnected.value = true
+    connectionStatus.value = 'connected'
+    return true
+  }
+
+  const existingState = globalConnectionState.get(props.connectionId)
+  const backendConnection = await getExistingBackendConnection()
+  const backendStatus = backendConnection?.status
+
+  if (backendStatus === 'connected' || backendStatus === 'reconnecting') {
+    globalConnectionState.set(props.connectionId, 'connected')
+    isConnected.value = true
+    connectionStatus.value = backendStatus
+    return true
+  }
+
+  if (backendStatus === 'connecting') {
+    globalConnectionState.set(props.connectionId, 'connecting')
+    isConnected.value = false
+    connectionStatus.value = 'connecting'
+    void waitForExistingConnectionReady()
+    return true
+  }
+
+  if (existingState) {
+    globalConnectionState.delete(props.connectionId)
+  }
+
+  return false
+}
+
 onMounted(async () => {
+  terminalTabMounted = true
+
   // Load snippets
   loadSnippets()
 
@@ -1141,27 +1221,11 @@ onMounted(async () => {
     clearAllIntelligenceStates()
   })
 
-  // 检查是否已经连接或正在连接（防止重复连接）
-  const existingState = globalConnectionState.get(props.connectionId)
-  if (existingState) {
+  // 检查是否已经连接或正在连接（防止视图切换时重复连接）
+  if (await reuseExistingConnectionIfAvailable()) {
     console.log(
       `[TerminalTab] Connection ${props.connectionId} already exists or connecting, reusing existing connection`
     )
-    if (existingState === 'connected') {
-      isConnected.value = true
-      connectionStatus.value = 'connected'
-    } else if (existingState === 'connecting') {
-      // 连接正在进行中，等待连接完成
-      connectionStatus.value = 'connecting'
-      // 检查终端实例是否已经存在且有数据（说明已经连接成功）
-      const instance = terminalManager.get(props.connectionId)
-      if (instance?.terminal) {
-        // 终端实例存在，说明连接已经成功，只是状态没同步
-        isConnected.value = true
-        connectionStatus.value = 'connected'
-        globalConnectionState.set(props.connectionId, 'connected')
-      }
-    }
     // 设置重连事件监听器（即使复用连接也需要监听）
     setupReconnectListeners()
 
@@ -1231,6 +1295,8 @@ onMounted(async () => {
 })
 
 onUnmounted(async () => {
+  terminalTabMounted = false
+
   // 清理键盘事件监听器
   if (cleanupKeyboard) {
     cleanupKeyboard()

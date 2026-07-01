@@ -2,6 +2,7 @@ import { BaseManager } from './BaseManager'
 import { app } from 'electron'
 import { join } from 'path'
 import { writeFileSync, existsSync, mkdirSync } from 'fs'
+import { appSettingsManager } from '../utils/app-settings'
 
 /**
  * 审计日志级别
@@ -135,6 +136,20 @@ export class AuditLogManager extends BaseManager<AuditLog> {
       errorMessage?: string
     } = {}
   ): AuditLog {
+    if (appSettingsManager.getSettings().general.enableAuditLog === false) {
+      return {
+        id: '',
+        timestamp: new Date().toISOString(),
+        level: options.level || this.getDefaultLevel(action),
+        action,
+        sessionId: options.sessionId,
+        resource: options.resource,
+        details: options.details,
+        success: options.success !== false,
+        errorMessage: options.errorMessage
+      }
+    }
+
     const log: AuditLog = {
       id: `audit_${Date.now()}_${Math.random().toString(36).substring(7)}`,
       timestamp: new Date().toISOString(),
@@ -490,9 +505,8 @@ export class AuditLogManager extends BaseManager<AuditLog> {
   /**
    * 清除所有日志
    */
-  clearAll(): void {
-    const logs = this.getAll()
-    logs.forEach(log => this.delete(log.id))
+  async clearAll(): Promise<void> {
+    await this.clear()
   }
 
   /**

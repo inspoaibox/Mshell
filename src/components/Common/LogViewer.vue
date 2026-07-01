@@ -167,7 +167,12 @@ const loadLogs = async () => {
       level: filter.value.level || undefined
     } : undefined
     
-    const result = await window.electronAPI.logs.get(filterParam)
+    const getLogs = window.electronAPI.log?.getLogs ?? window.electronAPI.logs?.get
+    if (!getLogs) {
+      throw new Error('System log API is unavailable')
+    }
+
+    const result = await getLogs(filterParam)
     logs.value = result
   } catch (error) {
     console.error('Failed to load logs:', error)

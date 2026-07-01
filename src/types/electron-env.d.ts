@@ -380,8 +380,15 @@ export interface ElectronAPI {
   }
   logs: {
     get: (filter?: any) => Promise<any[]>
+    clear: () => Promise<ApiResult>
     enableSession: (sessionId: string) => Promise<ApiResult>
     disableSession: (sessionId: string) => Promise<ApiResult>
+  }
+  log?: {
+    getLogs: (filter?: any) => Promise<any[]>
+    clearLogs: () => Promise<ApiResult>
+    enableSessionLogging: (sessionId: string) => Promise<ApiResult>
+    disableSessionLogging: (sessionId: string) => Promise<ApiResult>
   }
   knownHosts: {
     verify: (host: string, port: number, keyType: string, key: string) => Promise<ApiResult<any>>

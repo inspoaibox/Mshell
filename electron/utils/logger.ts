@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
+import { appSettingsManager } from './app-settings'
 
 type LogCategory = 'connection' | 'sftp' | 'system' | 'session' | 'proxy' | 'proxy-jump'
 
@@ -51,6 +52,8 @@ class Logger {
   }
 
   private writeLog(entry: LogEntry): void {
+    if (appSettingsManager.getSettings().general.enableSystemLog === false) return
+
     // 检查日志轮转
     this.checkLogRotation()
     
@@ -119,6 +122,7 @@ class Logger {
   }
 
   logSessionData(sessionId: string, direction: 'input' | 'output', data: string): void {
+    if (appSettingsManager.getSettings().general.enableSystemLog === false) return
     if (!this.sessionLogging.get(sessionId)) return
 
     const logFile = this.sessionLogFiles.get(sessionId)
@@ -134,6 +138,7 @@ class Logger {
   getLogs(filter?: { startDate?: Date; endDate?: Date; host?: string; level?: string }): LogEntry[] {
     const logs: LogEntry[] = []
     const files = fs.readdirSync(this.logDir).filter(f => f.startsWith('mshell-') && f.endsWith('.log'))
+    const hostFilter = filter?.host?.trim().toLowerCase()
 
     for (const file of files) {
       const content = fs.readFileSync(path.join(this.logDir, file), 'utf-8')
@@ -147,7 +152,7 @@ class Logger {
           if (filter) {
             if (filter.startDate && entryDate < filter.startDate) continue
             if (filter.endDate && entryDate > filter.endDate) continue
-            if (filter.host && entry.host !== filter.host) continue
+            if (hostFilter && !entry.host?.toLowerCase().includes(hostFilter)) continue
             if (filter.level && entry.level !== filter.level) continue
           }
 
@@ -167,6 +172,17 @@ class Logger {
     }
 
     return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+  }
+
+  clearLogs(): void {
+    const files = fs.readdirSync(this.logDir).filter(f => f.startsWith('mshell-') && f.endsWith('.log'))
+
+    for (const file of files) {
+      fs.unlinkSync(path.join(this.logDir, file))
+    }
+
+    const date = new Date().toISOString().split('T')[0]
+    this.currentLogFile = path.join(this.logDir, `mshell-${date}.log`)
   }
 
   /**

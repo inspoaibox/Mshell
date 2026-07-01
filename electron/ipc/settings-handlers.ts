@@ -23,12 +23,13 @@ export function registerSettingsHandlers() {
       await sessionManager.removeSavedSecrets()
     }
 
-    // 记录审计日志
-    auditLogManager.log(AuditAction.SETTINGS_UPDATE, {
-      resource: 'app-settings',
-      details: { updates },
-      success: true
-    })
+    if (settings.general.enableAuditLog !== false) {
+      auditLogManager.log(AuditAction.SETTINGS_UPDATE, {
+        resource: 'app-settings',
+        details: { updates },
+        success: true
+      })
+    }
 
     // 只有当 startWithSystem 值真正改变时才调用 setLoginItemSettings
     // 这个 API 在 Windows 上非常慢（约 2 秒）
@@ -54,12 +55,14 @@ export function registerSettingsHandlers() {
   ipcMain.handle('settings:reset', async () => {
     await appSettingsManager.resetToDefaults()
     
-    // 记录审计日志
-    auditLogManager.log(AuditAction.SETTINGS_UPDATE, {
-      resource: 'app-settings',
-      details: { action: 'reset-to-defaults' },
-      success: true
-    })
+    const settings = appSettingsManager.getSettings()
+    if (settings.general.enableAuditLog !== false) {
+      auditLogManager.log(AuditAction.SETTINGS_UPDATE, {
+        resource: 'app-settings',
+        details: { action: 'reset-to-defaults' },
+        success: true
+      })
+    }
     
     return { success: true }
   })

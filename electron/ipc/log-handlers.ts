@@ -33,6 +33,17 @@ export function registerLogHandlers() {
     }
   })
 
+  // 清空系统日志
+  ipcMain.handle('log:clearLogs', async () => {
+    try {
+      logger.clearLogs()
+      return { success: true }
+    } catch (error) {
+      console.error('[log-handlers] Error clearing logs:', error)
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
   // 启用会话日志
   ipcMain.handle('log:enableSessionLogging', async (_event, sessionId: string) => {
     logger.enableSessionLogging(sessionId)

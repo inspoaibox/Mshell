@@ -46,6 +46,14 @@
                 </el-radio-group>
                 <span class="form-hint">仅影响软件框架外观，不改变 SSH 终端配色方案</span>
               </el-form-item>
+              <el-form-item label="审计日志">
+                <el-switch v-model="settings.general.enableAuditLog" />
+                <span class="form-hint">记录连接、文件、密钥、设置等操作</span>
+              </el-form-item>
+              <el-form-item label="系统日志">
+                <el-switch v-model="settings.general.enableSystemLog" />
+                <span class="form-hint">记录系统错误、连接错误和内部运行日志</span>
+              </el-form-item>
               <!-- 语言切换暂时禁用，当前代码大部分为中文硬编码 -->
               <!--
               <el-form-item label="语言">
@@ -1352,7 +1360,7 @@ const availableThemes = themes
 const currentTheme = ref('dark')
 const appearanceOptions = [
   { label: '现代', value: 'modern' },
-  { label: '终端简洁', value: 'terminal' }
+  { label: '简洁', value: 'terminal' }
 ]
 
 const settings = ref({
@@ -1362,7 +1370,9 @@ const settings = ref({
     closeToTray: false,
     language: 'zh-CN',
     theme: 'dark' as 'light' | 'dark' | 'auto',
-    appearance: 'modern' as 'modern' | 'terminal'
+    appearance: 'modern' as 'modern' | 'terminal',
+    enableAuditLog: true,
+    enableSystemLog: true
   },
   terminal: {
     fontSize: 14,
@@ -1471,7 +1481,7 @@ const DEFAULT_RESTORE_OPTIONS = [
 const restoreOptions = ref<string[]>([...DEFAULT_RESTORE_OPTIONS])
 const backupLoading = ref(false)
 
-const appVersion = ref('0.2.7')
+const appVersion = ref('0.2.8')
 
 // 更新相关状态
 const updateState = ref({
