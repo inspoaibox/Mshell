@@ -1360,7 +1360,8 @@ const availableThemes = themes
 const currentTheme = ref('dark')
 const appearanceOptions = [
   { label: '现代', value: 'modern' },
-  { label: '简洁', value: 'terminal' }
+  { label: '简洁', value: 'terminal' },
+  { label: '简约', value: 'minimal' }
 ]
 
 const settings = ref({
@@ -1370,7 +1371,7 @@ const settings = ref({
     closeToTray: false,
     language: 'zh-CN',
     theme: 'dark' as 'light' | 'dark' | 'auto',
-    appearance: 'modern' as 'modern' | 'terminal',
+    appearance: 'modern' as 'modern' | 'terminal' | 'minimal',
     enableAuditLog: true,
     enableSystemLog: true
   },

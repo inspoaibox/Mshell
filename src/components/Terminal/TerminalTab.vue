@@ -708,7 +708,11 @@ const currentFont = computed(
 
 const getActiveAppShellGeneralSettings = (savedSettings: any) => {
   const root = document.documentElement
-  const appearance = root.classList.contains('app-appearance-terminal') ? 'terminal' : 'modern'
+  const appearance = root.classList.contains('app-appearance-minimal')
+    ? 'minimal'
+    : root.classList.contains('app-appearance-terminal')
+      ? 'terminal'
+      : 'modern'
 
   return {
     ...(savedSettings?.general || {}),

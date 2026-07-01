@@ -1736,6 +1736,254 @@ body,
   background: var(--border-color);
 }
 
+:global(:root.app-appearance-minimal .app-layout) {
+  background: var(--bg-main);
+}
+
+:global(:root.app-appearance-minimal .app-header) {
+  height: 42px;
+  padding: 0 12px;
+  position: relative;
+  justify-content: space-between;
+  background: var(--minimal-shell-header);
+  border-bottom: 1px solid var(--border-strong);
+  box-shadow: none;
+  font-family: var(--font-mono);
+}
+
+:global(:root.app-appearance-minimal .app-title-drag) {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+:global(:root.app-appearance-minimal .app-title-drag::before) {
+  content: 'local$ ssh workspace';
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(:root.app-appearance-minimal .app-title-drag::after) {
+  content: 'connected sessions ready';
+  margin-left: 14px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border-color);
+  color: var(--text-disabled);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+:global(:root.app-appearance-minimal .app-header .header-actions) {
+  gap: 6px;
+  align-items: center;
+}
+
+:global(:root.app-appearance-minimal .app-header .header-actions .el-button) {
+  width: 30px;
+  height: 28px;
+  min-height: 28px;
+  border-radius: 0;
+  background: var(--minimal-shell-panel-alt);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+:global(:root.app-appearance-minimal .app-header .header-actions .el-button:hover) {
+  background: var(--bg-tertiary);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  transform: none;
+}
+
+:global(:root.app-appearance-minimal .app-header .header-actions .el-button--primary) {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: var(--text-inverse);
+}
+
+:global(:root.app-appearance-minimal .sessions-panel) {
+  width: 332px;
+  min-width: 332px;
+  background: var(--minimal-shell-panel);
+  border-right: 1px solid var(--border-strong);
+  box-shadow: none;
+}
+
+:global(:root.app-appearance-minimal .session-panel-toggle) {
+  left: 332px;
+  width: 12px;
+  height: 56px;
+  border-radius: 0;
+  background: var(--minimal-shell-panel-alt);
+  border-color: var(--border-medium);
+  box-shadow: none;
+  color: var(--text-secondary);
+}
+
+:global(:root.app-appearance-minimal .session-panel-toggle:hover) {
+  width: 14px;
+  background: var(--bg-tertiary);
+  color: var(--primary-color);
+}
+
+:global(:root.app-appearance-minimal .session-panel-toggle.collapsed) {
+  left: 0;
+  border-left: 1px solid var(--border-medium);
+}
+
+:global(:root.app-appearance-minimal .terminal-panel.expanded) {
+  margin-left: 0;
+}
+
+:global(:root.app-appearance-minimal .premium-tabs) {
+  --el-tabs-header-height: 38px;
+}
+
+:global(:root.app-appearance-minimal .premium-tabs .el-tabs__header) {
+  padding: 0 0 0 8px;
+  background: var(--minimal-shell-bg);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+:global(:root.app-appearance-minimal .premium-tabs .el-tabs__nav) {
+  align-items: stretch;
+}
+
+:global(:root.app-appearance-minimal .premium-tabs .el-tabs__item) {
+  height: 38px;
+  line-height: 38px;
+  padding: 0 14px;
+  margin-right: 4px;
+  border: 1px solid transparent !important;
+  border-bottom: none !important;
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+
+:global(:root.app-appearance-minimal .premium-tabs .el-tabs__item::after) {
+  content: '$';
+  margin-left: 8px;
+  color: var(--text-disabled);
+  font-size: 11px;
+}
+
+:global(:root.app-appearance-minimal .premium-tabs .el-tabs__item.is-closable),
+:global(:root.app-appearance-minimal .premium-tabs .el-tabs__item.is-active.is-closable),
+:global(:root.app-appearance-minimal .premium-tabs .el-tabs__item.is-closable:hover) {
+  padding-left: 14px !important;
+  padding-right: 10px !important;
+}
+
+:global(:root.app-appearance-minimal .premium-tabs .el-tabs__item .el-icon-close) {
+  width: 14px;
+  height: 14px;
+  flex-basis: 14px;
+  border-radius: 0;
+  color: currentColor;
+}
+
+:global(:root.app-appearance-minimal .premium-tabs .el-tabs__item .el-icon-close:hover) {
+  background: var(--bg-hover);
+  color: var(--error-color);
+}
+
+:global(:root.app-appearance-minimal .premium-tabs .el-tabs__item.is-active) {
+  background: var(--minimal-shell-active);
+  border-color: var(--border-strong) !important;
+  color: var(--primary-color);
+  font-weight: 600;
+  box-shadow: inset 0 2px 0 var(--primary-color);
+}
+
+:global(:root.app-appearance-minimal .premium-tabs .el-tabs__item::before) {
+  display: none;
+}
+
+:global(:root.app-appearance-minimal .empty-state) {
+  background: var(--bg-main);
+}
+
+:global(:root.app-appearance-minimal .empty-state::before),
+:global(:root.app-appearance-minimal .empty-icon-wrapper::after) {
+  display: none;
+}
+
+:global(:root.app-appearance-minimal .empty-state-content) {
+  padding: var(--spacing-xl);
+  animation: none;
+}
+
+:global(:root.app-appearance-minimal .empty-icon-wrapper) {
+  width: 72px;
+  height: 72px;
+  border-radius: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  box-shadow: none;
+}
+
+:global(:root.app-appearance-minimal .empty-state h3) {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  letter-spacing: 0;
+}
+
+:global(:root.app-appearance-minimal .split-toolbar) {
+  min-height: 38px;
+  padding: 5px 10px;
+  background: var(--minimal-shell-bg);
+  border-bottom: 1px solid var(--border-strong);
+  font-family: var(--font-mono);
+}
+
+:global(:root.app-appearance-minimal .split-toolbar .terminal-count),
+:global(:root.app-appearance-minimal .split-toolbar .shortcut-hint) {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+:global(:root.app-appearance-minimal .split-toolbar .shortcut-hint) {
+  border-radius: 0;
+  background: var(--bg-tertiary);
+}
+
+:global(:root.app-appearance-minimal .split-terminals-container) {
+  gap: 1px;
+  background: var(--border-strong);
+}
+
+:global(:root.app-appearance-minimal .split-terminal-pane) {
+  border: 1px solid var(--border-color);
+  background: var(--bg-main);
+}
+
+:global(:root.app-appearance-minimal .split-terminal-pane.active) {
+  border-color: var(--primary-color);
+}
+
+:global(:root.app-appearance-minimal .split-terminal-pane .pane-header) {
+  height: 28px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  font-family: var(--font-mono);
+}
+
+:global(:root.app-appearance-minimal .split-terminal-pane .pane-index) {
+  border-radius: 0;
+  background: var(--primary-color);
+  color: var(--text-inverse);
+}
+
+:global(:root.app-appearance-minimal .divider-vertical) {
+  background: var(--border-color);
+}
+
 /* 动画 */
 @keyframes pulse {
   0%,

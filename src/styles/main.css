@@ -1455,6 +1455,632 @@ h5, h6 { font-size: var(--text-sm); }
   background: #fbfdfb !important;
 }
 
+/* 简约外观 */
+:root.app-appearance-minimal,
+:root.app-appearance-minimal body,
+:root.app-appearance-minimal #app {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-main);
+  color: var(--text-primary);
+}
+
+:root.app-appearance-minimal * {
+  letter-spacing: 0 !important;
+}
+
+:root.app-appearance-minimal body {
+  background: var(--bg-main);
+}
+
+:root.app-appearance-minimal .app-layout,
+:root.app-appearance-minimal .app-main,
+:root.app-appearance-minimal .app-content,
+:root.app-appearance-minimal .content-panel {
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-main) !important;
+}
+
+:root.app-appearance-minimal .app-header {
+  height: 42px;
+  background: var(--minimal-shell-header) !important;
+  border-bottom: 1px solid var(--border-strong) !important;
+  box-shadow: none !important;
+}
+
+:root.app-appearance-minimal .app-header::before {
+  display: none;
+}
+
+:root.app-appearance-minimal .sidebar {
+  width: 176px !important;
+  background: var(--minimal-shell-bg) !important;
+  border-right: 1px solid var(--border-strong) !important;
+  box-shadow: none !important;
+}
+
+:root.app-appearance-minimal .sidebar-header {
+  height: 58px !important;
+  padding: 9px 12px !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+:root.app-appearance-minimal .sidebar-footer {
+  padding: 8px !important;
+  border-top: 1px solid var(--border-color) !important;
+}
+
+:root.app-appearance-minimal .logo-icon {
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 1px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:root.app-appearance-minimal .logo-image {
+  border-radius: 1px !important;
+  filter: saturate(0.75) contrast(1.05);
+}
+
+:root.app-appearance-minimal .logo-glow {
+  display: none !important;
+}
+
+:root.app-appearance-minimal .logo-icon:hover {
+  transform: none !important;
+}
+
+:root.app-appearance-minimal .sidebar-nav {
+  gap: 2px !important;
+  padding: 8px 8px 4px !important;
+}
+
+:root.app-appearance-minimal .nav-item,
+:root.app-appearance-minimal .about-button {
+  width: 100% !important;
+  height: 34px !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  padding: 0 9px !important;
+  border-radius: 0 !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--text-tertiary) !important;
+}
+
+:root.app-appearance-minimal .nav-item::before {
+  background: transparent !important;
+}
+
+:root.app-appearance-minimal .nav-item:hover,
+:root.app-appearance-minimal .about-button:hover {
+  background: var(--bg-tertiary) !important;
+  border-color: var(--border-medium) !important;
+  color: var(--text-primary) !important;
+  transform: none !important;
+}
+
+:root.app-appearance-minimal .nav-item.is-active {
+  background: var(--bg-main) !important;
+  border-color: var(--primary-color) !important;
+  color: var(--primary-color) !important;
+  box-shadow: inset 2px 0 0 var(--primary-color) !important;
+}
+
+:root.app-appearance-minimal .nav-icon,
+:root.app-appearance-minimal .nav-item:hover .nav-icon,
+:root.app-appearance-minimal .nav-item.is-active .nav-icon {
+  transform: none !important;
+}
+
+:root.app-appearance-minimal .nav-indicator {
+  display: none !important;
+}
+
+:root.app-appearance-minimal .glass,
+:root.app-appearance-minimal .glass-light,
+:root.app-appearance-minimal .glass-panel,
+:root.app-appearance-minimal .sessions-panel,
+:root.app-appearance-minimal .terminal-panel,
+:root.app-appearance-minimal .settings-panel,
+:root.app-appearance-minimal .sftp-panel,
+:root.app-appearance-minimal .snippet-panel,
+:root.app-appearance-minimal .log-panel,
+:root.app-appearance-minimal .ssh-key-panel,
+:root.app-appearance-minimal .task-scheduler-panel,
+:root.app-appearance-minimal .workflow-panel,
+:root.app-appearance-minimal .port-forward-panel,
+:root.app-appearance-minimal .session-template-panel {
+  background: var(--bg-main) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root.app-appearance-minimal .sessions-panel {
+  width: 332px !important;
+  min-width: 332px !important;
+  background: var(--minimal-shell-panel) !important;
+  border-right: 1px solid var(--border-strong) !important;
+}
+
+:root.app-appearance-minimal .session-panel-toggle {
+  border-radius: 0 !important;
+  border-color: var(--border-medium) !important;
+  background: var(--bg-secondary) !important;
+  color: var(--text-secondary) !important;
+  box-shadow: none !important;
+}
+
+:root.app-appearance-minimal .panel-header,
+:root.app-appearance-minimal .terminal-header,
+:root.app-appearance-minimal .browser-header,
+:root.app-appearance-minimal .session-list-header,
+:root.app-appearance-minimal .premium-tabs .el-tabs__header {
+  min-height: 34px;
+  background: var(--bg-secondary) !important;
+  border-bottom: 1px solid var(--border-strong) !important;
+  box-shadow: none !important;
+}
+
+:root.app-appearance-minimal .panel-header,
+:root.app-appearance-minimal .browser-header {
+  padding: 7px 10px !important;
+}
+
+:root.app-appearance-minimal .panel-header h1,
+:root.app-appearance-minimal .panel-header h2,
+:root.app-appearance-minimal .panel-header h3,
+:root.app-appearance-minimal .panel-header h4,
+:root.app-appearance-minimal .browser-header h3,
+:root.app-appearance-minimal .session-list-header .header-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm) !important;
+  font-weight: 600;
+  color: var(--text-primary) !important;
+}
+
+:root.app-appearance-minimal .panel-header h2::before,
+:root.app-appearance-minimal .panel-header h3::before,
+:root.app-appearance-minimal .browser-header h3::before,
+:root.app-appearance-minimal .session-list-header .header-title::before {
+  content: '> ';
+  color: var(--primary-color);
+}
+
+:root.app-appearance-minimal .terminal-header {
+  height: 38px !important;
+  padding: 0 10px !important;
+  gap: 10px !important;
+  background: var(--minimal-shell-panel) !important;
+}
+
+:root.app-appearance-minimal .terminal-header .connection-info,
+:root.app-appearance-minimal .terminal-header .host-name,
+:root.app-appearance-minimal .terminal-header .status-text,
+:root.app-appearance-minimal .terminal-header .connection-host-text {
+  font-family: var(--font-mono) !important;
+}
+
+:root.app-appearance-minimal .terminal-header .host-name,
+:root.app-appearance-minimal .terminal-header .connection-host-text {
+  color: var(--text-primary) !important;
+}
+
+:root.app-appearance-minimal .terminal-header .status-text {
+  color: var(--text-tertiary) !important;
+}
+
+:root.app-appearance-minimal .terminal-content {
+  background: var(--minimal-terminal-bg) !important;
+}
+
+:root.light-theme.app-appearance-minimal .terminal-content {
+  background: #ffffff !important;
+}
+
+:root.app-appearance-minimal .connection-host-chip {
+  height: 22px !important;
+  border-radius: 0 !important;
+  border-color: var(--border-medium) !important;
+  background: var(--bg-main) !important;
+}
+
+:root.app-appearance-minimal .terminal-header .header-actions {
+  gap: 4px !important;
+}
+
+:root.app-appearance-minimal .terminal-header .action-btn,
+:root.app-appearance-minimal .terminal-header .copy-host-btn,
+:root.app-appearance-minimal .terminal-header .header-actions .el-dropdown .el-button {
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  min-height: 24px !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--text-secondary) !important;
+  box-shadow: none !important;
+}
+
+:root.app-appearance-minimal .terminal-header .action-btn:hover,
+:root.app-appearance-minimal .terminal-header .copy-host-btn:hover,
+:root.app-appearance-minimal .terminal-header .header-actions .el-dropdown .el-button:hover {
+  background: var(--bg-tertiary) !important;
+  border-color: var(--border-medium) !important;
+  color: var(--primary-color) !important;
+}
+
+:root.app-appearance-minimal .premium-tabs .el-tabs__nav-wrap::after {
+  height: 0 !important;
+}
+
+:root.app-appearance-minimal .premium-tabs .el-tabs__item {
+  height: 38px !important;
+  padding: 0 14px !important;
+  border-radius: 0 !important;
+  border: 1px solid transparent !important;
+  border-bottom: none !important;
+  background: transparent !important;
+  color: var(--text-tertiary) !important;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+:root.app-appearance-minimal .premium-tabs .el-tabs__item.is-active {
+  background: var(--minimal-shell-active) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--primary-color) !important;
+  box-shadow: inset 0 2px 0 var(--primary-color) !important;
+}
+
+:root.app-appearance-minimal .split-toolbar {
+  min-height: 38px !important;
+  border-bottom: 1px solid var(--border-strong) !important;
+  background: var(--minimal-shell-bg) !important;
+  font-family: var(--font-mono);
+}
+
+:root.app-appearance-minimal .split-terminal-pane {
+  border-radius: 0 !important;
+  border: 1px solid var(--border-color) !important;
+  background: var(--bg-main) !important;
+  box-shadow: none !important;
+}
+
+:root.app-appearance-minimal .split-terminal-pane.active {
+  border-color: var(--primary-color) !important;
+  box-shadow: inset 0 0 0 1px var(--primary-color) !important;
+}
+
+:root.app-appearance-minimal .split-terminal-pane .pane-header {
+  height: 28px !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  background: var(--bg-secondary) !important;
+  font-family: var(--font-mono);
+}
+
+:root.app-appearance-minimal .el-button {
+  min-height: 28px;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  background: var(--bg-tertiary);
+  border-color: var(--border-medium);
+  color: var(--text-secondary);
+}
+
+:root.app-appearance-minimal .el-button:hover,
+:root.app-appearance-minimal .el-button:focus {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+:root.app-appearance-minimal .el-button--primary {
+  background: var(--primary-color) !important;
+  border-color: var(--primary-hover) !important;
+  color: var(--text-inverse) !important;
+}
+
+:root.app-appearance-minimal .el-button.is-link,
+:root.app-appearance-minimal .el-button--primary.is-link {
+  min-height: auto;
+  background: transparent !important;
+  border-color: transparent !important;
+  color: var(--text-secondary) !important;
+}
+
+:root.app-appearance-minimal .el-button.is-link:hover,
+:root.app-appearance-minimal .el-button--primary.is-link:hover {
+  background: var(--bg-tertiary) !important;
+  color: var(--primary-color) !important;
+}
+
+:root.app-appearance-minimal .el-input__wrapper,
+:root.app-appearance-minimal .el-select__wrapper,
+:root.app-appearance-minimal .el-textarea__inner,
+:root.app-appearance-minimal .el-input-number .el-input__wrapper {
+  border-radius: 0 !important;
+  box-shadow: 0 0 0 1px var(--border-color) inset !important;
+  background: var(--bg-secondary) !important;
+  font-family: var(--font-mono);
+}
+
+:root.app-appearance-minimal .el-input__wrapper.is-focus,
+:root.app-appearance-minimal .el-select__wrapper.is-focused,
+:root.app-appearance-minimal .el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--primary-color) inset !important;
+}
+
+:root.app-appearance-minimal .el-dialog,
+:root.app-appearance-minimal .el-message-box,
+:root.app-appearance-minimal .el-popper,
+:root.app-appearance-minimal .el-select__popper,
+:root.app-appearance-minimal .el-dropdown__popper {
+  border-radius: 0 !important;
+  border: 1px solid var(--border-strong) !important;
+  background: var(--bg-secondary) !important;
+  box-shadow: none !important;
+}
+
+:root.app-appearance-minimal .el-dialog__header,
+:root.app-appearance-minimal .el-message-box__header,
+:root.app-appearance-minimal .el-dialog__footer,
+:root.app-appearance-minimal .el-message-box__btns {
+  background: var(--bg-tertiary) !important;
+  border-color: var(--border-color) !important;
+}
+
+:root.app-appearance-minimal .el-table {
+  --el-table-header-bg-color: var(--bg-tertiary);
+  --el-table-tr-bg-color: var(--bg-secondary);
+  --el-table-row-hover-bg-color: var(--bg-hover);
+  --el-table-border-color: var(--border-color);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+:root.app-appearance-minimal .el-table th.el-table__cell,
+:root.app-appearance-minimal .file-list .table-header-cell {
+  height: 30px;
+  padding: 4px 0 !important;
+  background: var(--bg-tertiary) !important;
+  color: var(--text-secondary) !important;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+:root.app-appearance-minimal .el-table td.el-table__cell,
+:root.app-appearance-minimal .file-list .table-cell {
+  padding: 4px 0 !important;
+  border-bottom: 1px solid var(--border-light) !important;
+}
+
+:root.app-appearance-minimal .file-browser,
+:root.app-appearance-minimal .shortcut-item,
+:root.app-appearance-minimal .theme-item,
+:root.app-appearance-minimal .group-item,
+:root.app-appearance-minimal .session-card,
+:root.app-appearance-minimal .snippet-item,
+:root.app-appearance-minimal .type-item,
+:root.app-appearance-minimal .case-study,
+:root.app-appearance-minimal .stat-card,
+:root.app-appearance-minimal .metric-card,
+:root.app-appearance-minimal .status-card,
+:root.app-appearance-minimal .command-block,
+:root.app-appearance-minimal .command-preview,
+:root.app-appearance-minimal .variables-form,
+:root.app-appearance-minimal .final-command,
+:root.app-appearance-minimal .restore-options {
+  border-radius: 0 !important;
+  background: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: none !important;
+}
+
+:root.app-appearance-minimal .session-list-header {
+  min-height: 92px !important;
+  padding: 12px 12px 10px !important;
+  background: var(--minimal-shell-panel) !important;
+}
+
+:root.app-appearance-minimal .session-list-header .header-top {
+  margin-bottom: 10px;
+}
+
+:root.app-appearance-minimal .session-list-header .header-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 13px !important;
+  text-transform: uppercase;
+}
+
+:root.app-appearance-minimal .session-list-header .header-title::before {
+  content: '~/.ssh/config';
+  display: inline-flex;
+  height: 20px;
+  align-items: center;
+  padding: 0 6px;
+  background: var(--minimal-shell-active);
+  border: 1px solid var(--border-color);
+  color: var(--primary-color);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+:root.app-appearance-minimal .session-groups-container {
+  padding: 0 !important;
+  background: var(--minimal-shell-panel) !important;
+}
+
+:root.app-appearance-minimal .group-item {
+  width: 100% !important;
+  margin: 0 !important;
+  border-width: 0 0 1px !important;
+  background: transparent !important;
+}
+
+:root.app-appearance-minimal .session-groups-container .el-collapse-item__header {
+  height: 32px !important;
+  padding: 0 12px !important;
+  background: var(--minimal-shell-panel-alt) !important;
+  font-family: var(--font-mono);
+  font-size: 11px !important;
+  text-transform: uppercase;
+}
+
+:root.app-appearance-minimal .session-groups-container .el-collapse-item__content,
+:root.app-appearance-minimal .session-items {
+  padding: 0 !important;
+}
+
+:root.app-appearance-minimal .group-header .el-tag {
+  min-width: 26px;
+  height: 18px;
+  border-radius: 0;
+  background: var(--minimal-shell-bg);
+  border-color: var(--border-medium);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+:root.app-appearance-minimal .session-card {
+  min-height: 46px !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 7px 12px !important;
+  background: transparent !important;
+  border-width: 0 0 1px !important;
+  border-color: var(--border-color) !important;
+  display: grid !important;
+  grid-template-columns: 10px 26px minmax(0, 1fr) auto;
+  column-gap: 8px;
+}
+
+:root.app-appearance-minimal .session-card::before {
+  content: '';
+  width: 3px;
+  inset: 7px auto 7px 0;
+  background: transparent;
+  transform: none;
+}
+
+:root.app-appearance-minimal .session-card:hover::before {
+  background: var(--primary-color);
+}
+
+:root.app-appearance-minimal .session-status {
+  margin-right: 0 !important;
+  align-self: center;
+}
+
+:root.app-appearance-minimal .session-icon {
+  width: 24px !important;
+  height: 24px !important;
+  margin-right: 0 !important;
+  background: var(--minimal-shell-active) !important;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+:root.app-appearance-minimal .session-card:hover .session-icon {
+  background: var(--minimal-shell-active) !important;
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+:root.app-appearance-minimal .session-name {
+  font-family: var(--font-mono);
+  font-size: 12px !important;
+  font-weight: 700;
+}
+
+:root.app-appearance-minimal .session-name::before {
+  content: 'Host ';
+  color: var(--text-disabled);
+  font-weight: 500;
+}
+
+:root.app-appearance-minimal .session-details {
+  font-family: var(--font-mono);
+  font-size: 11px !important;
+  color: var(--text-tertiary);
+}
+
+:root.app-appearance-minimal .session-type-tag,
+:root.app-appearance-minimal .expiry-tag {
+  border-radius: 0 !important;
+  font-family: var(--font-mono);
+}
+
+:root.app-appearance-minimal .session-card:hover,
+:root.app-appearance-minimal .snippet-item:hover,
+:root.app-appearance-minimal .shortcut-item:hover,
+:root.app-appearance-minimal .theme-item:hover,
+:root.app-appearance-minimal .file-list .table-row:hover,
+:root.app-appearance-minimal .file-list .table-row.hover {
+  background: var(--bg-hover) !important;
+  border-color: var(--border-medium) !important;
+  transform: none !important;
+}
+
+:root.app-appearance-minimal .file-list .table-row.selected {
+  background: rgba(var(--primary-color-rgb), 0.14) !important;
+  box-shadow: inset 2px 0 0 var(--primary-color) !important;
+}
+
+:root.app-appearance-minimal pre,
+:root.app-appearance-minimal code,
+:root.app-appearance-minimal kbd,
+:root.app-appearance-minimal .connection-info,
+:root.app-appearance-minimal .preview-connection,
+:root.app-appearance-minimal .connected-session,
+:root.app-appearance-minimal .shortcut-hint {
+  font-family: var(--font-mono);
+}
+
+:root.app-appearance-minimal .settings-tabs .el-tabs__header,
+:root.app-appearance-minimal .settings-tabs .el-tabs__nav-wrap,
+:root.app-appearance-minimal .settings-tabs .el-tabs__content {
+  background: transparent !important;
+}
+
+:root.app-appearance-minimal .settings-section h3 {
+  color: var(--text-primary) !important;
+  border-bottom-color: var(--border-color) !important;
+}
+
+:root.app-appearance-minimal .el-popper.is-dark,
+:root.app-appearance-minimal .el-tooltip__popper,
+:root.app-appearance-minimal .el-tooltip__popper.is-dark {
+  --el-popper-bg-color-dark: var(--bg-elevated);
+  --el-fill-color-blank: var(--bg-elevated);
+  background: var(--bg-elevated) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text-primary) !important;
+  font-family: var(--font-mono);
+}
+
+:root.app-appearance-minimal .status-connected,
+:root.app-appearance-minimal .connected-icon {
+  color: var(--accent-color) !important;
+}
+
+:root.app-appearance-minimal .status-dot,
+:root.app-appearance-minimal .status-connected {
+  box-shadow: none !important;
+}
+
 /* 动画效果 */
 @keyframes fadeIn {
   from {

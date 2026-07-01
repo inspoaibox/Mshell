@@ -325,3 +325,124 @@
   --el-font-size-small: var(--text-sm);
   --el-font-size-extra-small: var(--text-xs);
 }
+
+/* 简约外观：接近原生 SSH 客户端，弱装饰、高可读、终端优先 */
+:root.app-appearance-minimal {
+  --primary-color: #8fb4ff;
+  --primary-color-rgb: 143, 180, 255;
+  --primary-hover: #a8c4ff;
+  --primary-light: #c7d8ff;
+  --accent-color: #78d6c6;
+  --accent-hover: #93eadc;
+  --terminal-warn: #d6b76e;
+  --terminal-line: rgba(143, 180, 255, 0.28);
+
+  --bg-main: #0b0d10;
+  --bg-primary: var(--bg-main);
+  --bg-secondary: #111418;
+  --bg-tertiary: #171b20;
+  --bg-elevated: #1b2026;
+  --bg-hover: #20262d;
+  --minimal-shell-bg: #0b0d10;
+  --minimal-shell-header: #080a0d;
+  --minimal-shell-panel: #0d1014;
+  --minimal-shell-panel-alt: #10141a;
+  --minimal-shell-panel-hover: #151a21;
+  --minimal-shell-active: #11161c;
+  --minimal-terminal-bg: #07090b;
+
+  --glass-bg: var(--bg-secondary);
+  --glass-bg-light: var(--bg-tertiary);
+  --glass-border: var(--border-color);
+  --glass-border-hover: var(--border-medium);
+  --glass-blur: 0px;
+
+  --text-primary: #e6edf3;
+  --text-secondary: #b7c1cd;
+  --text-tertiary: #7f8b99;
+  --text-disabled: #56616f;
+  --text-inverse: #080a0d;
+
+  --border-color: #2a3038;
+  --border-light: rgba(230, 237, 243, 0.06);
+  --border-medium: #3a4350;
+  --border-strong: #4a5563;
+
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+  --shadow-glow: none;
+
+  --radius-xs: 0px;
+  --radius-sm: 1px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 3px;
+
+  --spacing-xs: 3px;
+  --spacing-sm: 6px;
+  --spacing-md: 9px;
+  --spacing-lg: 12px;
+  --spacing-xl: 18px;
+  --spacing-2xl: 24px;
+
+  --el-bg-color: var(--bg-main);
+  --el-bg-color-overlay: var(--bg-elevated);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-secondary);
+  --el-border-color: var(--border-color);
+  --el-border-color-light: var(--border-light);
+  --el-border-color-lighter: var(--border-light);
+  --el-fill-color-blank: var(--bg-secondary);
+  --el-fill-color: var(--bg-tertiary);
+  --el-border-radius-base: var(--radius-md);
+  --el-border-radius-small: var(--radius-sm);
+  --el-font-size-extra-large: var(--text-lg);
+  --el-font-size-large: var(--text-base);
+  --el-font-size-medium: var(--text-sm);
+  --el-font-size-base: var(--text-sm);
+  --el-font-size-small: var(--text-xs);
+  --el-font-size-extra-small: var(--text-xs);
+}
+
+:root.light-theme.app-appearance-minimal {
+  --primary-color: #255eb8;
+  --primary-color-rgb: 37, 94, 184;
+  --primary-hover: #1d4f9d;
+  --primary-light: #4279d7;
+  --accent-color: #047481;
+  --accent-hover: #075e68;
+  --terminal-warn: #8a6500;
+  --terminal-line: rgba(37, 94, 184, 0.24);
+
+  --bg-main: #f3f5f7;
+  --bg-primary: var(--bg-main);
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e9edf2;
+  --bg-elevated: #ffffff;
+  --bg-hover: #dde4ec;
+  --minimal-shell-bg: #f6f8fb;
+  --minimal-shell-header: #eef2f7;
+  --minimal-shell-panel: #ffffff;
+  --minimal-shell-panel-alt: #edf2f7;
+  --minimal-shell-panel-hover: #e4ebf3;
+  --minimal-shell-active: #eaf2ff;
+  --minimal-terminal-bg: #ffffff;
+
+  --glass-bg: var(--bg-secondary);
+  --glass-bg-light: var(--bg-tertiary);
+  --glass-border: var(--border-color);
+  --glass-border-hover: var(--border-medium);
+
+  --text-primary: #111827;
+  --text-secondary: #3f4a5a;
+  --text-tertiary: #6b7280;
+  --text-disabled: #9aa3af;
+  --text-inverse: #ffffff;
+
+  --border-color: #c9d1dc;
+  --border-light: rgba(17, 24, 39, 0.06);
+  --border-medium: #aeb8c6;
+  --border-strong: #8f9bad;
+}

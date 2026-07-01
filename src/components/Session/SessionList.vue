@@ -417,9 +417,10 @@ const getSessionItemsStyle = (count: number) => ({
 })
 
 const updateAppearanceMode = () => {
-  isTerminalAppearance.value = document.documentElement.classList.contains(
-    'app-appearance-terminal'
-  )
+  const root = document.documentElement
+  isTerminalAppearance.value =
+    root.classList.contains('app-appearance-terminal') ||
+    root.classList.contains('app-appearance-minimal')
 }
 
 let appearanceObserver: MutationObserver | null = null
@@ -1196,6 +1197,158 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
 
 :global(:root.app-appearance-terminal .session-details) {
   font-family: var(--font-mono);
+}
+
+:global(:root.app-appearance-minimal .session-list-header) {
+  padding: 12px 12px 10px;
+  background: var(--minimal-shell-panel);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+:global(:root.app-appearance-minimal .header-title) {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+:global(:root.app-appearance-minimal .search-wrapper .el-input__wrapper) {
+  height: 32px;
+  background: var(--minimal-terminal-bg) !important;
+  border-radius: 0 !important;
+  box-shadow: 0 0 0 1px var(--border-color) inset !important;
+  font-family: var(--font-mono);
+}
+
+:global(:root.app-appearance-minimal .session-groups-container) {
+  padding: 0;
+  background: var(--minimal-shell-panel);
+}
+
+:global(:root.app-appearance-minimal .group-item) {
+  width: 100%;
+  margin: 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:global(:root.app-appearance-minimal .group-item:hover) {
+  box-shadow: none;
+}
+
+:global(:root.app-appearance-minimal .session-groups-container .el-collapse-item__header) {
+  height: 32px;
+  line-height: 32px;
+  padding: 0 12px;
+  background: var(--minimal-shell-panel-alt);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+:global(:root.app-appearance-minimal .session-groups-container .el-collapse-item__header:hover) {
+  background: var(--minimal-shell-panel-hover);
+}
+
+:global(:root.app-appearance-minimal .session-groups-container .el-collapse-item__content),
+:global(:root.app-appearance-minimal .session-items) {
+  padding: 0;
+}
+
+:global(:root.app-appearance-minimal .group-name) {
+  font-size: 11px;
+}
+
+:global(:root.app-appearance-minimal .group-header .el-tag) {
+  height: 18px;
+  min-width: 26px;
+  border-radius: 0;
+  background: var(--minimal-shell-bg);
+  border-color: var(--border-medium);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+:global(:root.app-appearance-minimal .session-card) {
+  display: grid;
+  grid-template-columns: 10px 26px minmax(0, 1fr) auto;
+  column-gap: 8px;
+  min-height: 46px;
+  width: 100%;
+  margin: 0;
+  padding: 7px 12px;
+  border-width: 0 0 1px;
+  border-color: var(--border-color);
+  border-radius: 0;
+  background: transparent;
+}
+
+:global(:root.app-appearance-minimal .session-card:hover) {
+  transform: none;
+  box-shadow: none;
+  background: var(--minimal-shell-panel-hover);
+  border-color: var(--border-medium);
+}
+
+:global(:root.app-appearance-minimal .session-card:active) {
+  transform: none;
+}
+
+:global(:root.app-appearance-minimal .session-card::before) {
+  width: 3px;
+  inset: 7px auto 7px 0;
+  background: transparent;
+  transform: none;
+}
+
+:global(:root.app-appearance-minimal .session-card:hover::before) {
+  background: var(--primary-color);
+}
+
+:global(:root.app-appearance-minimal .session-status) {
+  margin-right: 0;
+  align-self: center;
+}
+
+:global(:root.app-appearance-minimal .status-dot) {
+  width: 6px;
+  height: 6px;
+  background: var(--accent-color);
+  box-shadow: none;
+}
+
+:global(:root.app-appearance-minimal .session-icon) {
+  width: 24px;
+  height: 24px;
+  margin-right: 0;
+  align-self: center;
+  border: 1px solid var(--border-color);
+  border-radius: 0;
+  background: var(--minimal-shell-active);
+  color: var(--text-secondary);
+}
+
+:global(:root.app-appearance-minimal .session-card:hover .session-icon) {
+  background: var(--minimal-shell-active);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  transform: none;
+}
+
+:global(:root.app-appearance-minimal .session-name) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+:global(:root.app-appearance-minimal .session-details) {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
 }
 
 .session-card {

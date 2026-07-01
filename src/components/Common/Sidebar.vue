@@ -8,10 +8,15 @@
           <div class="logo-glow"></div>
         </div>
       </div>
+      <div class="sidebar-brand">
+        <span class="brand-name">MShell</span>
+        <span class="brand-subtitle">SSH Console</span>
+      </div>
     </div>
     
     <!-- 主导航 -->
     <nav class="sidebar-nav">
+      <div class="nav-section-title">Workspace</div>
       <el-tooltip 
         v-for="item in mainMenuItems" 
         :key="item.index"
@@ -28,6 +33,7 @@
           <el-icon class="nav-icon" :size="20">
             <component :is="item.icon" />
           </el-icon>
+          <span class="nav-label">{{ item.label }}</span>
           <div class="nav-indicator"></div>
         </div>
       </el-tooltip>
@@ -37,6 +43,7 @@
 
     <!-- 底部导航 -->
     <nav class="sidebar-nav sidebar-nav-bottom">
+      <div class="nav-section-title">System</div>
       <el-tooltip 
         v-for="item in bottomMenuItems" 
         :key="item.index"
@@ -53,6 +60,7 @@
           <el-icon class="nav-icon" :size="20">
             <component :is="item.icon" />
           </el-icon>
+          <span class="nav-label">{{ item.label }}</span>
           <div class="nav-indicator"></div>
         </div>
       </el-tooltip>
@@ -70,6 +78,7 @@
           <el-icon class="about-icon" :size="18">
             <InfoFilled />
           </el-icon>
+          <span class="about-label">关于 · {{ appVersion }}</span>
         </button>
       </el-tooltip>
     </div>
@@ -189,6 +198,13 @@ const handleAboutClick = () => {
 
 .logo-wrapper {
   position: relative;
+}
+
+.sidebar-brand,
+.nav-section-title,
+.nav-label,
+.about-label {
+  display: none;
 }
 
 .logo-icon {
@@ -475,5 +491,182 @@ const handleAboutClick = () => {
   background: var(--bg-tertiary);
   border-color: var(--border-medium);
   color: var(--primary-color);
+}
+
+:global(:root.app-appearance-minimal .sidebar) {
+  width: 176px !important;
+  background: var(--minimal-shell-bg) !important;
+  border-right: 1px solid var(--border-strong);
+  box-shadow: none;
+  overflow-x: hidden;
+}
+
+:global(:root.app-appearance-minimal .sidebar-header) {
+  height: 58px;
+  padding: 9px 12px;
+  justify-content: flex-start;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+:global(:root.app-appearance-minimal .logo-icon) {
+  width: 30px;
+  height: 30px;
+  border-radius: 1px;
+  flex: 0 0 30px;
+}
+
+:global(:root.app-appearance-minimal .logo-image) {
+  border-radius: 1px;
+  filter: grayscale(0.2) contrast(1.08);
+}
+
+:global(:root.app-appearance-minimal .logo-icon:hover) {
+  transform: none;
+}
+
+:global(:root.app-appearance-minimal .logo-glow) {
+  display: none;
+}
+
+:global(:root.app-appearance-minimal .sidebar-brand) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  font-family: var(--font-mono);
+}
+
+:global(:root.app-appearance-minimal .brand-name) {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+:global(:root.app-appearance-minimal .brand-subtitle) {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+:global(:root.app-appearance-minimal .sidebar-nav) {
+  gap: 2px;
+  padding: 8px 8px 4px;
+}
+
+:global(:root.app-appearance-minimal .nav-section-title) {
+  display: block;
+  padding: 10px 6px 5px;
+  color: var(--text-disabled);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+:global(:root.app-appearance-minimal .nav-item) {
+  width: 100%;
+  height: 34px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 9px;
+  border-radius: 0;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+:global(:root.app-appearance-minimal .nav-item::before) {
+  content: '>';
+  position: static;
+  inset: auto;
+  display: inline-block;
+  width: 10px;
+  flex: 0 0 10px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--primary-color);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+:global(:root.app-appearance-minimal .nav-item:hover::before),
+:global(:root.app-appearance-minimal .nav-item.is-active::before) {
+  opacity: 1;
+}
+
+:global(:root.app-appearance-minimal .nav-item:hover) {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+:global(:root.app-appearance-minimal .nav-item.is-active) {
+  color: var(--primary-color);
+  background: var(--minimal-shell-active);
+  border-color: var(--border-medium);
+  box-shadow: inset 3px 0 0 var(--primary-color);
+}
+
+:global(:root.app-appearance-minimal .nav-icon),
+:global(:root.app-appearance-minimal .nav-item:hover .nav-icon),
+:global(:root.app-appearance-minimal .nav-item.is-active .nav-icon) {
+  transform: none;
+  flex: 0 0 18px;
+}
+
+:global(:root.app-appearance-minimal .nav-label) {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: currentColor;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(:root.app-appearance-minimal .nav-indicator) {
+  display: none;
+}
+
+:global(:root.app-appearance-minimal .sidebar-footer) {
+  padding: 8px;
+  border-top: 1px solid var(--border-strong);
+}
+
+:global(:root.app-appearance-minimal .about-button) {
+  width: 100%;
+  height: 34px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 9px;
+  border-radius: 0;
+  background: transparent;
+  border-color: var(--border-color);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+:global(:root.app-appearance-minimal .about-button:hover) {
+  background: var(--bg-tertiary);
+  border-color: var(--border-medium);
+  color: var(--primary-color);
+}
+
+:global(:root.app-appearance-minimal .about-label) {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

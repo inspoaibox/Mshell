@@ -23,7 +23,7 @@ export interface AppSettings {
   general: {
     language: 'zh-CN' | 'en-US'
     theme: 'light' | 'dark' | 'auto'
-    appearance: 'modern' | 'terminal'
+    appearance: 'modern' | 'terminal' | 'minimal'
     startWithSystem: boolean
     minimizeToTray: boolean
     closeToTray: boolean
