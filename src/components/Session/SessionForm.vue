@@ -818,8 +818,12 @@ const handleSave = async () => {
             sessionData.password = form.password
           } else {
             ;(sessionData as any).password = null
+            ;(sessionData as any).passphrase = null
           }
         } else {
+          if (!shouldSavePasswords) {
+            ;(sessionData as any).password = null
+          }
           // 优先使用SSH密钥ID，其次使用本地文件路径
           // 使用 null 显式清除另一个字段，防止旧值在 merge 时被保留
           if (form.privateKeyId) {

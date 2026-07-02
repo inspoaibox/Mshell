@@ -89,6 +89,8 @@ interface TerminalInstance {
   selectionDisposable?: { dispose: () => void } // 选中事件监听器
   bracketedPasteEnabled: boolean // 远端是否启用了 bracketed paste mode
   echoEnabled: boolean // 终端是否处于回显模式（false = 密码输入等无回显场景）
+  pendingViewportRefresh: boolean // 终端隐藏期间收到输出后，重新显示时刷新 viewport
+  pendingScrollToBottom: boolean // 终端隐藏期间位于底部，重新显示时恢复到底部
 }
 
 class TerminalManager {
@@ -265,7 +267,9 @@ class TerminalManager {
       outputCallback: null,
       copyOnSelect: options.copyOnSelect || false,
       bracketedPasteEnabled: false,
-      echoEnabled: true // 默认回显开启
+      echoEnabled: true, // 默认回显开启
+      pendingViewportRefresh: false,
+      pendingScrollToBottom: false
     }
 
     if (container) {
@@ -284,7 +288,7 @@ class TerminalManager {
     // 1. SSH Data
     const unsubData = window.electronAPI.ssh.onData((id: string, data: string | Uint8Array) => {
       if (id === connectionId) {
-        instance.terminal.write(data)
+        this.writeTerminalOutput(instance, data)
 
         // 检测远端是否启用/禁用了 bracketed paste mode
         // \x1b[?2004h = 启用, \x1b[?2004l = 禁用
@@ -385,7 +389,7 @@ class TerminalManager {
     // 2. SSH Error
     const unsubError = window.electronAPI.ssh.onError((id: string, error: string) => {
       if (id === connectionId) {
-        instance.terminal.write(`\r\n\x1b[31mError: ${error}\x1b[0m\r\n`)
+        this.writeTerminalOutput(instance, `\r\n\x1b[31mError: ${error}\x1b[0m\r\n`)
       }
     })
     instance.unsubscribers.push(unsubError)
@@ -393,7 +397,7 @@ class TerminalManager {
     // 3. SSH Close
     const unsubClose = window.electronAPI.ssh.onClose((id: string) => {
       if (id === connectionId) {
-        instance.terminal.write('\r\n\x1b[33mConnection closed\x1b[0m\r\n')
+        this.writeTerminalOutput(instance, '\r\n\x1b[33mConnection closed\x1b[0m\r\n')
       }
     })
     instance.unsubscribers.push(unsubClose)
@@ -402,7 +406,8 @@ class TerminalManager {
     const unsubReconnecting = window.electronAPI.ssh.onReconnecting(
       (id: string, attempt: number, maxAttempts: number) => {
         if (id === connectionId) {
-          instance.terminal.write(
+          this.writeTerminalOutput(
+            instance,
             `\r\n\x1b[33m正在重连... (尝试 ${attempt}/${maxAttempts})\x1b[0m\r\n`
           )
         }
@@ -413,7 +418,7 @@ class TerminalManager {
     // 5. Reconnected
     const unsubReconnected = window.electronAPI.ssh.onReconnected((id: string) => {
       if (id === connectionId) {
-        instance.terminal.write('\r\n\x1b[32m重连成功！\x1b[0m\r\n')
+        this.writeTerminalOutput(instance, '\r\n\x1b[32m重连成功！\x1b[0m\r\n')
       }
     })
     instance.unsubscribers.push(unsubReconnected)
@@ -422,7 +427,7 @@ class TerminalManager {
     const unsubReconnectFailed = window.electronAPI.ssh.onReconnectFailed(
       (id: string, reason: string) => {
         if (id === connectionId) {
-          instance.terminal.write(`\r\n\x1b[31m重连失败: ${reason}\x1b[0m\r\n`)
+          this.writeTerminalOutput(instance, `\r\n\x1b[31m重连失败: ${reason}\x1b[0m\r\n`)
         }
       }
     )
@@ -437,6 +442,38 @@ class TerminalManager {
    */
   get(connectionId: string): TerminalInstance | undefined {
     return this.instances.get(connectionId)
+  }
+
+  requestScrollToBottom(connectionId: string): void {
+    const instance = this.instances.get(connectionId)
+    if (!instance) return
+
+    instance.pendingViewportRefresh = true
+    instance.pendingScrollToBottom = true
+
+    if (this.hasVisibleContainer(instance)) {
+      this.reveal(connectionId, { scrollToBottom: true })
+    }
+  }
+
+  reveal(connectionId: string, options: { scrollToBottom?: boolean } = {}): void {
+    const instance = this.instances.get(connectionId)
+    if (!instance || !this.hasVisibleContainer(instance)) return
+
+    const shouldScrollToBottom = options.scrollToBottom || instance.pendingScrollToBottom
+    this.syncTerminalViewport(instance, shouldScrollToBottom)
+
+    instance.pendingViewportRefresh = false
+    instance.pendingScrollToBottom = false
+  }
+
+  writeLocalOutput(connectionId: string, data: string): void {
+    const instance = this.instances.get(connectionId)
+    if (!instance) return
+
+    instance.pendingViewportRefresh = true
+    instance.pendingScrollToBottom = true
+    this.writeTerminalOutput(instance, data)
   }
 
   setRendererMode(connectionId: string, options: any): void {
@@ -461,6 +498,54 @@ class TerminalManager {
       if (options?.rendererType === 'webgl') {
         console.warn('WebGL renderer not available:', error)
       }
+    }
+  }
+
+  private writeTerminalOutput(instance: TerminalInstance, data: string | Uint8Array): void {
+    const wasScrolledToBottom = this.isScrolledToBottom(instance)
+    const wasVisible = this.hasVisibleContainer(instance)
+
+    instance.terminal.write(data, () => {
+      if (!this.hasVisibleContainer(instance)) {
+        instance.pendingViewportRefresh = true
+        if (wasScrolledToBottom) {
+          instance.pendingScrollToBottom = true
+        }
+        return
+      }
+
+      if (wasScrolledToBottom || !wasVisible || instance.pendingViewportRefresh) {
+        this.syncTerminalViewport(instance, wasScrolledToBottom || instance.pendingScrollToBottom)
+        instance.pendingViewportRefresh = false
+        instance.pendingScrollToBottom = false
+      }
+    })
+  }
+
+  private isScrolledToBottom(instance: TerminalInstance): boolean {
+    const buffer = instance.terminal.buffer.active
+    return buffer.viewportY >= buffer.baseY
+  }
+
+  private hasVisibleContainer(instance: TerminalInstance): boolean {
+    if (!instance.container || !instance.container.isConnected) {
+      return false
+    }
+
+    const rect = instance.container.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0 && instance.container.getClientRects().length > 0
+  }
+
+  private syncTerminalViewport(instance: TerminalInstance, scrollToBottom = false): void {
+    if (scrollToBottom) {
+      instance.terminal.scrollToBottom()
+    }
+
+    const core = (instance.terminal as any)._core
+    core?.viewport?.syncScrollArea?.(true)
+
+    if (instance.terminal.rows > 0) {
+      instance.terminal.refresh(0, instance.terminal.rows - 1)
     }
   }
 

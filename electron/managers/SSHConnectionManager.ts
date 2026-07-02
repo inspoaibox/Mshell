@@ -17,6 +17,7 @@ export interface SSHConnectionOptions {
   host: string
   port: number
   username: string
+  authType?: 'password' | 'privateKey'
   password?: string
   privateKey?: Buffer
   passphrase?: string

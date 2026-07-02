@@ -1116,6 +1116,7 @@ h5, h6 { font-size: var(--text-sm); }
 :root.app-appearance-terminal .content-panel > .sftp-panel,
 :root.app-appearance-terminal .content-panel > .settings-panel,
 :root.app-appearance-terminal .content-panel > .snippet-panel,
+:root.app-appearance-terminal .content-panel > .lazy-script-panel,
 :root.app-appearance-terminal .content-panel > .log-panel,
 :root.app-appearance-terminal .content-panel > .ssh-key-panel,
 :root.app-appearance-terminal .content-panel > .task-scheduler-panel,

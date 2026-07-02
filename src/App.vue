@@ -287,6 +287,10 @@
             <SnippetPanel />
           </div>
 
+          <div v-show="appStore.activeView === 'lazy-scripts'" class="content-panel">
+            <LazyScriptPanel />
+          </div>
+
           <div v-show="appStore.activeView === 'statistics'" class="content-panel">
             <StatisticsPanel />
           </div>
@@ -390,6 +394,7 @@ import LogPanel from './components/Logs/LogPanel.vue'
 import SFTPPanel from './components/SFTP/SFTPPanel.vue'
 import PortForwardPanel from './components/PortForward/PortForwardPanel.vue'
 import SnippetPanel from './components/Snippet/SnippetPanel.vue'
+import LazyScriptPanel from './components/LazyScripts/LazyScriptPanel.vue'
 import StatisticsPanel from './components/Statistics/StatisticsPanel.vue'
 import SSHKeyPanel from './components/Keys/SSHKeyPanel.vue'
 import TaskSchedulerPanel from './components/Tasks/TaskSchedulerPanel.vue'

@@ -637,6 +637,22 @@ export interface ElectronAPI {
     export: (filePath: string) => Promise<ApiResult<any>>
     import: (filePath: string) => Promise<ApiResult<any>>
   }
+  lazyScript: {
+    getAll: () => Promise<ApiResult<any[]>>
+    get: (id: string) => Promise<ApiResult<any>>
+    create: (data: any) => Promise<ApiResult<any>>
+    update: (id: string, updates: any) => Promise<ApiResult>
+    delete: (id: string) => Promise<ApiResult>
+    incrementUsage: (id: string) => Promise<ApiResult>
+    getByCategory: (category: string) => Promise<ApiResult<any[]>>
+    getByTag: (tag: string) => Promise<ApiResult<any[]>>
+    search: (query: string) => Promise<ApiResult<any[]>>
+    getAllCategories: () => Promise<ApiResult<string[]>>
+    extractVariables: (content: string) => Promise<ApiResult<string[]>>
+    render: (content: string, values: Record<string, string>) => Promise<ApiResult<string>>
+    export: (filePath: string) => Promise<ApiResult<any>>
+    import: (filePath: string) => Promise<ApiResult<any>>
+  }
 
   // 更新操作
   update?: {

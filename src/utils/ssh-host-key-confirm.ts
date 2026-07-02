@@ -34,14 +34,24 @@ export function createSSHConnectOptions(
   sshSettings: any = {},
   trustedHostKey?: TrustedHostKey
 ) {
+  const authType =
+    session.authType ||
+    (session.privateKeyId || session.privateKeyPath || session.privateKey ? 'privateKey' : 'password')
+  const usePrivateKey = authType === 'privateKey'
+
   return {
     host: session.host,
     port: session.port,
     username: session.username,
-    password: session.password,
-    privateKey: session.privateKeyId ? undefined : session.privateKeyPath || session.privateKey,
-    privateKeyId: session.privateKeyId,
-    passphrase: session.passphrase,
+    authType,
+    password: usePrivateKey ? undefined : session.password,
+    privateKey: usePrivateKey
+      ? session.privateKeyId
+        ? undefined
+        : session.privateKeyPath || session.privateKey
+      : undefined,
+    privateKeyId: usePrivateKey ? session.privateKeyId : undefined,
+    passphrase: usePrivateKey ? session.passphrase : undefined,
     readyTimeout: (sshSettings.timeout || 30) * 1000,
     keepaliveInterval: sshSettings.keepalive
       ? (sshSettings.keepaliveInterval || 60) * 1000

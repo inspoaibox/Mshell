@@ -112,6 +112,7 @@ const fitAndSyncRemote = () => {
   const instance = terminalManager.get(props.connectionId)
   if (instance) {
     terminalManager.fit(props.connectionId)
+    terminalManager.reveal(props.connectionId)
   } else {
     fitAddon?.fit()
     if (terminal && terminal.cols > 0 && terminal.rows > 0) {
@@ -137,6 +138,7 @@ const scheduleFitAndFocus = (delays = [50]) => {
           fitAndSyncRemote()
 
           if (isVisibleActiveTerminal.value && hasUsableTerminalSize()) {
+            terminalManager.reveal(props.connectionId)
             terminal?.focus()
           }
         } catch (e) {

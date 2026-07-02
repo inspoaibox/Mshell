@@ -193,6 +193,10 @@ export const disconnectSshSession = async (sessionId: string): Promise<SshRunRes
 }
 
 const resolvePrivateKey = (session: SessionConfig, keys: MobileSSHKey[]): string | undefined => {
+  if (session.authType !== 'privateKey') {
+    return undefined
+  }
+
   const key = session.privateKeyId
     ? keys.find((item) => item.id === session.privateKeyId)
     : undefined

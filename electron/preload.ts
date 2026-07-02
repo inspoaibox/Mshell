@@ -759,6 +759,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getFrequent: (limit?: number) => ipcRenderer.invoke('quickCommand:getFrequent', limit),
     export: (filePath: string) => ipcRenderer.invoke('quickCommand:export', filePath),
     import: (filePath: string) => ipcRenderer.invoke('quickCommand:import', filePath)
+  },
+
+  // Lazy Script operations
+  lazyScript: {
+    getAll: () => ipcRenderer.invoke('lazyScript:getAll'),
+    get: (id: string) => ipcRenderer.invoke('lazyScript:get', id),
+    create: (data: any) => ipcRenderer.invoke('lazyScript:create', data),
+    update: (id: string, updates: any) => ipcRenderer.invoke('lazyScript:update', id, updates),
+    delete: (id: string) => ipcRenderer.invoke('lazyScript:delete', id),
+    incrementUsage: (id: string) => ipcRenderer.invoke('lazyScript:incrementUsage', id),
+    getByCategory: (category: string) => ipcRenderer.invoke('lazyScript:getByCategory', category),
+    getByTag: (tag: string) => ipcRenderer.invoke('lazyScript:getByTag', tag),
+    search: (query: string) => ipcRenderer.invoke('lazyScript:search', query),
+    getAllCategories: () => ipcRenderer.invoke('lazyScript:getAllCategories'),
+    extractVariables: (content: string) => ipcRenderer.invoke('lazyScript:extractVariables', content),
+    render: (content: string, values: Record<string, string>) =>
+      ipcRenderer.invoke('lazyScript:render', content, values),
+    export: (filePath: string) => ipcRenderer.invoke('lazyScript:export', filePath),
+    import: (filePath: string) => ipcRenderer.invoke('lazyScript:import', filePath)
   }
 })
 

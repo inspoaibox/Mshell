@@ -25,6 +25,7 @@ import { registerRDPHandlers } from './ipc/rdp-handlers'
 import { registerVNCHandlers } from './ipc/vnc-handlers'
 import { registerSyncHandlers } from './ipc/sync-handlers'
 import { registerQuickCommandHandlers } from './ipc/quick-command-handlers'
+import { registerLazyScriptHandlers } from './ipc/lazy-script-handlers'
 import {
   handleTerminalBackgroundProtocol,
   registerTerminalBackgroundHandlers,
@@ -127,6 +128,7 @@ registerRDPHandlers()
 registerVNCHandlers()
 registerSyncHandlers()
 registerQuickCommandHandlers()
+registerLazyScriptHandlers()
 registerTerminalBackgroundHandlers()
 
 function createWindow() {

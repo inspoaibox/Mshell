@@ -68,6 +68,7 @@ export interface BackupData {
   transferRecords?: any[] // 传输记录
   lockConfig?: any // 锁定配置（不包含密码）
   quickCommands?: any[] // 快捷命令
+  lazyScripts?: any[] // 懒人脚本
   terminalBackgroundAssets?: TerminalBackgroundAssetBackup[] // 本地终端背景图附件
 }
 
@@ -520,6 +521,8 @@ export class BackupManager {
     options: { includeLocalConfigs?: boolean; includeLocalAssets?: boolean } = {}
   ): Promise<BackupData> {
     const { quickCommandManager } = await import('./QuickCommandManager')
+    const { lazyScriptManager } = await import('./LazyScriptManager')
+    await lazyScriptManager.initialize()
 
     // SessionManager 内存中的敏感字段已经是明文；外层备份/同步会整体加密。
     const sessions = sessionManager.getAllSessions().map((session) => ({ ...session }))
@@ -553,6 +556,7 @@ export class BackupManager {
       transferRecords: transferRecordManager.getAllRecords(),
       lockConfig: sessionLockManager.getConfig(),
       quickCommands: quickCommandManager.getAll(),
+      lazyScripts: lazyScriptManager.getAll(),
       terminalBackgroundAssets
     }
   }
@@ -847,6 +851,7 @@ export class BackupManager {
       restoreTransferRecords?: boolean
       restoreLockConfig?: boolean
       restoreQuickCommands?: boolean
+      restoreLazyScripts?: boolean
     }
   ): Promise<void> {
     try {
@@ -1369,6 +1374,54 @@ export class BackupManager {
           )
         } catch (error) {
           logger.logError('system', 'Failed to restore quick commands', error as Error)
+        }
+      }
+
+      // 恢复懒人脚本
+      if (options.restoreLazyScripts && backupData.lazyScripts) {
+        try {
+          const { lazyScriptManager } = await import('./LazyScriptManager')
+          await lazyScriptManager.initialize()
+          const currentScripts = lazyScriptManager.getAll()
+
+          for (const script of backupData.lazyScripts) {
+            const existing = currentScripts.find(
+              (item) => item.id === script.id || item.name === script.name
+            )
+            const scriptData = {
+              name: script.name,
+              fileName: script.fileName || script.name,
+              description: script.description || '',
+              category: script.category || '',
+              tags: script.tags || [],
+              type: script.type || 'shell',
+              content: script.content,
+              variables: script.variables || [],
+              riskLevel: script.riskLevel || 'medium',
+              runMode: script.runMode || 'paste'
+            }
+
+            if (existing) {
+              await lazyScriptManager.update(existing.id, {
+                ...scriptData,
+                usageCount: Number(script.usageCount || 0)
+              })
+            } else {
+              const created = await lazyScriptManager.create({
+                id: script.id,
+                ...scriptData
+              })
+              if (Number(script.usageCount || 0) > 0) {
+                await lazyScriptManager.update(created.id, {
+                  usageCount: Number(script.usageCount || 0)
+                })
+              }
+            }
+          }
+
+          logger.logInfo('system', `Lazy scripts restored: ${backupData.lazyScripts.length} records`)
+        } catch (error) {
+          logger.logError('system', 'Failed to restore lazy scripts', error as Error)
         }
       }
 

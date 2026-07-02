@@ -11,6 +11,7 @@ export type ActiveView =
   | 'sftp'
   | 'port-forward'
   | 'snippets'
+  | 'lazy-scripts'
   | 'statistics'
   | 'tasks'
   | 'workflows'

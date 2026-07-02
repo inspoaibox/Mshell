@@ -1311,6 +1311,9 @@
           <el-checkbox label="quickCommands" :disabled="!restoreBackupData.quickCommands?.length">
             快捷命令 ({{ restoreBackupData.quickCommands?.length || 0 }} 个)
           </el-checkbox>
+          <el-checkbox label="lazyScripts" :disabled="!restoreBackupData.lazyScripts?.length">
+            懒人脚本 ({{ restoreBackupData.lazyScripts?.length || 0 }} 个)
+          </el-checkbox>
         </el-checkbox-group>
         <el-alert type="info" :closable="false" show-icon style="margin-top: 16px">
           <template #title>
@@ -1544,7 +1547,8 @@ const DEFAULT_RESTORE_OPTIONS = [
   'auditLogs',
   'transferRecords',
   'lockConfig',
-  'quickCommands'
+  'quickCommands',
+  'lazyScripts'
 ] as const
 const restoreOptions = ref<string[]>([...DEFAULT_RESTORE_OPTIONS])
 const backupLoading = ref(false)
@@ -2040,7 +2044,8 @@ const applyRestore = async () => {
       restoreAuditLogs: restoreOptions.value.includes('auditLogs'),
       restoreTransferRecords: restoreOptions.value.includes('transferRecords'),
       restoreLockConfig: restoreOptions.value.includes('lockConfig'),
-      restoreQuickCommands: restoreOptions.value.includes('quickCommands')
+      restoreQuickCommands: restoreOptions.value.includes('quickCommands'),
+      restoreLazyScripts: restoreOptions.value.includes('lazyScripts')
     }
 
     const result = await window.electronAPI.backup.apply(toRaw(restoreBackupData.value), options)
@@ -2142,6 +2147,8 @@ const getAvailableRestoreOptions = (backupData: any): string[] => {
         return !!backupData.lockConfig
       case 'quickCommands':
         return !!backupData.quickCommands?.length
+      case 'lazyScripts':
+        return !!backupData.lazyScripts?.length
       default:
         return false
     }

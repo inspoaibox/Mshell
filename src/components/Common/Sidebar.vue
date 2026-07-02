@@ -98,6 +98,7 @@ import {
   Key,
   Files,
   Timer,
+  MagicStick,
   InfoFilled
 } from '@element-plus/icons-vue'
 import logoImg from '@/assets/logo.png'
@@ -122,6 +123,7 @@ const mainMenuItems = [
   { index: 'sftp', label: '文件传输', icon: FolderOpened },
   { index: 'port-forward', label: '端口转发', icon: Share },
   { index: 'snippets', label: '命令片段', icon: Document },
+  { index: 'lazy-scripts', label: '懒人脚本', icon: MagicStick },
   { index: 'statistics', label: '统计分析', icon: DataAnalysis },
   { index: 'tasks', label: '任务调度', icon: Timer },
   { index: 'workflows', label: '工作流', icon: Files }

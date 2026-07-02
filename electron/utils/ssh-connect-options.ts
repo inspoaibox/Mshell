@@ -80,6 +80,7 @@ export interface RawSSHConnectOptions {
   host: string
   port: number
   username: string
+  authType?: 'password' | 'privateKey'
   password?: string
   privateKey?: string
   privateKeyId?: string
@@ -101,8 +102,12 @@ export async function prepareSSHConnectionOptions(
   options: RawSSHConnectOptions
 ): Promise<SSHConnectionOptions> {
   let privateKeyBuffer: Buffer | undefined
+  const usePassword = options.authType ? options.authType === 'password' : true
+  const usePrivateKey = options.authType
+    ? options.authType === 'privateKey'
+    : !!(options.privateKeyId || options.privateKey)
 
-  if (options.privateKeyId) {
+  if (usePrivateKey && options.privateKeyId) {
     try {
       const { sshKeyManager } = await import('../managers/SSHKeyManager')
       const privateKeyContent = sshKeyManager.readPrivateKey(options.privateKeyId)
@@ -115,7 +120,7 @@ export async function prepareSSHConnectionOptions(
       )
       throw new Error(`无法读取SSH密钥: ${error.message}`)
     }
-  } else if (options.privateKey && typeof options.privateKey === 'string') {
+  } else if (usePrivateKey && options.privateKey && typeof options.privateKey === 'string') {
     if (
       options.privateKey.includes('PRIVATE KEY') ||
       options.privateKey.includes('OPENSSH PRIVATE KEY')
@@ -141,9 +146,10 @@ export async function prepareSSHConnectionOptions(
     host: options.host,
     port: options.port,
     username: options.username,
-    password: options.password,
+    authType: options.authType,
+    password: usePassword ? options.password : undefined,
     privateKey: privateKeyBuffer,
-    passphrase: options.passphrase,
+    passphrase: usePrivateKey ? options.passphrase : undefined,
     keepaliveInterval: options.keepaliveInterval,
     keepaliveCountMax: options.keepaliveCountMax,
     readyTimeout: options.readyTimeout,

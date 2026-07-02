@@ -941,7 +941,8 @@ export class SyncManager {
         restoreAuditLogs: true,
         restoreTransferRecords: true,
         restoreLockConfig: true,
-        restoreQuickCommands: true // 恢复快捷命令
+        restoreQuickCommands: true, // 恢复快捷命令
+        restoreLazyScripts: true // 恢复懒人脚本
       })
 
       // 更新同步状态
@@ -1179,7 +1180,8 @@ export class SyncManager {
         restoreAuditLogs: true,
         restoreTransferRecords: true,
         restoreLockConfig: true,
-        restoreQuickCommands: true // 恢复快捷命令
+        restoreQuickCommands: true, // 恢复快捷命令
+        restoreLazyScripts: true // 恢复懒人脚本
       })
 
       // 更新同步状态
