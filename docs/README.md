@@ -2,7 +2,7 @@
 
 这是 MShell 的静态 GitHub Pages 介绍页面，用于展示当前产品定位、核心功能、客户端形态、截图、下载入口和快速开始说明。
 
-当前页面对应产品版本：`v0.2.10`
+当前页面对应产品版本：`v0.2.11`
 
 ## 文件结构
 
@@ -10,8 +10,9 @@
 - `styles.css`：页面视觉、布局、响应式和截图预览样式。
 - `script.js`：导航菜单、平滑滚动、终端演示、截图放大和外链安全处理。
 - `logo.png` / `favicon.png`：品牌图标。
-- `upgrade-v0.2.10.md`：本次升级说明与功能修复摘要。
+- `upgrade-v0.2.11.md`：本次升级说明与功能修复摘要。
 - `mcp-readonly.md`：本机 Agent / MCP 只读接入说明与安全边界。
+- `security-manual.md`：完整安全产品使用说明书，包含 MCP 接入、凭据、备份、同步、日志和事件响应。
 - `screenshots/`：当前页面实际引用的产品截图。
 - `mshell截图/`：中文命名的原始截图备份。
 - `releases/`：可选的离线发布包目录。
@@ -40,6 +41,7 @@ MShell 是面向开发者、站长和运维人员的 SSH 服务器管理工作�
 - 多套外观风格、终端背景图、透明度设置。
 - 会话锁、审计日志、系统日志、备份恢复和远程同步。
 - 本机 Agent / MCP 只读接入：仅允许读取当前已连接的 SSH 会话、目录和有限大小的文本文件。
+- 完整安全使用说明：见 `security-manual.md`，以当前代码实现和限制为准。
 
 ### Android 客户端
 
@@ -84,7 +86,7 @@ http://localhost:8000
 - `docs/index.html` 中 Android 下载卡片版本。
 - `docs/index.html` footer 版本。
 - `docs/README.md` 当前页面对应版本。
-- `docs/upgrade-v0.2.10.md` 中的升级标题和版本说明。
+- `docs/upgrade-v0.2.11.md` 中的升级标题和版本说明。
 
 当前下载入口：
 
