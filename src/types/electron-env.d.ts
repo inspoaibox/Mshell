@@ -54,6 +54,10 @@ type DockerContainer = {
   cpu: string
   memory: string
   netIO: string
+  composeProject: string
+  composeService: string
+  composeWorkingDir: string
+  composeConfigFiles: string
 }
 
 type DockerOverview = {
@@ -73,6 +77,31 @@ type DownloadTransferRequest = {
   localPath: string
   taskId?: string
   resumeFromExisting?: boolean
+}
+
+type SSHCloseSource = 'stream' | 'client' | 'socket' | 'manual' | 'timeout' | 'replace'
+
+type SSHCloseDetails = {
+  source: SSHCloseSource
+  reason: string
+  statusBefore: string
+  lastActivity: string
+  closedAt: string
+  hadError?: boolean
+  errorMessage?: string
+  errorCode?: string
+  reconnecting?: boolean
+  socket?: {
+    destroyed: boolean
+    connecting: boolean
+    readyState?: string
+    bytesRead?: number
+    bytesWritten?: number
+    localAddress?: string
+    localPort?: number
+    remoteAddress?: string
+    remotePort?: number
+  }
 }
 
 export interface ElectronAPI {
@@ -119,6 +148,12 @@ export interface ElectronAPI {
       connectionId: string,
       action: DockerContainerAction,
       containerId: string,
+      options?: DockerContainerActionOptions
+    ) => Promise<ApiResult<string>>
+    containerBatchAction: (
+      connectionId: string,
+      action: DockerContainerAction,
+      containerIds: string[],
       options?: DockerContainerActionOptions
     ) => Promise<ApiResult<string>>
   }
@@ -249,7 +284,7 @@ export interface ElectronAPI {
     // 事件监听器返回取消订阅函数
     onData: (callback: (id: string, data: string) => void) => () => void
     onError: (callback: (id: string, error: string) => void) => () => void
-    onClose: (callback: (id: string) => void) => () => void
+    onClose: (callback: (id: string, details?: SSHCloseDetails) => void) => () => void
     onReconnecting: (
       callback: (id: string, attempt: number, maxAttempts: number) => void
     ) => () => void
@@ -279,14 +314,14 @@ export interface ElectronAPI {
       connectionId: string,
       localPath: string,
       remotePath: string,
-      options?: { resumeFromExisting?: boolean }
-    ) => Promise<{ success: boolean; error?: string }>
+      options?: { resumeFromExisting?: boolean; taskId?: string }
+    ) => Promise<{ success: boolean; taskId?: string; error?: string }>
     downloadFile: (
       connectionId: string,
       remotePath: string,
       localPath: string,
-      options?: { resumeFromExisting?: boolean }
-    ) => Promise<{ success: boolean; error?: string }>
+      options?: { resumeFromExisting?: boolean; taskId?: string }
+    ) => Promise<{ success: boolean; taskId?: string; error?: string }>
     readFile: (
       connectionId: string,
       filePath: string
@@ -328,6 +363,9 @@ export interface ElectronAPI {
     getAllTransferRecords: () => Promise<{ success: boolean; data?: any[]; error?: string }>
     deleteTransferRecord: (taskId: string) => Promise<{ success: boolean; error?: string }>
     cleanupCompletedRecords: () => Promise<{ success: boolean; error?: string }>
+    onStarted: (
+      callback: (taskId: string, record: any) => void
+    ) => () => void
     uploadFiles: (
       connectionId: string,
       files: UploadTransferRequest[]
@@ -416,6 +454,35 @@ export interface ElectronAPI {
     reset: () => Promise<void>
     onChange: (callback: (settings: any) => void) => () => void
   }
+  mcp: {
+    getStatus: () => Promise<{
+      success: boolean
+      data?: {
+        enabled: boolean
+        running: boolean
+        host: '127.0.0.1'
+        port: number
+        endpoint: string
+        token: string
+      }
+      error?: string
+    }>
+    getConfig: () => Promise<{
+      success: boolean
+      data?: {
+        enabled: boolean
+        running: boolean
+        host: '127.0.0.1'
+        port: number
+        endpoint: string
+        token: string
+      }
+      error?: string
+    }>
+    start: () => Promise<{ success: boolean; error?: string }>
+    stop: () => Promise<{ success: boolean; error?: string }>
+    regenerateToken: () => Promise<{ success: boolean; error?: string }>
+  }
   terminalBackground: {
     selectImage: () => Promise<
       ApiResult<{
@@ -499,10 +566,11 @@ export interface ElectronAPI {
     start: (sessionId: string, config?: any) => Promise<{ success: boolean; error?: string }>
     stop: (sessionId: string) => Promise<{ success: boolean; error?: string }>
     getMetrics: (sessionId: string) => Promise<{ success: boolean; data?: any; error?: string }>
+    refresh: (sessionId: string) => Promise<{ success: boolean; data?: any; error?: string }>
     getMonitoredSessions: () => Promise<{ success: boolean; data?: string[]; error?: string }>
     updateConfig: (sessionId: string, config: any) => Promise<{ success: boolean; error?: string }>
-    onMetrics: (callback: (sessionId: string, metrics: any) => void) => void
-    onError: (callback: (sessionId: string, error: any) => void) => void
+    onMetrics: (callback: (sessionId: string, metrics: any) => void) => (() => void) | undefined
+    onError: (callback: (sessionId: string, error: any) => void) => (() => void) | undefined
   }
   sshKey: {
     getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>

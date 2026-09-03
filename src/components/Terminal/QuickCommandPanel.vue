@@ -161,9 +161,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { 
+import {
   Plus, Close, Search, Position, Edit, Delete, Document, DocumentAdd, VideoPlay
 } from '@element-plus/icons-vue'
+import { terminalManager } from '@/utils/terminal-manager'
+import {
+  buildTerminalExecutePayload,
+  buildTerminalInsertPayload
+} from '@/utils/terminal-command-execution'
 
 interface QuickCommand {
   id: string
@@ -275,20 +280,24 @@ const handleSendCommand = (command: string) => {
 // 发送命令到终端
 const sendCommand = (execute: boolean) => {
   if (!commandText.value.trim()) return
-  
-  // 发送命令到终端
-  const cmd = execute ? commandText.value + '\n' : commandText.value
+
+  const inst = terminalManager.get(props.connectionId)
+  const cmd = execute
+    ? buildTerminalExecutePayload(commandText.value, inst?.bracketedPasteEnabled ?? false)
+    : buildTerminalInsertPayload(commandText.value, inst?.bracketedPasteEnabled ?? false)
   window.electronAPI.ssh.write(props.connectionId, cmd)
-  
+
   ElMessage.success(execute ? '命令已执行' : '命令已插入')
 }
 
 // 执行保存的快捷命令
 const executeCommand = async (cmd: QuickCommand, execute: boolean) => {
-  // 发送命令到终端
-  const command = execute ? cmd.command + '\n' : cmd.command
+  const inst = terminalManager.get(props.connectionId)
+  const command = execute
+    ? buildTerminalExecutePayload(cmd.command, inst?.bracketedPasteEnabled ?? false)
+    : buildTerminalInsertPayload(cmd.command, inst?.bracketedPasteEnabled ?? false)
   window.electronAPI.ssh.write(props.connectionId, command)
-  
+
   // 增加使用次数
   try {
     await window.electronAPI.quickCommand.incrementUsage(cmd.id)

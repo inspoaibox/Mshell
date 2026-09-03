@@ -15,6 +15,43 @@ export type InputCallback = (data: string, lineBuffer: string) => void
 
 type RendererType = 'auto' | 'webgl' | 'canvas' | 'dom'
 
+type SSHCloseDetails = {
+  source?: 'stream' | 'client' | 'socket' | 'manual' | 'timeout' | 'replace'
+  reason?: string
+  errorMessage?: string
+  errorCode?: string
+  hadError?: boolean
+  closedAt?: string
+}
+
+const SSH_CLOSE_SOURCE_LABELS: Record<string, string> = {
+  stream: '终端通道',
+  client: 'SSH连接',
+  socket: '网络连接',
+  manual: '手动断开',
+  timeout: '会话超时',
+  replace: '连接重建'
+}
+
+const truncateCloseMessage = (value: string, maxLength = 96) =>
+  value.length > maxLength ? `${value.slice(0, maxLength - 1)}...` : value
+
+const formatSSHCloseDetails = (details?: SSHCloseDetails) => {
+  if (!details) return ''
+
+  const sourceLabel = details.source ? SSH_CLOSE_SOURCE_LABELS[details.source] || details.source : ''
+  if (details.errorMessage) {
+    return truncateCloseMessage(`${sourceLabel || '错误'}: ${details.errorMessage}`)
+  }
+  if (details.errorCode) {
+    return truncateCloseMessage(`${sourceLabel || '错误'}: ${details.errorCode}`)
+  }
+  if (details.hadError) {
+    return sourceLabel ? `${sourceLabel}: socket error` : 'socket error'
+  }
+  return sourceLabel || truncateCloseMessage(details.reason || '')
+}
+
 const hasBackgroundImage = (options: any) =>
   options?.background?.enabled === true && !!options.background.image
 
@@ -109,6 +146,8 @@ interface TerminalInstance {
   echoEnabled: boolean // 终端是否处于回显模式（false = 密码输入等无回显场景）
   pendingViewportRefresh: boolean // 终端隐藏期间收到输出后，重新显示时刷新 viewport
   pendingScrollToBottom: boolean // 终端隐藏期间位于底部，重新显示时恢复到底部
+  lastCloseNoticeAt: number
+  lastCloseNoticeKey: string
 }
 
 class TerminalManager {
@@ -287,7 +326,9 @@ class TerminalManager {
       bracketedPasteEnabled: false,
       echoEnabled: true, // 默认回显开启
       pendingViewportRefresh: false,
-      pendingScrollToBottom: false
+      pendingScrollToBottom: false,
+      lastCloseNoticeAt: 0,
+      lastCloseNoticeKey: ''
     }
 
     if (container) {
@@ -413,9 +454,23 @@ class TerminalManager {
     instance.unsubscribers.push(unsubError)
 
     // 3. SSH Close
-    const unsubClose = window.electronAPI.ssh.onClose((id: string) => {
+    const unsubClose = window.electronAPI.ssh.onClose((id: string, details?: SSHCloseDetails) => {
       if (id === connectionId) {
-        this.writeTerminalOutput(instance, '\r\n\x1b[33mConnection closed\x1b[0m\r\n')
+        const now = Date.now()
+        const closeKey =
+          details?.closedAt || `${details?.source || 'unknown'}:${details?.reason || ''}`
+        if (instance.lastCloseNoticeKey === closeKey || now - instance.lastCloseNoticeAt < 1000) {
+          return
+        }
+
+        instance.lastCloseNoticeAt = now
+        instance.lastCloseNoticeKey = closeKey
+
+        const closeReason = formatSSHCloseDetails(details)
+        this.writeTerminalOutput(
+          instance,
+          `\r\n\x1b[33mConnection closed${closeReason ? ` (${closeReason})` : ''}\x1b[0m\r\n`
+        )
       }
     })
     instance.unsubscribers.push(unsubClose)
@@ -436,6 +491,8 @@ class TerminalManager {
     // 5. Reconnected
     const unsubReconnected = window.electronAPI.ssh.onReconnected((id: string) => {
       if (id === connectionId) {
+        instance.lastCloseNoticeAt = 0
+        instance.lastCloseNoticeKey = ''
         this.writeTerminalOutput(instance, '\r\n\x1b[32m重连成功！\x1b[0m\r\n')
       }
     })

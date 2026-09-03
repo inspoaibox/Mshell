@@ -12,7 +12,12 @@
 
     <!-- 路径导航 -->
     <div class="path-nav">
-      <el-button :icon="Back" size="small" @click="goBack" :disabled="!canGoBack" />
+      <el-tooltip content="返回历史路径" placement="bottom">
+        <el-button :icon="Back" size="small" @click="goBack" :disabled="!canGoBack" />
+      </el-tooltip>
+      <el-tooltip content="上一级目录" placement="bottom">
+        <el-button :icon="ArrowUp" size="small" @click="goParentDirectory" :disabled="!canGoParent" />
+      </el-tooltip>
       <el-button :icon="HomeFilled" size="small" @click="goHome" />
       <el-input
         v-model="pathInput"
@@ -57,6 +62,38 @@
           @click="toggleHiddenFiles"
         />
       </el-tooltip>
+    </div>
+
+    <div v-if="panelTransfers.length > 0" class="panel-transfers">
+      <div class="panel-transfers-header">
+        <span>当前传输</span>
+        <el-button text size="small" @click="clearCompletedPanelTransfers">清除完成</el-button>
+      </div>
+      <div v-for="transfer in panelTransfers" :key="transfer.id" class="panel-transfer-item">
+        <div class="panel-transfer-row">
+          <div class="panel-transfer-name" :title="transfer.name">{{ transfer.name }}</div>
+          <span :class="['panel-transfer-status', transfer.status]">
+            {{ getPanelTransferStatusText(transfer) }}
+          </span>
+        </div>
+        <el-progress
+          :percentage="transfer.progress"
+          :precision="1"
+          :status="
+            transfer.status === 'failed'
+              ? 'exception'
+              : transfer.status === 'completed'
+                ? 'success'
+                : transfer.status === 'paused'
+                  ? 'warning'
+                  : undefined
+          "
+        />
+        <div v-if="transfer.status === 'active'" class="panel-transfer-meta">
+          <span>{{ formatSize(transfer.transferred) }} / {{ formatSize(transfer.total) }}</span>
+          <span>{{ formatPanelSpeed(transfer.speed) }}</span>
+        </div>
+      </div>
     </div>
 
     <!-- 文件列表 -->
@@ -398,8 +435,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, h } from 'vue'
+import { ElButton, ElMessage, ElMessageBox } from 'element-plus'
 import {
   Close,
   Back,
@@ -428,6 +465,13 @@ import {
 } from '@element-plus/icons-vue'
 import { formatSftpOperationError } from '@/utils/sftp-errors'
 
+type TransferConflictAction = 'overwrite' | 'skip' | 'rename' | 'resume'
+
+interface TransferConflictResult {
+  action: TransferConflictAction
+  fileName?: string
+}
+
 interface FileInfo {
   name: string
   path: string
@@ -435,6 +479,21 @@ interface FileInfo {
   size: number
   modifyTime: Date
   permissions?: number
+}
+
+interface PanelTransfer {
+  id: string
+  name: string
+  type: 'upload' | 'download'
+  status: 'active' | 'paused' | 'completed' | 'failed' | 'cancelled'
+  progress: number
+  transferred: number
+  total: number
+  speed: number
+  eta: number
+  localPath: string
+  remotePath: string
+  error?: string
 }
 
 const props = defineProps<{
@@ -461,6 +520,7 @@ const pathHistory = ref<string[]>([])
 const showHiddenFiles = ref(false)
 const confirmBeforeDelete = ref(true)
 const cleanupFunctions: Array<() => void> = []
+const panelTransfers = ref<PanelTransfer[]>([])
 
 // 拖曳状态
 const isDragOver = ref(false)
@@ -686,6 +746,295 @@ const getBaseName = (filename: string): string => {
   return name
 }
 
+const normalizeCompressOutputName = (fileName: string, format: string) => {
+  const extension = format === 'zip' || format === 'tar' ? `.${format}` : `.${format}`
+  const baseName = getBaseName(fileName.trim() || 'archive')
+  return `${baseName}${extension}`
+}
+
+const splitFileName = (fileName: string) => {
+  const dotIndex = fileName.lastIndexOf('.')
+  if (dotIndex <= 0) {
+    return { base: fileName, extension: '' }
+  }
+
+  return {
+    base: fileName.slice(0, dotIndex),
+    extension: fileName.slice(dotIndex)
+  }
+}
+
+const hasNameConflict = (name: string, existingNames: string[], caseSensitive: boolean) => {
+  if (caseSensitive) return existingNames.includes(name)
+
+  const normalized = name.toLocaleLowerCase()
+  return existingNames.some((existingName) => existingName.toLocaleLowerCase() === normalized)
+}
+
+const generateConflictRename = (
+  fileName: string,
+  existingNames: string[],
+  caseSensitive: boolean
+) => {
+  const { base, extension } = splitFileName(fileName)
+  let index = 1
+  let nextName = `${base} (${index})${extension}`
+
+  while (hasNameConflict(nextName, existingNames, caseSensitive)) {
+    index += 1
+    nextName = `${base} (${index})${extension}`
+  }
+
+  return nextName
+}
+
+const replacePathFileName = (path: string, fileName: string) => {
+  const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  if (index < 0) return fileName
+  return `${path.slice(0, index + 1)}${fileName}`
+}
+
+const joinRemotePath = (dirPath: string, fileName: string) =>
+  (dirPath === '/' ? '/' + fileName : dirPath + '/' + fileName).replace(/\/+/g, '/')
+
+const joinLocalPath = (dirPath: string, fileName: string) => {
+  const separator = dirPath.includes('\\') ? '\\' : '/'
+  return dirPath.endsWith('\\') || dirPath.endsWith('/')
+    ? `${dirPath}${fileName}`
+    : `${dirPath}${separator}${fileName}`
+}
+
+const readLocalDirectoryNames = async (dirPath: string) => {
+  try {
+    const result = await window.electronAPI.fs.readDirectory(dirPath)
+    if (!result.success || !result.files) return []
+    return result.files.map((file: any) => file.name).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+const statLocalPath = async (filePath: string) => {
+  try {
+    const result = await window.electronAPI.fs.stat(filePath)
+    if (!result.success || !result.stats) {
+      return { exists: false, isDirectory: false, size: 0 }
+    }
+    return {
+      exists: true,
+      isDirectory: Boolean(result.stats.isDirectory),
+      size: Number(result.stats.size || 0)
+    }
+  } catch {
+    return { exists: false, isDirectory: false, size: 0 }
+  }
+}
+
+const showTransferConflictChoice = async (context: {
+  direction: 'upload' | 'download'
+  fileName: string
+  targetPath: string
+  targetType: 'file' | 'directory' | 'queued'
+  canOverwrite: boolean
+  canResume: boolean
+  existingNames: string[]
+  caseSensitive: boolean
+}): Promise<TransferConflictResult> => {
+  let settled = false
+
+  const settle = (
+    resolve: (choice: TransferConflictResult) => void,
+    choice: TransferConflictResult
+  ) => {
+    if (settled) return
+    settled = true
+    resolve(choice)
+    ElMessageBox.close()
+  }
+
+  const choice = await new Promise<TransferConflictResult>((resolve) => {
+    ElMessageBox({
+      title: context.direction === 'upload' ? '上传同名处理' : '下载同名处理',
+      message: h('div', { class: 'transfer-conflict-message' }, [
+        h('p', { class: 'transfer-conflict-title' }, [
+          `目标位置已存在同名${context.targetType === 'directory' ? '目录' : '文件'}：`,
+          h('strong', context.fileName)
+        ]),
+        h('p', { class: 'transfer-conflict-path' }, context.targetPath),
+        h('div', { class: 'transfer-conflict-actions' }, [
+          h(
+            ElButton,
+            { onClick: () => settle(resolve, { action: 'skip' }) },
+            () => '跳过'
+          ),
+          h(
+            ElButton,
+            { onClick: () => settle(resolve, { action: 'rename' }) },
+            () => '重命名'
+          ),
+          context.canResume
+            ? h(
+                ElButton,
+                { type: 'warning', onClick: () => settle(resolve, { action: 'resume' }) },
+                () => '续传'
+              )
+            : null,
+          context.canOverwrite
+            ? h(
+                ElButton,
+                { type: 'danger', onClick: () => settle(resolve, { action: 'overwrite' }) },
+                () => '覆盖'
+              )
+            : null
+        ])
+      ]),
+      showConfirmButton: false,
+      showCancelButton: false,
+      closeOnClickModal: false,
+      closeOnPressEscape: false,
+      beforeClose: (_action, _instance, done) => {
+        if (!settled) {
+          settled = true
+          resolve({ action: 'skip' })
+        }
+        done()
+      }
+    }).catch(() => {
+      if (!settled) {
+        settled = true
+        resolve({ action: 'skip' })
+      }
+    })
+  })
+
+  if (choice.action !== 'rename') return choice
+
+  const generatedName = generateConflictRename(
+    context.fileName,
+    context.existingNames,
+    context.caseSensitive
+  )
+
+  while (true) {
+    const { value } = await ElMessageBox.prompt('请输入新的文件名', '重命名传输', {
+      inputValue: generatedName,
+      inputPattern: /^(?!\s*$)[^/\\]+$/,
+      inputErrorMessage: '文件名不能为空，且不能包含 / 或 \\',
+      closeOnClickModal: false,
+      closeOnPressEscape: false
+    }).catch(() => ({ value: '' }))
+
+    if (!value) return { action: 'skip' }
+    if (!hasNameConflict(value, context.existingNames, context.caseSensitive)) {
+      return { action: 'rename', fileName: value }
+    }
+
+    ElMessage.warning('该名称仍然冲突，请重新输入')
+  }
+}
+
+const resolveUploadConflict = async (
+  fileName: string,
+  sourceSize: number,
+  plannedRemoteNames: string[]
+) => {
+  const remotePath = joinRemotePath(currentPath.value, fileName)
+  const existingFile = files.value.find((file) => file.name === fileName)
+  const queuedConflict = plannedRemoteNames.includes(fileName)
+
+  if (!existingFile && !queuedConflict) {
+    return { action: 'overwrite' as TransferConflictAction, remotePath, resumeFromExisting: false }
+  }
+
+  const targetType = queuedConflict
+    ? 'queued'
+    : existingFile?.type === 'directory'
+      ? 'directory'
+      : 'file'
+  const targetSize = existingFile?.type === 'file' ? existingFile.size : undefined
+  const canOverwrite = targetType === 'file'
+  const canResume = canOverwrite && targetSize !== undefined && targetSize > 0 && targetSize < sourceSize
+
+  const choice = await showTransferConflictChoice({
+    direction: 'upload',
+    fileName,
+    targetPath: remotePath,
+    targetType,
+    canOverwrite,
+    canResume,
+    existingNames: [...files.value.map((file) => file.name), ...plannedRemoteNames],
+    caseSensitive: true
+  })
+
+  if (choice.action === 'skip') {
+    return { action: choice.action, remotePath, resumeFromExisting: false }
+  }
+
+  if (choice.action === 'rename' && choice.fileName) {
+    return {
+      action: choice.action,
+      remotePath: replacePathFileName(remotePath, choice.fileName).replace(/\/+/g, '/'),
+      resumeFromExisting: false
+    }
+  }
+
+  return {
+    action: choice.action,
+    remotePath,
+    resumeFromExisting: choice.action === 'resume'
+  }
+}
+
+const resolveDownloadConflict = async (
+  file: FileInfo,
+  saveDir: string,
+  plannedLocalNames: string[]
+) => {
+  const localPath = joinLocalPath(saveDir, file.name)
+  const localStat = await statLocalPath(localPath)
+  const queuedConflict = plannedLocalNames.some(
+    (name) => name.toLocaleLowerCase() === file.name.toLocaleLowerCase()
+  )
+
+  if (!localStat.exists && !queuedConflict) {
+    return { action: 'overwrite' as TransferConflictAction, localPath, resumeFromExisting: false }
+  }
+
+  const targetType = queuedConflict ? 'queued' : localStat.isDirectory ? 'directory' : 'file'
+  const canOverwrite = targetType === 'file'
+  const canResume = canOverwrite && localStat.size > 0 && localStat.size < file.size
+  const existingNames = await readLocalDirectoryNames(saveDir)
+
+  const choice = await showTransferConflictChoice({
+    direction: 'download',
+    fileName: file.name,
+    targetPath: localPath,
+    targetType,
+    canOverwrite,
+    canResume,
+    existingNames: [...existingNames, ...plannedLocalNames],
+    caseSensitive: false
+  })
+
+  if (choice.action === 'skip') {
+    return { action: choice.action, localPath, resumeFromExisting: false }
+  }
+
+  if (choice.action === 'rename' && choice.fileName) {
+    return {
+      action: choice.action,
+      localPath: replacePathFileName(localPath, choice.fileName),
+      resumeFromExisting: false
+    }
+  }
+
+  return {
+    action: choice.action,
+    localPath,
+    resumeFromExisting: choice.action === 'resume'
+  }
+}
+
 const canGoBack = computed(() => pathHistory.value.length > 0)
 
 const computedOctalPermission = computed(() => {
@@ -719,6 +1068,89 @@ const normalizeRemotePath = (path: string) => {
   if (!trimmed) return '/'
   return trimmed.startsWith('/') ? trimmed.replace(/\/+/g, '/') : `/${trimmed}`.replace(/\/+/g, '/')
 }
+
+const getParentRemotePath = (path: string) => {
+  const normalized = normalizeRemotePath(path)
+  if (normalized === '/') return '/'
+  const parts = normalized.split('/').filter(Boolean)
+  parts.pop()
+  return parts.length > 0 ? `/${parts.join('/')}` : '/'
+}
+
+const canGoParent = computed(() => getParentRemotePath(currentPath.value) !== currentPath.value)
+
+const createPanelTransferId = (type: 'upload' | 'download') =>
+  `terminal-file-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+
+const normalizePanelByteCount = (value: unknown, fallback = 0) => {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) && numberValue >= 0 ? numberValue : fallback
+}
+
+const normalizePanelProgress = (value: unknown, transferred: number, total: number) => {
+  const numberValue = Number(value)
+  if (Number.isFinite(numberValue)) {
+    return Math.max(0, Math.min(numberValue, 100))
+  }
+  if (total <= 0) return 0
+  return Math.max(0, Math.min((transferred / total) * 100, 100))
+}
+
+const addPanelTransfer = (transfer: PanelTransfer) => {
+  const existing = panelTransfers.value.find((item) => item.id === transfer.id)
+  if (existing) {
+    Object.assign(existing, transfer)
+    return existing
+  }
+  panelTransfers.value.unshift(transfer)
+  return transfer
+}
+
+const markPanelTransferCompleted = (taskId: string) => {
+  const transfer = panelTransfers.value.find((item) => item.id === taskId)
+  if (!transfer || transfer.status === 'cancelled') return
+  transfer.status = 'completed'
+  transfer.progress = 100
+  transfer.transferred = transfer.total || transfer.transferred
+  transfer.speed = 0
+  transfer.eta = 0
+}
+
+const markPanelTransferFailed = (taskId: string, error?: string) => {
+  const transfer = panelTransfers.value.find((item) => item.id === taskId)
+  if (!transfer || transfer.status === 'cancelled') return
+  transfer.status = 'failed'
+  transfer.error = error
+  transfer.speed = 0
+  transfer.eta = 0
+}
+
+const updatePanelTransferProgress = (taskId: string, progress: any) => {
+  const transfer = panelTransfers.value.find((item) => item.id === taskId)
+  if (!transfer || transfer.status !== 'active') return
+
+  transfer.transferred = normalizePanelByteCount(progress?.transferred, transfer.transferred)
+  transfer.total = normalizePanelByteCount(progress?.total, transfer.total)
+  transfer.progress = normalizePanelProgress(progress?.percentage, transfer.transferred, transfer.total)
+  transfer.speed = normalizePanelByteCount(progress?.speed)
+  transfer.eta = normalizePanelByteCount(progress?.eta)
+}
+
+const clearCompletedPanelTransfers = () => {
+  panelTransfers.value = panelTransfers.value.filter(
+    (transfer) => transfer.status !== 'completed' && transfer.status !== 'failed'
+  )
+}
+
+const getPanelTransferStatusText = (transfer: PanelTransfer) => {
+  if (transfer.status === 'active') return transfer.type === 'upload' ? '上传中' : '下载中'
+  if (transfer.status === 'completed') return '已完成'
+  if (transfer.status === 'paused') return '已暂停'
+  if (transfer.status === 'failed') return transfer.error || '失败'
+  return '已取消'
+}
+
+const formatPanelSpeed = (bytesPerSecond: number) => `${formatSize(bytesPerSecond)}/s`
 
 const loadDirectory = async (path: string, notify = true): Promise<boolean> => {
   loading.value = true
@@ -796,12 +1228,20 @@ const navigateToPath = () => {
   }
 }
 
-// 返回上级
+// 返回历史路径
 const goBack = () => {
   if (pathHistory.value.length > 0) {
     const prevPath = pathHistory.value.pop()!
     loadDirectory(prevPath)
   }
+}
+
+// 返回父目录
+const goParentDirectory = () => {
+  const parentPath = getParentRemotePath(currentPath.value)
+  if (parentPath === currentPath.value) return
+  pathHistory.value.push(currentPath.value)
+  loadDirectory(parentPath)
 }
 
 // 返回主目录（用户的 home 目录）
@@ -1040,24 +1480,64 @@ const handleUpload = async () => {
     })
 
     if (result && result.length > 0) {
+      const plannedRemoteNames: string[] = []
+      let skippedCount = 0
+
       for (const localPath of result) {
         const fileName = localPath.split(/[/\\]/).pop()
-        const remotePath =
-          currentPath.value === '/' ? '/' + fileName : currentPath.value + '/' + fileName
+        if (!fileName) continue
 
-        ElMessage.info(`正在上传 ${fileName}...`)
-
-        const uploadResult = await window.electronAPI.sftp.uploadFile(
-          props.connectionId,
-          localPath,
-          remotePath
+        const localStat = await statLocalPath(localPath)
+        const conflict = await resolveUploadConflict(
+          fileName,
+          localStat.size,
+          plannedRemoteNames
         )
-        if (uploadResult.success) {
-          ElMessage.success(`${fileName} 上传成功`)
-        } else {
-          ElMessage.error(`${fileName} 上传失败: ${uploadResult.error}`)
+
+        if (conflict.action === 'skip') {
+          skippedCount += 1
+          continue
+        }
+
+        const remoteName = conflict.remotePath.split('/').pop() || fileName
+        plannedRemoteNames.push(remoteName)
+        const taskId = createPanelTransferId('upload')
+        addPanelTransfer({
+          id: taskId,
+          name: remoteName,
+          type: 'upload',
+          status: 'active',
+          progress: 0,
+          transferred: 0,
+          total: localStat.size || 0,
+          speed: 0,
+          eta: 0,
+          localPath,
+          remotePath: conflict.remotePath
+        })
+
+        ElMessage.info(`正在上传 ${remoteName}...`)
+
+        try {
+          const uploadResult = await window.electronAPI.sftp.uploadFile(
+            props.connectionId,
+            localPath,
+            conflict.remotePath,
+            { resumeFromExisting: conflict.resumeFromExisting, taskId }
+          )
+          if (uploadResult.success) {
+            markPanelTransferCompleted(taskId)
+            ElMessage.success(`${remoteName} 上传成功`)
+          } else {
+            markPanelTransferFailed(taskId, uploadResult.error)
+            ElMessage.error(`${remoteName} 上传失败: ${uploadResult.error}`)
+          }
+        } catch (error: any) {
+          markPanelTransferFailed(taskId, error.message)
+          ElMessage.error(`${remoteName} 上传失败: ${error.message}`)
         }
       }
+      if (skippedCount > 0) ElMessage.info(`已跳过 ${skippedCount} 个文件`)
       refreshDirectory()
     }
   } catch (error: any) {
@@ -1118,29 +1598,65 @@ const onDrop = async (event: DragEvent) => {
   }
 
   // 上传文件
+  const plannedRemoteNames: string[] = []
+  let skippedCount = 0
+
   for (const localPath of filePaths) {
     const fileName = localPath.split(/[/\\]/).pop()
-    const remotePath =
-      currentPath.value === '/' ? '/' + fileName : currentPath.value + '/' + fileName
+    if (!fileName) continue
 
-    ElMessage.info(`正在上传 ${fileName}...`)
+    const localStat = await statLocalPath(localPath)
+    const conflict = await resolveUploadConflict(
+      fileName,
+      localStat.size,
+      plannedRemoteNames
+    )
+
+    if (conflict.action === 'skip') {
+      skippedCount += 1
+      continue
+    }
+
+    const remoteName = conflict.remotePath.split('/').pop() || fileName
+    plannedRemoteNames.push(remoteName)
+    const taskId = createPanelTransferId('upload')
+    addPanelTransfer({
+      id: taskId,
+      name: remoteName,
+      type: 'upload',
+      status: 'active',
+      progress: 0,
+      transferred: 0,
+      total: localStat.size || 0,
+      speed: 0,
+      eta: 0,
+      localPath,
+      remotePath: conflict.remotePath
+    })
+
+    ElMessage.info(`正在上传 ${remoteName}...`)
 
     try {
       const uploadResult = await window.electronAPI.sftp.uploadFile(
         props.connectionId,
         localPath,
-        remotePath
+        conflict.remotePath,
+        { resumeFromExisting: conflict.resumeFromExisting, taskId }
       )
       if (uploadResult.success) {
-        ElMessage.success(`${fileName} 上传成功`)
+        markPanelTransferCompleted(taskId)
+        ElMessage.success(`${remoteName} 上传成功`)
       } else {
-        ElMessage.error(`${fileName} 上传失败: ${uploadResult.error}`)
+        markPanelTransferFailed(taskId, uploadResult.error)
+        ElMessage.error(`${remoteName} 上传失败: ${uploadResult.error}`)
       }
     } catch (error: any) {
-      ElMessage.error(`${fileName} 上传失败: ${error.message}`)
+      markPanelTransferFailed(taskId, error.message)
+      ElMessage.error(`${remoteName} 上传失败: ${error.message}`)
     }
   }
 
+  if (skippedCount > 0) ElMessage.info(`已跳过 ${skippedCount} 个文件`)
   refreshDirectory()
 }
 
@@ -1200,27 +1716,52 @@ const onFileDragEnd = async (event: DragEvent, file: FileInfo) => {
       event.clientY >= windowHeight
     ) {
       // 弹出保存对话框
+      let taskId = ''
       try {
         const saveDir = await window.electronAPI.dialog.openDirectory({
           properties: ['openDirectory', 'createDirectory']
         })
 
         if (saveDir) {
-          const localPath = `${saveDir}/${file.name}`
-          ElMessage.info(`正在下载 ${file.name}...`)
+          const conflict = await resolveDownloadConflict(file, saveDir, [])
+          if (conflict.action === 'skip') {
+            ElMessage.info(`已跳过 ${file.name}`)
+            return
+          }
+
+          const localName = conflict.localPath.split(/[/\\]/).pop() || file.name
+          taskId = createPanelTransferId('download')
+          addPanelTransfer({
+            id: taskId,
+            name: localName,
+            type: 'download',
+            status: 'active',
+            progress: 0,
+            transferred: 0,
+            total: file.size || 0,
+            speed: 0,
+            eta: 0,
+            localPath: conflict.localPath,
+            remotePath: file.path
+          })
+          ElMessage.info(`正在下载 ${localName}...`)
 
           const result = await window.electronAPI.sftp.downloadFile(
             props.connectionId,
             file.path,
-            localPath
+            conflict.localPath,
+            { resumeFromExisting: conflict.resumeFromExisting, taskId }
           )
           if (result.success) {
-            ElMessage.success(`${file.name} 下载成功`)
+            markPanelTransferCompleted(taskId)
+            ElMessage.success(`${localName} 下载成功`)
           } else {
+            markPanelTransferFailed(taskId, result.error)
             ElMessage.error(`下载失败: ${result.error}`)
           }
         }
       } catch (error: any) {
+        if (taskId) markPanelTransferFailed(taskId, error.message)
         console.error('[TerminalFilePanel] Download error:', error)
       }
     }
@@ -1232,6 +1773,7 @@ const handleDownload = async () => {
   if (!contextMenuFile.value) return
   hideContextMenu()
 
+  let taskId = ''
   try {
     // 选择保存目录
     const saveDir = await window.electronAPI.dialog.openDirectory({
@@ -1241,21 +1783,44 @@ const handleDownload = async () => {
     if (!saveDir) return
 
     const file = contextMenuFile.value
-    const localPath = `${saveDir}/${file.name}`
+    const conflict = await resolveDownloadConflict(file, saveDir, [])
+    if (conflict.action === 'skip') {
+      ElMessage.info(`已跳过 ${file.name}`)
+      return
+    }
 
-    ElMessage.info(`正在下载 ${file.name}...`)
+    const localName = conflict.localPath.split(/[/\\]/).pop() || file.name
+    taskId = createPanelTransferId('download')
+    addPanelTransfer({
+      id: taskId,
+      name: localName,
+      type: 'download',
+      status: 'active',
+      progress: 0,
+      transferred: 0,
+      total: file.size || 0,
+      speed: 0,
+      eta: 0,
+      localPath: conflict.localPath,
+      remotePath: file.path
+    })
+    ElMessage.info(`正在下载 ${localName}...`)
 
     const result = await window.electronAPI.sftp.downloadFile(
       props.connectionId,
       file.path,
-      localPath
+      conflict.localPath,
+      { resumeFromExisting: conflict.resumeFromExisting, taskId }
     )
     if (result.success) {
-      ElMessage.success(`${file.name} 下载成功`)
+      markPanelTransferCompleted(taskId)
+      ElMessage.success(`${localName} 下载成功`)
     } else {
+      markPanelTransferFailed(taskId, result.error)
       ElMessage.error(`下载失败: ${result.error}`)
     }
   } catch (error: any) {
+    if (taskId) markPanelTransferFailed(taskId, error.message)
     ElMessage.error('下载失败: ' + error.message)
   }
 }
@@ -1412,23 +1977,50 @@ const handleDownloadMultiple = async () => {
 
     let successCount = 0
     let failCount = 0
+    let skippedCount = 0
+    const plannedLocalNames: string[] = []
 
     for (const file of selected) {
-      const localPath = `${saveDir}/${file.name}`
-      ElMessage.info(`正在下载 ${file.name}...`)
+      const conflict = await resolveDownloadConflict(file, saveDir, plannedLocalNames)
+      if (conflict.action === 'skip') {
+        skippedCount += 1
+        continue
+      }
+
+      const localName = conflict.localPath.split(/[/\\]/).pop() || file.name
+      plannedLocalNames.push(localName)
+      const taskId = createPanelTransferId('download')
+      addPanelTransfer({
+        id: taskId,
+        name: localName,
+        type: 'download',
+        status: 'active',
+        progress: 0,
+        transferred: 0,
+        total: file.size || 0,
+        speed: 0,
+        eta: 0,
+        localPath: conflict.localPath,
+        remotePath: file.path
+      })
+      ElMessage.info(`正在下载 ${localName}...`)
 
       try {
         const result = await window.electronAPI.sftp.downloadFile(
           props.connectionId,
           file.path,
-          localPath
+          conflict.localPath,
+          { resumeFromExisting: conflict.resumeFromExisting, taskId }
         )
         if (result.success) {
+          markPanelTransferCompleted(taskId)
           successCount++
         } else {
+          markPanelTransferFailed(taskId, result.error)
           failCount++
         }
       } catch (error) {
+        markPanelTransferFailed(taskId, error instanceof Error ? error.message : '下载失败')
         failCount++
       }
     }
@@ -1438,6 +2030,7 @@ const handleDownloadMultiple = async () => {
     } else {
       ElMessage.warning(`下载完成：成功 ${successCount} 个，失败 ${failCount} 个`)
     }
+    if (skippedCount > 0) ElMessage.info(`已跳过 ${skippedCount} 个文件`)
   } catch (error: any) {
     ElMessage.error('下载失败: ' + error.message)
   }
@@ -1462,16 +2055,26 @@ const handleDeleteMultiple = async () => {
     let successCount = 0
     let failCount = 0
 
-    for (const file of selected) {
-      try {
-        const result = await window.electronAPI.sftp.deleteFile(props.connectionId, file.path)
-        if (result.success) {
-          successCount++
-        } else {
-          failCount++
-        }
-      } catch (error) {
-        failCount++
+    const filePaths = selected.filter((file) => file.type !== 'directory').map((file) => file.path)
+    const dirPaths = selected.filter((file) => file.type === 'directory').map((file) => file.path)
+
+    if (filePaths.length > 0) {
+      const result = await window.electronAPI.sftp.deleteFiles(props.connectionId, filePaths)
+      if (result.success && result.results) {
+        successCount += result.results.success.length
+        failCount += result.results.failed.length
+      } else {
+        failCount += filePaths.length
+      }
+    }
+
+    if (dirPaths.length > 0) {
+      const result = await window.electronAPI.sftp.deleteDirectories(props.connectionId, dirPaths)
+      if (result.success && result.results) {
+        successCount += result.results.success.length
+        failCount += result.results.failed.length
+      } else {
+        failCount += dirPaths.length
       }
     }
 
@@ -1512,37 +2115,32 @@ const confirmCompress = async () => {
   }
 
   try {
-    // 根据格式构建压缩命令
-    let command = ''
-    const sourceNames = filesToCompress.map((f) => `"${f.name}"`).join(' ')
-
-    switch (compressFormat.value) {
-      case 'tar.gz':
-        command = `cd "${currentPath.value}" && tar -czvf "${compressOutputName.value}" ${sourceNames}`
-        break
-      case 'tar':
-        command = `cd "${currentPath.value}" && tar -cvf "${compressOutputName.value}" ${sourceNames}`
-        break
-      case 'tar.bz2':
-        command = `cd "${currentPath.value}" && tar -cjvf "${compressOutputName.value}" ${sourceNames}`
-        break
-      case 'tar.xz':
-        command = `cd "${currentPath.value}" && tar -cJvf "${compressOutputName.value}" ${sourceNames}`
-        break
-      case 'zip':
-        command = `cd "${currentPath.value}" && zip -r "${compressOutputName.value}" ${sourceNames}`
-        break
-      default:
-        command = `cd "${currentPath.value}" && tar -czvf "${compressOutputName.value}" ${sourceNames}`
-    }
+    const outputName = normalizeCompressOutputName(
+      compressOutputName.value.trim(),
+      compressFormat.value
+    )
+    compressOutputName.value = outputName
+    const archivePath =
+      currentPath.value === '/'
+        ? '/' + outputName
+        : currentPath.value + '/' + outputName
 
     const msg = isMultiple
       ? `正在压缩 ${filesToCompress.length} 个项目...`
       : `正在压缩 ${filesToCompress[0].name}...`
     ElMessage.info(msg)
 
-    // 通过 SSH 执行压缩命令
-    const result = await window.electronAPI.ssh.executeCommand(props.connectionId, command, 60000)
+    const result = isMultiple
+      ? await window.electronAPI.sftp.compressMultiple(
+          props.connectionId,
+          filesToCompress.map((file) => file.path),
+          archivePath
+        )
+      : await window.electronAPI.sftp.compress(
+          props.connectionId,
+          filesToCompress[0].path,
+          archivePath
+        )
 
     if (result.success) {
       ElMessage.success('压缩完成')
@@ -1574,7 +2172,6 @@ const confirmExtract = async () => {
 
   extracting.value = true
   const file = contextMenuFile.value
-  const fileName = file.name.toLowerCase()
 
   try {
     // 确定解压目标目录
@@ -1582,55 +2179,13 @@ const confirmExtract = async () => {
     if (extractTarget.value === 'subfolder') {
       const baseName = getBaseName(file.name)
       targetDir = currentPath.value === '/' ? '/' + baseName : currentPath.value + '/' + baseName
-      // 先创建目录
-      await window.electronAPI.ssh.executeCommand(
-        props.connectionId,
-        `mkdir -p "${targetDir}"`,
-        10000
-      )
     } else if (extractTarget.value === 'custom') {
       targetDir = extractCustomPath.value || currentPath.value
-      // 确保目录存在
-      await window.electronAPI.ssh.executeCommand(
-        props.connectionId,
-        `mkdir -p "${targetDir}"`,
-        10000
-      )
-    }
-
-    // 根据文件类型构建解压命令（默认覆盖同名文件）
-    let command = ''
-
-    if (fileName.endsWith('.tar.gz') || fileName.endsWith('.tgz')) {
-      command = `tar -xzvf "${file.path}" -C "${targetDir}"`
-    } else if (fileName.endsWith('.tar.bz2')) {
-      command = `tar -xjvf "${file.path}" -C "${targetDir}"`
-    } else if (fileName.endsWith('.tar.xz')) {
-      command = `tar -xJvf "${file.path}" -C "${targetDir}"`
-    } else if (fileName.endsWith('.tar')) {
-      command = `tar -xvf "${file.path}" -C "${targetDir}"`
-    } else if (fileName.endsWith('.zip')) {
-      command = `unzip -o "${file.path}" -d "${targetDir}"`
-    } else if (fileName.endsWith('.gz') && !fileName.endsWith('.tar.gz')) {
-      command = `gunzip -c "${file.path}" > "${targetDir}/${getBaseName(file.name)}"`
-    } else if (fileName.endsWith('.bz2') && !fileName.endsWith('.tar.bz2')) {
-      command = `bunzip2 -c "${file.path}" > "${targetDir}/${getBaseName(file.name)}"`
-    } else if (fileName.endsWith('.xz') && !fileName.endsWith('.tar.xz')) {
-      command = `unxz -c "${file.path}" > "${targetDir}/${getBaseName(file.name)}"`
-    } else if (fileName.endsWith('.rar')) {
-      command = `unrar x -o+ "${file.path}" "${targetDir}/"`
-    } else if (fileName.endsWith('.7z')) {
-      command = `7z x -aoa "${file.path}" -o"${targetDir}"`
-    } else {
-      ElMessage.error('不支持的压缩格式')
-      extracting.value = false
-      return
     }
 
     ElMessage.info(`正在解压 ${file.name}...`)
 
-    // 通过 SSH 执行解压命令
-    const result = await window.electronAPI.ssh.executeCommand(props.connectionId, command, 120000)
+    const result = await window.electronAPI.sftp.extract(props.connectionId, file.path, targetDir)
 
     if (result.success) {
       ElMessage.success('解压完成')
@@ -1868,6 +2423,11 @@ const initSFTP = async () => {
 onMounted(async () => {
   document.addEventListener('click', hideContextMenu)
   await loadFilePanelSettings()
+  cleanupFunctions.push(
+    window.electronAPI.sftp.onProgress(updatePanelTransferProgress),
+    window.electronAPI.sftp.onComplete(markPanelTransferCompleted),
+    window.electronAPI.sftp.onError(markPanelTransferFailed)
+  )
   const cleanupSettings = window.electronAPI.settings.onChange((settings: any) => {
     applyFilePanelSettings(settings)
   })
@@ -1985,6 +2545,77 @@ watch(
   gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border-color);
+}
+
+.panel-transfers {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
+}
+
+.panel-transfers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.panel-transfer-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.panel-transfer-row,
+.panel-transfer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.panel-transfer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.panel-transfer-status {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.panel-transfer-status.active {
+  color: var(--primary-color);
+}
+
+.panel-transfer-status.completed {
+  color: var(--success-color);
+}
+
+.panel-transfer-status.failed {
+  color: var(--danger-color);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-transfer-meta {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
 }
 
 .file-list {

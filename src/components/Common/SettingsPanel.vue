@@ -244,7 +244,10 @@
                     <el-button size="small" @click="selectGlobalTerminalBackgroundImage">
                       选择图片
                     </el-button>
-                    <span class="background-file-name" :title="settings.terminal.background.fileName">
+                    <span
+                      class="background-file-name"
+                      :title="settings.terminal.background.fileName"
+                    >
                       {{ settings.terminal.background.fileName || '未选择图片' }}
                     </span>
                   </div>
@@ -1035,7 +1038,9 @@
                             <el-button
                               :icon="Download"
                               :loading="syncState.downloadingGitLab"
-                              :disabled="!hasSyncEncryptionPassword || !syncConfig.gitlab?.snippetId"
+                              :disabled="
+                                !hasSyncEncryptionPassword || !syncConfig.gitlab?.snippetId
+                              "
                               @click="doDownloadGitLab"
                             >
                               覆盖本地
@@ -1075,6 +1080,77 @@
         <!-- AI 助手 -->
         <el-tab-pane label="AI 助手" name="ai">
           <AISettingsPanel ref="aiSettingsPanelRef" />
+        </el-tab-pane>
+
+        <!-- Agent/MCP 接入 -->
+        <el-tab-pane label="Agent 接入" name="agent-mcp">
+          <div class="settings-section">
+            <h3>本机 Agent / MCP</h3>
+            <el-alert type="info" :closable="false" show-icon class="mcp-notice">
+              <template #title>让 Codex、Claude 等 Agent 读取当前已连接的 SSH 会话</template>
+              <template #default>
+                当前第一阶段仅开放只读能力：会话列表、连接状态、远程目录列表和远程文本文件读取。
+                不会向 Agent 暴露密码、私钥、Electron IPC、命令执行或文件写入能力。
+              </template>
+            </el-alert>
+
+            <el-form label-position="left">
+              <el-form-item label="启用 MCP 服务">
+                <el-switch
+                  v-model="settings.agentMcp.enabled"
+                  :loading="mcpLoading"
+                  @change="handleMcpToggle"
+                />
+                <span class="form-hint">
+                  {{ mcpStatus.running ? '服务运行中' : '默认关闭，仅监听本机' }}
+                </span>
+              </el-form-item>
+
+              <el-form-item label="服务端点">
+                <div class="mcp-inline-field">
+                  <el-input :model-value="mcpStatus.endpoint" readonly />
+                  <el-button :disabled="!mcpStatus.running" @click="copyMcpEndpoint">
+                    复制
+                  </el-button>
+                </div>
+              </el-form-item>
+
+              <el-form-item label="访问令牌">
+                <div class="mcp-inline-field">
+                  <el-input
+                    :model-value="mcpTokenVisible ? settings.agentMcp.token : maskedMcpToken"
+                    readonly
+                  />
+                  <el-button @click="mcpTokenVisible = !mcpTokenVisible">
+                    {{ mcpTokenVisible ? '隐藏' : '显示' }}
+                  </el-button>
+                  <el-button @click="copyMcpToken">复制</el-button>
+                  <el-button type="danger" plain @click="regenerateMcpToken"> 重新生成 </el-button>
+                </div>
+              </el-form-item>
+
+              <el-form-item label="客户端配置">
+                <div class="mcp-config-actions">
+                  <el-button :disabled="!mcpStatus.running" @click="copyCodexMcpConfig">
+                    复制 Codex 配置
+                  </el-button>
+                  <el-button :disabled="!mcpStatus.running" @click="copyClaudeMcpConfig">
+                    复制 Claude 配置
+                  </el-button>
+                </div>
+              </el-form-item>
+            </el-form>
+
+            <div class="mcp-safety-list">
+              <strong>安全边界</strong>
+              <ul>
+                <li>只接受本机请求，并且必须携带访问令牌。</li>
+                <li>只能操作 MShell 当前已经连接的 SSH 会话。</li>
+                <li>远程文件读取限制为单文件 1 MiB，目录最多返回 2000 项。</li>
+                <li>每次 Agent 工具调用都会写入现有审计日志。</li>
+              </ul>
+            </div>
+          </div>
         </el-tab-pane>
 
         <!-- 关于 -->
@@ -1480,6 +1556,12 @@ const settings = ref({
   updates: {
     autoCheck: true,
     autoDownload: false
+  },
+  agentMcp: {
+    enabled: false,
+    host: '127.0.0.1' as const,
+    port: 47821,
+    token: ''
   }
 })
 
@@ -1553,7 +1635,24 @@ const DEFAULT_RESTORE_OPTIONS = [
 const restoreOptions = ref<string[]>([...DEFAULT_RESTORE_OPTIONS])
 const backupLoading = ref(false)
 
-const appVersion = ref('0.2.9')
+const appVersion = ref('0.2.10')
+
+const mcpStatus = ref({
+  enabled: false,
+  running: false,
+  host: '127.0.0.1' as const,
+  port: 47821,
+  endpoint: 'http://127.0.0.1:47821/mcp',
+  token: ''
+})
+const mcpLoading = ref(false)
+const mcpTokenVisible = ref(false)
+const maskedMcpToken = computed(() => {
+  const token = settings.value.agentMcp.token
+  if (!token) return '未生成'
+  if (token.length <= 8) return '*'.repeat(token.length)
+  return `${token.slice(0, 4)}${'*'.repeat(Math.max(4, token.length - 8))}${token.slice(-4)}`
+})
 
 // 更新相关状态
 const updateState = ref({
@@ -1705,7 +1804,8 @@ watch(
 )
 
 onMounted(async () => {
-  loadSettings()
+  await loadSettings()
+  await loadMcpStatus()
   loadBackupConfig()
   loadBackupList()
   loadLockConfig()
@@ -1744,7 +1844,8 @@ const loadSettings = async () => {
         ssh: { ...settings.value.ssh, ...saved.ssh },
         sftp: { ...settings.value.sftp, ...saved.sftp },
         security: { ...settings.value.security, ...saved.security },
-        updates: { ...settings.value.updates, ...saved.updates }
+        updates: { ...settings.value.updates, ...saved.updates },
+        agentMcp: { ...settings.value.agentMcp, ...saved.agentMcp }
       }
       currentTheme.value = settings.value.terminal.theme
       if (saved.terminalShortcuts) {
@@ -1755,6 +1856,131 @@ const loadSettings = async () => {
     await ensureSftpDefaultLocalPath()
   } catch (error) {
     console.error('Failed to load settings:', error)
+  }
+}
+
+const loadMcpStatus = async () => {
+  try {
+    const result = await window.electronAPI.mcp.getStatus()
+    if (!result.success || !result.data) return
+
+    mcpStatus.value = result.data
+    settings.value.agentMcp = {
+      ...settings.value.agentMcp,
+      enabled: result.data.enabled,
+      host: result.data.host,
+      port: result.data.port,
+      token: result.data.token
+    }
+  } catch (error) {
+    console.error('Failed to load MCP status:', error)
+  }
+}
+
+const handleMcpToggle = async (enabled: boolean | string | number) => {
+  const nextEnabled = Boolean(enabled)
+  mcpLoading.value = true
+  try {
+    const result = nextEnabled
+      ? await window.electronAPI.mcp.start()
+      : await window.electronAPI.mcp.stop()
+
+    if (!result.success) {
+      settings.value.agentMcp.enabled = !nextEnabled
+      ElMessage.error(result.error || 'MCP 服务状态更新失败')
+      return
+    }
+
+    await loadMcpStatus()
+    ElMessage.success(nextEnabled ? 'MCP 服务已启动' : 'MCP 服务已停止')
+  } catch (error) {
+    settings.value.agentMcp.enabled = !nextEnabled
+    console.error('Failed to toggle MCP service:', error)
+    ElMessage.error('MCP 服务状态更新失败')
+  } finally {
+    mcpLoading.value = false
+  }
+}
+
+const copyToClipboard = async (text: string, successMessage: string) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(successMessage)
+  } catch (error) {
+    console.error('Failed to copy MCP configuration:', error)
+    ElMessage.error('复制失败，请检查系统剪贴板权限')
+  }
+}
+
+const copyMcpEndpoint = () => {
+  void copyToClipboard(mcpStatus.value.endpoint, 'MCP 端点已复制')
+}
+
+const copyMcpToken = () => {
+  if (!settings.value.agentMcp.token) {
+    ElMessage.warning('当前没有可复制的访问令牌')
+    return
+  }
+  void copyToClipboard(settings.value.agentMcp.token, 'MCP 令牌已复制')
+}
+
+const copyCodexMcpConfig = () => {
+  const { endpoint } = mcpStatus.value
+  const token = settings.value.agentMcp.token
+  void copyToClipboard(
+    `# 在启动 Codex 的同一 PowerShell 窗口中执行：\n$env:MSHELL_MCP_TOKEN = '${token}'\n\n# 将以下内容加入 ~/.codex/config.toml：\n[mcp_servers.mshell]\nurl = "${endpoint}"\nbearer_token_env_var = "MSHELL_MCP_TOKEN"`,
+    'Codex 配置已复制'
+  )
+}
+
+const copyClaudeMcpConfig = () => {
+  const { endpoint } = mcpStatus.value
+  const token = settings.value.agentMcp.token
+  void copyToClipboard(
+    JSON.stringify(
+      {
+        mcpServers: {
+          mshell: {
+            type: 'http',
+            url: endpoint,
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        }
+      },
+      null,
+      2
+    ),
+    'Claude 配置已复制'
+  )
+}
+
+const regenerateMcpToken = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '重新生成后，已经接入的 Agent 需要更新令牌才能继续连接。',
+      '重新生成 MCP 令牌',
+      { type: 'warning', confirmButtonText: '重新生成', cancelButtonText: '取消' }
+    )
+
+    mcpLoading.value = true
+    const result = await window.electronAPI.mcp.regenerateToken()
+    if (!result.success) {
+      ElMessage.error(result.error || 'MCP 令牌生成失败')
+      return
+    }
+
+    mcpTokenVisible.value = false
+    await loadMcpStatus()
+    ElMessage.success('MCP 令牌已重新生成')
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('Failed to regenerate MCP token:', error)
+      ElMessage.error('MCP 令牌生成失败')
+    }
+  } finally {
+    mcpLoading.value = false
   }
 }
 
@@ -1819,7 +2045,9 @@ const selectGlobalTerminalBackgroundImage = async () => {
 }
 
 const clearGlobalTerminalBackground = () => {
-  settings.value.terminal.background = normalizeTerminalBackground(null) as typeof settings.value.terminal.background
+  settings.value.terminal.background = normalizeTerminalBackground(
+    null
+  ) as typeof settings.value.terminal.background
 }
 
 const saveSettings = async () => {
@@ -2463,11 +2691,9 @@ const doUpload = async () => {
   }
   if (syncConfig.value.github?.gistId) {
     try {
-      await ElMessageBox.confirm(
-        '上传会用本地数据覆盖云端同步数据，确定要继续吗？',
-        '覆盖云端',
-        { type: 'warning' }
-      )
+      await ElMessageBox.confirm('上传会用本地数据覆盖云端同步数据，确定要继续吗？', '覆盖云端', {
+        type: 'warning'
+      })
     } catch {
       return
     }
@@ -2630,11 +2856,9 @@ const doUploadGitLab = async () => {
   }
   if (syncConfig.value.gitlab?.snippetId) {
     try {
-      await ElMessageBox.confirm(
-        '上传会用本地数据覆盖云端同步数据，确定要继续吗？',
-        '覆盖云端',
-        { type: 'warning' }
-      )
+      await ElMessageBox.confirm('上传会用本地数据覆盖云端同步数据，确定要继续吗？', '覆盖云端', {
+        type: 'warning'
+      })
     } catch {
       return
     }
@@ -3531,6 +3755,46 @@ const testShortcuts = () => {
   margin-left: var(--spacing-sm);
   color: var(--text-tertiary);
   font-size: var(--text-sm);
+}
+
+.mcp-notice {
+  margin-bottom: var(--spacing-lg);
+}
+
+.mcp-inline-field {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  width: min(760px, 100%);
+}
+
+.mcp-inline-field .el-input {
+  min-width: 0;
+  flex: 1;
+}
+
+.mcp-config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.mcp-safety-list {
+  max-width: 760px;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.mcp-safety-list strong {
+  color: var(--text-primary);
+}
+
+.mcp-safety-list ul {
+  margin: var(--spacing-xs) 0 0;
+  padding-left: var(--spacing-lg);
 }
 
 .terminal-background-form {

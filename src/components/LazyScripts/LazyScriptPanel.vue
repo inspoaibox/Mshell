@@ -864,6 +864,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useAppStore, type Tab } from '@/stores/app'
 import { terminalManager } from '@/utils/terminal-manager'
+import { buildTerminalExecutePayload } from '@/utils/terminal-command-execution'
 
 type LazyScriptType = 'command' | 'shell' | 'steps'
 type LazyScriptRunMode = 'copy' | 'paste' | 'execute'
@@ -1783,7 +1784,11 @@ const runScript = async () => {
 
   if (script.type === 'command') {
     terminalManager.requestScrollToBottom(targetTerminalId)
-    window.electronAPI.ssh.write(targetTerminalId, ensureTrailingNewline(buildRunCommand()))
+    const inst = terminalManager.get(targetTerminalId)
+    window.electronAPI.ssh.write(
+      targetTerminalId,
+      buildTerminalExecutePayload(buildRunCommand(), inst?.bracketedPasteEnabled ?? false)
+    )
     await markUsed()
     ElMessage.success(`命令已发送到 ${formatTargetTerminalName(targetTerminalId)}`)
     return

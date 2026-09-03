@@ -34,6 +34,31 @@ export interface SSHConnectionOptions {
   trustedHostKey?: TrustedHostKey
 }
 
+export type SSHCloseSource = 'stream' | 'client' | 'socket' | 'manual' | 'timeout' | 'replace'
+
+export interface SSHCloseDetails {
+  source: SSHCloseSource
+  reason: string
+  statusBefore: SSHConnection['status']
+  lastActivity: string
+  closedAt: string
+  hadError?: boolean
+  errorMessage?: string
+  errorCode?: string
+  reconnecting?: boolean
+  socket?: {
+    destroyed: boolean
+    connecting: boolean
+    readyState?: string
+    bytesRead?: number
+    bytesWritten?: number
+    localAddress?: string
+    localPort?: number
+    remoteAddress?: string
+    remotePort?: number
+  }
+}
+
 export class HostKeyChallengeError extends Error {
   public readonly code = 'HOST_KEY_CHALLENGE_REQUIRED'
   public readonly details: HostKeyChallengeDetails
@@ -63,6 +88,13 @@ export interface SSHConnection {
   maxReconnectAttempts?: number
   reconnectInterval?: number
   shellPid?: number // Shell 进程的 PID，用于获取当前目录
+  closeEmitted?: boolean
+  manualDisconnect?: boolean
+  manualDisconnectReason?: SSHCloseSource
+  lastCloseDetails?: SSHCloseDetails
+  lastError?: string
+  lastErrorCode?: string
+  lastSocketCloseHadError?: boolean
 }
 
 /**
@@ -86,7 +118,7 @@ export class SSHConnectionManager extends EventEmitter {
       const existingConnection = this.connections.get(id)
       if (existingConnection) {
         try {
-          await this.disconnect(id)
+          await this.disconnect(id, 'replace')
         } catch (error) {
           ErrorHandler.handle(error as Error, `Disconnect existing connection ${id}`)
         }
@@ -189,12 +221,18 @@ export class SSHConnectionManager extends EventEmitter {
         if (rejectHostKeyChallenge()) return
 
         const appError = ErrorHandler.handle(err, `SSH Connection ${id}`)
+        connection.lastError = appError.userMessage
+        connection.lastErrorCode = (err as any)?.code
         if (connection.status === 'connecting') {
           this.emit('error', id, appError.userMessage)
           rejectWhileConnecting(appError)
           return
         }
         this.emit('error', id, appError.userMessage)
+      })
+
+      socket.on('close', (hadError: boolean) => {
+        connection.lastSocketCloseHadError = hadError
       })
 
       // Setup SSH Client events
@@ -252,9 +290,16 @@ export class SSHConnectionManager extends EventEmitter {
           })
 
           stream.on('close', () => {
-            connection.status = 'disconnected'
-            this.stopSessionMonitor(id)
-            this.emit('close', id)
+            if (connectSettled && this.connections.get(id) !== connection) {
+              return
+            }
+            const closeSource = connection.manualDisconnect
+              ? connection.manualDisconnectReason || 'manual'
+              : 'stream'
+            const closeReason = connection.manualDisconnect
+              ? `SSH connection closed by ${closeSource}`
+              : 'SSH shell channel closed'
+            this.emitCloseOnce(id, connection, closeSource, closeReason)
           })
 
           stream.stderr.on('data', (data: Buffer) => {
@@ -284,6 +329,8 @@ export class SSHConnectionManager extends EventEmitter {
         if (rejectHostKeyChallenge()) return
 
         const appError = ErrorHandler.handle(err, `SSH Client ${id}`)
+        connection.lastError = appError.userMessage
+        connection.lastErrorCode = (err as any)?.code
         this.emit('error', id, appError.userMessage)
         // 只在连接阶段（connecting）才 reject Promise，避免已连接后的错误重复 reject
         if (connection.status === 'connecting') {
@@ -298,12 +345,23 @@ export class SSHConnectionManager extends EventEmitter {
           return
         }
 
-        connection.status = 'disconnected'
-        this.stopSessionMonitor(id)
-        this.emit('close', id)
+        const willReconnect =
+          !connection.manualDisconnect &&
+          Boolean(connection.maxReconnectAttempts && connection.maxReconnectAttempts > 0) &&
+          (connection.reconnectAttempts || 0) < (connection.maxReconnectAttempts || 0)
+
+        this.emitCloseOnce(
+          id,
+          connection,
+          connection.manualDisconnect ? connection.manualDisconnectReason || 'manual' : 'client',
+          connection.lastError ? `SSH client closed after error: ${connection.lastError}` : 'SSH client closed',
+          willReconnect
+        )
 
         // 尝试自动重连
-        this.attemptReconnect(id)
+        if (willReconnect) {
+          this.attemptReconnect(id)
+        }
       })
 
       // 使用全局设置作为默认值
@@ -404,12 +462,15 @@ export class SSHConnectionManager extends EventEmitter {
   /**
    * 断开 SSH 连接
    */
-  async disconnect(id: string): Promise<void> {
+  async disconnect(id: string, reason: SSHCloseSource = 'manual'): Promise<void> {
     const connection = this.connections.get(id)
     if (!connection) {
       console.warn(`Attempted to disconnect non-existent session: ${id}`)
       return
     }
+
+    connection.manualDisconnect = true
+    connection.manualDisconnectReason = reason
 
     // 取消重连
     this.cancelReconnect(id)
@@ -599,7 +660,7 @@ export class SSHConnectionManager extends EventEmitter {
               `会话已超时 (闲置超过 ${timeoutMinutes} 分钟)`
             )
             this.emit('error', id, appError.userMessage)
-            this.disconnect(id).catch((err) => {
+            this.disconnect(id, 'timeout').catch((err) => {
               ErrorHandler.handle(err, `Disconnect timeout session ${id}`)
             })
           }
@@ -626,6 +687,65 @@ export class SSHConnectionManager extends EventEmitter {
    */
   getAllConnections(): SSHConnection[] {
     return Array.from(this.connections.values())
+  }
+
+  private createCloseDetails(
+    connection: SSHConnection,
+    source: SSHCloseSource,
+    reason: string,
+    reconnecting = false
+  ): SSHCloseDetails {
+    const socket = connection.socket
+    const socketInfo = socket
+      ? {
+          destroyed: socket.destroyed,
+          connecting: socket.connecting,
+          readyState: socket.readyState,
+          bytesRead: socket.bytesRead,
+          bytesWritten: socket.bytesWritten,
+          localAddress: socket.localAddress,
+          localPort: socket.localPort,
+          remoteAddress: socket.remoteAddress,
+          remotePort: socket.remotePort
+        }
+      : undefined
+
+    return {
+      source,
+      reason,
+      statusBefore: connection.status,
+      lastActivity: connection.lastActivity.toISOString(),
+      closedAt: new Date().toISOString(),
+      hadError: connection.lastSocketCloseHadError,
+      errorMessage: connection.lastError,
+      errorCode: connection.lastErrorCode,
+      reconnecting,
+      socket: socketInfo
+    }
+  }
+
+  private emitCloseOnce(
+    id: string,
+    connection: SSHConnection,
+    source: SSHCloseSource,
+    reason: string,
+    reconnecting = false
+  ): boolean {
+    const details = this.createCloseDetails(connection, source, reason, reconnecting)
+    connection.lastCloseDetails = details
+
+    if (connection.closeEmitted) {
+      console.warn(
+        `[SSHConnectionManager] Duplicate close suppressed for session ${id}: ${source} - ${reason}`
+      )
+      return false
+    }
+
+    connection.closeEmitted = true
+    connection.status = 'disconnected'
+    this.stopSessionMonitor(id)
+    this.emit('close', id, details)
+    return true
   }
 
   /**

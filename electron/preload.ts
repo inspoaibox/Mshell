@@ -32,8 +32,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('ssh:error', listener)
       return () => ipcRenderer.removeListener('ssh:error', listener)
     },
-    onClose: (callback: (id: string) => void) => {
-      const listener = (_event: any, id: string) => callback(id)
+    onClose: (callback: (id: string, details?: any) => void) => {
+      const listener = (_event: any, id: string, details?: any) => callback(id, details)
       ipcRenderer.on('ssh:close', listener)
       return () => ipcRenderer.removeListener('ssh:close', listener)
     },
@@ -86,13 +86,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       connectionId: string,
       localPath: string,
       remotePath: string,
-      options?: { resumeFromExisting?: boolean }
+      options?: { resumeFromExisting?: boolean; taskId?: string }
     ) => ipcRenderer.invoke('sftp:uploadFile', connectionId, localPath, remotePath, options),
     downloadFile: (
       connectionId: string,
       remotePath: string,
       localPath: string,
-      options?: { resumeFromExisting?: boolean }
+      options?: { resumeFromExisting?: boolean; taskId?: string }
     ) => ipcRenderer.invoke('sftp:downloadFile', connectionId, remotePath, localPath, options),
     createDirectory: (connectionId: string, path: string) =>
       ipcRenderer.invoke('sftp:createDirectory', connectionId, path),
@@ -161,6 +161,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('sftp:progress', listener)
       return () => ipcRenderer.removeListener('sftp:progress', listener)
     },
+    onStarted: (callback: (taskId: string, record: any) => void) => {
+      const listener = (_event: any, taskId: string, record: any) => callback(taskId, record)
+      ipcRenderer.on('sftp:started', listener)
+      return () => ipcRenderer.removeListener('sftp:started', listener)
+    },
     onComplete: (callback: (taskId: string) => void) => {
       const listener = (_event: any, taskId: string) => callback(taskId)
       ipcRenderer.on('sftp:complete', listener)
@@ -183,6 +188,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('settings:changed', listener)
       return () => ipcRenderer.removeListener('settings:changed', listener)
     }
+  },
+
+  // 本机 Agent/MCP 只读服务
+  mcp: {
+    getStatus: () => ipcRenderer.invoke('mcp:getStatus'),
+    getConfig: () => ipcRenderer.invoke('mcp:getConfig'),
+    start: () => ipcRenderer.invoke('mcp:start'),
+    stop: () => ipcRenderer.invoke('mcp:stop'),
+    regenerateToken: () => ipcRenderer.invoke('mcp:regenerateToken')
   },
 
   // Log operations
@@ -245,7 +259,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     install: (connectionId: string) => ipcRenderer.invoke('docker:install', connectionId),
     cleanupUnused: (connectionId: string) => ipcRenderer.invoke('docker:cleanupUnused', connectionId),
     containerAction: (connectionId: string, action: string, containerId: string, options?: any) =>
-      ipcRenderer.invoke('docker:containerAction', connectionId, action, containerId, options)
+      ipcRenderer.invoke('docker:containerAction', connectionId, action, containerId, options),
+    containerBatchAction: (
+      connectionId: string,
+      action: string,
+      containerIds: string[],
+      options?: any
+    ) => ipcRenderer.invoke('docker:containerBatchAction', connectionId, action, containerIds, options)
   },
 
   // Port forward operations
@@ -427,6 +447,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('serverMonitor:start', sessionId, config),
     stop: (sessionId: string) => ipcRenderer.invoke('serverMonitor:stop', sessionId),
     getMetrics: (sessionId: string) => ipcRenderer.invoke('serverMonitor:getMetrics', sessionId),
+    refresh: (sessionId: string) => ipcRenderer.invoke('serverMonitor:refresh', sessionId),
     getMonitoredSessions: () => ipcRenderer.invoke('serverMonitor:getMonitoredSessions'),
     updateConfig: (sessionId: string, config: any) =>
       ipcRenderer.invoke('serverMonitor:updateConfig', sessionId, config),
@@ -828,7 +849,7 @@ export interface ElectronAPI {
     getAllConnections: () => Promise<any[]>
     onData: (callback: (id: string, data: string) => void) => void
     onError: (callback: (id: string, error: string) => void) => void
-    onClose: (callback: (id: string) => void) => void
+    onClose: (callback: (id: string, details?: any) => void) => void
   }
   session: {
     getAll: () => Promise<any[]>
@@ -852,8 +873,19 @@ export interface ElectronAPI {
     }>
     init: (connectionId: string) => Promise<void>
     listDirectory: (connectionId: string, path: string) => Promise<any[]>
-    uploadFile: (connectionId: string, localPath: string, remotePath: string) => Promise<void>
-    downloadFile: (connectionId: string, remotePath: string, localPath: string) => Promise<void>
+    uploadFile: (
+      connectionId: string,
+      localPath: string,
+      remotePath: string,
+      options?: { resumeFromExisting?: boolean; taskId?: string }
+    ) => Promise<{ success: boolean; taskId?: string; error?: string }>
+    downloadFile: (
+      connectionId: string,
+      remotePath: string,
+      localPath: string,
+      options?: { resumeFromExisting?: boolean; taskId?: string }
+    ) => Promise<{ success: boolean; taskId?: string; error?: string }>
+    onStarted: (callback: (taskId: string, record: any) => void) => () => void
     onProgress: (callback: (taskId: string, progress: any) => void) => () => void
   }
   settings: {

@@ -28,6 +28,10 @@ export interface DockerContainer {
   cpu: string
   memory: string
   netIO: string
+  composeProject: string
+  composeService: string
+  composeWorkingDir: string
+  composeConfigFiles: string
 }
 
 export interface DockerOverview {
@@ -73,10 +77,19 @@ class DockerManager {
     containerId: string,
     options: DockerContainerActionOptions = {}
   ): Promise<string> {
-    const target = shellQuote(containerId)
+    return await this.executeContainerBatchAction(connectionId, action, [containerId], options)
+  }
+
+  async executeContainerBatchAction(
+    connectionId: string,
+    action: DockerContainerAction,
+    containerIds: string[],
+    options: DockerContainerActionOptions = {}
+  ): Promise<string> {
+    const targets = containerIds.map(shellQuote).join(' ')
     const command = action === 'remove'
-      ? buildDockerRemoveScript(target, options)
-      : `set -e\n${buildDockerCommandPrefix()} ${getDockerActionCommand(action)} ${target}`
+      ? buildDockerRemoveScript(targets, options)
+      : `set -e\n${buildDockerCommandPrefix()} ${getDockerActionCommand(action)} ${targets}`
 
     const output = await sshConnectionManager.executeCommand(
       connectionId,
@@ -207,8 +220,13 @@ if [ "$installed" = "true" ] && [ "$socket_accessible" = "true" ]; then
     cpu="$(printf '%s' "$stats_line" | cut -d'|' -f2)"
     memory="$(printf '%s' "$stats_line" | cut -d'|' -f3)"
     net_io="$(printf '%s' "$stats_line" | cut -d'|' -f4)"
+    labels_line="$($docker_prefix inspect -f '{{with index .Config.Labels "com.docker.compose.project"}}{{.}}{{end}}|{{with index .Config.Labels "com.docker.compose.service"}}{{.}}{{end}}|{{with index .Config.Labels "com.docker.compose.project.working_dir"}}{{.}}{{end}}|{{with index .Config.Labels "com.docker.compose.project.config_files"}}{{.}}{{end}}' "$id" 2>/dev/null)"
+    compose_project="$(printf '%s' "$labels_line" | cut -d'|' -f1)"
+    compose_service="$(printf '%s' "$labels_line" | cut -d'|' -f2)"
+    compose_working_dir="$(printf '%s' "$labels_line" | cut -d'|' -f3)"
+    compose_config_files="$(printf '%s' "$labels_line" | cut -d'|' -f4-)"
 
-    item="{\\"id\\":\\"$(json_escape "$id")\\",\\"name\\":\\"$(json_escape "$name")\\",\\"image\\":\\"$(json_escape "$image")\\",\\"status\\":\\"$(json_escape "$status")\\",\\"state\\":\\"$(json_escape "$state")\\",\\"ports\\":\\"$(json_escape "$ports")\\",\\"createdAt\\":\\"$(json_escape "$created_at")\\",\\"size\\":\\"$(json_escape "$size")\\",\\"cpu\\":\\"$(json_escape "\${cpu:--}")\\",\\"memory\\":\\"$(json_escape "\${memory:--}")\\",\\"netIO\\":\\"$(json_escape "\${net_io:--}")\\"}"
+    item="{\\"id\\":\\"$(json_escape "$id")\\",\\"name\\":\\"$(json_escape "$name")\\",\\"image\\":\\"$(json_escape "$image")\\",\\"status\\":\\"$(json_escape "$status")\\",\\"state\\":\\"$(json_escape "$state")\\",\\"ports\\":\\"$(json_escape "$ports")\\",\\"createdAt\\":\\"$(json_escape "$created_at")\\",\\"size\\":\\"$(json_escape "$size")\\",\\"cpu\\":\\"$(json_escape "\${cpu:--}")\\",\\"memory\\":\\"$(json_escape "\${memory:--}")\\",\\"netIO\\":\\"$(json_escape "\${net_io:--}")\\",\\"composeProject\\":\\"$(json_escape "$compose_project")\\",\\"composeService\\":\\"$(json_escape "$compose_service")\\",\\"composeWorkingDir\\":\\"$(json_escape "$compose_working_dir")\\",\\"composeConfigFiles\\":\\"$(json_escape "$compose_config_files")\\"}"
     if [ "$first" = "true" ]; then
       containers_json="$item"
       first=false
@@ -353,7 +371,7 @@ exit "$failed"`
 }
 
 function buildDockerRemoveScript(
-  target: string,
+  targets: string,
   options: DockerContainerActionOptions
 ): string {
   const removeImage = options.removeImage ? 'true' : 'false'
@@ -361,32 +379,44 @@ function buildDockerRemoveScript(
 
   return `set -e
 ${buildDockerCommandResolverScript()}
-TARGET=${target}
 REMOVE_IMAGE=${removeImage}
 REMOVE_NETWORKS=${removeNetworks}
-IMAGE_NAME=""
+IMAGES=""
 NETWORKS=""
 
-if [ "$REMOVE_IMAGE" = "true" ]; then
-  IMAGE_NAME="$($DOCKER_CMD inspect -f '{{.Config.Image}}' "$TARGET" 2>/dev/null || true)"
-fi
-
-if [ "$REMOVE_NETWORKS" = "true" ]; then
-  NETWORKS="$($DOCKER_CMD inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$TARGET" 2>/dev/null || true)"
-fi
-
-$DOCKER_CMD rm -f "$TARGET"
-
-if [ "$REMOVE_IMAGE" = "true" ] && [ -n "$IMAGE_NAME" ]; then
-  if $DOCKER_CMD rmi "$IMAGE_NAME"; then
-    echo "已删除镜像: $IMAGE_NAME"
-  else
-    echo "镜像删除失败或仍被其他容器使用: $IMAGE_NAME"
+for TARGET in ${targets}; do
+  if [ "$REMOVE_IMAGE" = "true" ]; then
+    IMAGE_NAME="$($DOCKER_CMD inspect -f '{{.Config.Image}}' "$TARGET" 2>/dev/null || true)"
+    if [ -n "$IMAGE_NAME" ]; then
+      IMAGES="$IMAGES
+$IMAGE_NAME"
+    fi
   fi
+
+  if [ "$REMOVE_NETWORKS" = "true" ]; then
+    TARGET_NETWORKS="$($DOCKER_CMD inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$TARGET" 2>/dev/null || true)"
+    if [ -n "$TARGET_NETWORKS" ]; then
+      NETWORKS="$NETWORKS
+$TARGET_NETWORKS"
+    fi
+  fi
+
+  $DOCKER_CMD rm -f "$TARGET"
+done
+
+if [ "$REMOVE_IMAGE" = "true" ] && [ -n "$IMAGES" ]; then
+  printf '%s\\n' "$IMAGES" | sort -u | while IFS= read -r image; do
+    [ -z "$image" ] && continue
+    if $DOCKER_CMD rmi "$image"; then
+      echo "已删除镜像: $image"
+    else
+      echo "镜像删除失败或仍被其他容器使用: $image"
+    fi
+  done
 fi
 
 if [ "$REMOVE_NETWORKS" = "true" ] && [ -n "$NETWORKS" ]; then
-  printf '%s\\n' "$NETWORKS" | while IFS= read -r network; do
+  printf '%s\\n' "$NETWORKS" | sort -u | while IFS= read -r network; do
     [ -z "$network" ] && continue
     case "$network" in
       bridge|host|none)

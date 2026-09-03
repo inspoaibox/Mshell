@@ -47,6 +47,20 @@ export function registerServerMonitorHandlers() {
     }
   })
 
+  // Refresh metrics immediately
+  ipcMain.handle('serverMonitor:refresh', async (_event, sessionId: string) => {
+    try {
+      const metrics = await serverMonitorManager.refreshMetrics(sessionId)
+      if (!metrics) {
+        return { success: false, error: 'No metrics available' }
+      }
+      return { success: true, data: metrics }
+    } catch (error) {
+      console.error('Failed to refresh metrics:', error)
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
   // Get monitored sessions
   ipcMain.handle('serverMonitor:getMonitoredSessions', async () => {
     try {

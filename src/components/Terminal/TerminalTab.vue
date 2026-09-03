@@ -42,6 +42,7 @@
               <el-checkbox v-model="toolbarConfig.history" size="small">命令历史</el-checkbox>
               <el-checkbox v-model="toolbarConfig.monitor" size="small">监控</el-checkbox>
               <el-checkbox v-model="toolbarConfig.docker" size="small">Docker</el-checkbox>
+              <el-checkbox v-model="toolbarConfig.firewall" size="small">防火墙</el-checkbox>
               <el-checkbox v-model="toolbarConfig.file" size="small">文件管理</el-checkbox>
               <el-checkbox v-model="toolbarConfig.ai" size="small">AI 助手</el-checkbox>
               <el-checkbox v-model="toolbarConfig.quickCommand" size="small">快捷命令</el-checkbox>
@@ -278,6 +279,22 @@
             :class="{ 'is-active': showQuickCommand }"
           />
         </el-tooltip>
+
+        <!-- 防火墙管理 -->
+        <el-tooltip
+          v-if="toolbarConfig.firewall"
+          :content="showFirewallPanel ? '关闭防火墙' : '防火墙管理'"
+          placement="bottom"
+        >
+          <el-button
+            type="primary"
+            link
+            :icon="Lock"
+            @click="toggleToolDockPanel('firewall')"
+            class="action-btn"
+            :class="{ 'is-active': showFirewallPanel }"
+          />
+        </el-tooltip>
       </div>
     </div>
 
@@ -333,6 +350,7 @@
           'with-ai': showTerminalAI,
           'with-file': showFilePanel,
           'with-docker': showDockerPanel,
+          'with-firewall': showFirewallPanel,
           'with-snippet': showSnippetDialog,
           'with-quick-command': showQuickCommand,
           'has-terminal-background': hasEffectiveTerminalBackground
@@ -458,6 +476,11 @@
         <!-- 快捷命令面板 -->
         <div v-if="showQuickCommand" class="quick-command-sidebar">
           <QuickCommandPanel :connection-id="connectionId" @close="showQuickCommand = false" />
+        </div>
+
+        <!-- 防火墙管理面板 -->
+        <div v-if="showFirewallPanel" class="firewall-sidebar">
+          <FirewallPanel :connection-id="connectionId" @close="showFirewallPanel = false" />
         </div>
 
         <!-- 命令片段面板 -->
@@ -594,7 +617,8 @@ import {
   Setting,
   CopyDocument,
   Picture,
-  Box
+  Box,
+  Lock
 } from '@element-plus/icons-vue'
 import { ElMessage, ElNotification } from 'element-plus'
 import TerminalView from './TerminalView.vue'
@@ -603,6 +627,7 @@ import CommandAutocomplete from './CommandAutocomplete.vue'
 import CommandHistoryPanel from './CommandHistoryPanel.vue'
 import ServerMonitorPanel from '../Monitor/ServerMonitorPanel.vue'
 import DockerPanel from '../Docker/DockerPanel.vue'
+import FirewallPanel from '../Firewall/FirewallPanel.vue'
 import TerminalAIChatPanel from '../AI/TerminalAIChatPanel.vue'
 import TerminalFilePanel from './TerminalFilePanel.vue'
 import QuickCommandPanel from './QuickCommandPanel.vue'
@@ -616,6 +641,10 @@ import {
   shouldShowInlineSuggestion
 } from '@/utils/autocomplete/inline-suggest'
 import { isExplainQuery, parseExplainQuery } from '@/utils/command-intelligence'
+import {
+  buildTerminalExecutePayload,
+  buildTerminalInsertPayload
+} from '@/utils/terminal-command-execution'
 import {
   createSSHConnectOptions,
   runWithHostKeyConfirmation
@@ -701,11 +730,13 @@ const showTerminalAI = ref(false)
 const showFilePanel = ref(false)
 const showQuickCommand = ref(false)
 const showDockerPanel = ref(false)
+const showFirewallPanel = ref(false)
 const hasExternalToolPanels = computed(
   () =>
     showCommandHistory.value ||
     showMonitor.value ||
     showDockerPanel.value ||
+    showFirewallPanel.value ||
     showTerminalAI.value ||
     showFilePanel.value ||
     showQuickCommand.value ||
@@ -724,7 +755,8 @@ const toolbarConfig = ref({
   docker: true,
   file: true,
   ai: true,
-  quickCommand: true
+  quickCommand: true,
+  firewall: true
 })
 
 // 加载工具栏配置
@@ -802,13 +834,22 @@ const updateCurrentWorkingDir = () => {
   }
 }
 
-type ToolDockPanel = 'snippet' | 'history' | 'monitor' | 'docker' | 'file' | 'ai' | 'quickCommand'
+type ToolDockPanel =
+  | 'snippet'
+  | 'history'
+  | 'monitor'
+  | 'docker'
+  | 'firewall'
+  | 'file'
+  | 'ai'
+  | 'quickCommand'
 
 const closeToolDockPanels = () => {
   showSnippetDialog.value = false
   showCommandHistory.value = false
   showMonitor.value = false
   showDockerPanel.value = false
+  showFirewallPanel.value = false
   showFilePanel.value = false
   showTerminalAI.value = false
   showQuickCommand.value = false
@@ -824,6 +865,8 @@ const isToolDockPanelOpen = (panel: ToolDockPanel) => {
       return showMonitor.value
     case 'docker':
       return showDockerPanel.value
+    case 'firewall':
+      return showFirewallPanel.value
     case 'file':
       return showFilePanel.value
     case 'ai':
@@ -846,6 +889,9 @@ const openToolDockPanel = (panel: ToolDockPanel) => {
       break
     case 'docker':
       showDockerPanel.value = true
+      break
+    case 'firewall':
+      showFirewallPanel.value = true
       break
     case 'file':
       updateCurrentWorkingDir()
@@ -1477,6 +1523,9 @@ onMounted(async () => {
   // 加载工具栏配置
   loadToolbarConfig()
 
+  // 先注册重连监听，避免在检查已有连接或重连完成的窗口期里错过事件
+  setupReconnectListeners()
+
   // 获取 appStore 用于检查当前激活的标签页
   const appStore = useAppStore()
 
@@ -1653,8 +1702,6 @@ onMounted(async () => {
     console.log(
       `[TerminalTab] Connection ${props.connectionId} already exists or connecting, reusing existing connection`
     )
-    // 设置重连事件监听器（即使复用连接也需要监听）
-    setupReconnectListeners()
 
     // 复用连接时也需要加载设置
     loadCommandIntelligenceSettings()
@@ -1664,9 +1711,6 @@ onMounted(async () => {
 
   // 标记为正在连接
   globalConnectionState.set(props.connectionId, 'connecting')
-
-  // 设置重连事件监听器
-  setupReconnectListeners()
 
   try {
     // 获取 SSH 设置
@@ -1909,7 +1953,11 @@ const handleFindPrevious = () => {
 
 const handleCommandSelect = (command: string) => {
   // 直接发送到SSH，依赖SSH的回显来显示在终端上，避免重复显示
-  window.electronAPI.ssh.write(props.connectionId, command)
+  const inst = terminalManager.get(props.connectionId)
+  window.electronAPI.ssh.write(
+    props.connectionId,
+    buildTerminalInsertPayload(command, inst?.bracketedPasteEnabled ?? false)
+  )
 }
 
 const loadSnippets = async () => {
@@ -1984,9 +2032,12 @@ const executeSnippet = async () => {
 
   try {
     const command = finalCommand.value
+    const inst = terminalManager.get(props.connectionId)
 
-    // 发送命令到终端
-    await window.electronAPI.ssh.write(props.connectionId, command + '\n')
+    window.electronAPI.ssh.write(
+      props.connectionId,
+      buildTerminalExecutePayload(command, inst?.bracketedPasteEnabled ?? false)
+    )
 
     // 记录命令到历史
     await window.electronAPI.commandHistory?.add?.({
@@ -2298,7 +2349,12 @@ const handleAICommandExecute = async (command: string) => {
   // 使用 Ctrl+U + Ctrl+K 清除光标前后内容，然后发送新命令
   // \x15 = Ctrl+U (清除光标前的所有内容)
   // \x0b = Ctrl+K (清除光标后的所有内容)
-  window.electronAPI.ssh.write(props.connectionId, CLEAR_CURRENT_TERMINAL_LINE + command + '\r')
+  const inst = terminalManager.get(props.connectionId)
+  window.electronAPI.ssh.write(
+    props.connectionId,
+    CLEAR_CURRENT_TERMINAL_LINE +
+      buildTerminalExecutePayload(command, inst?.bracketedPasteEnabled ?? false)
+  )
 
   // 记录 AI 生成的命令到历史
   try {
@@ -2331,7 +2387,11 @@ const handleAICommandEdit = (command: string) => {
   if (!command) return
 
   // 使用 Ctrl+U + Ctrl+K 清除当前行输入，然后发送新命令（不执行）
-  window.electronAPI.ssh.write(props.connectionId, CLEAR_CURRENT_TERMINAL_LINE + command)
+  const inst = terminalManager.get(props.connectionId)
+  window.electronAPI.ssh.write(
+    props.connectionId,
+    CLEAR_CURRENT_TERMINAL_LINE + buildTerminalInsertPayload(command, inst?.bracketedPasteEnabled ?? false)
+  )
 
   // 更新命令缓冲
   if (terminalRef.value) {
@@ -2732,6 +2792,10 @@ defineExpose({
   flex: 1;
 }
 
+.terminal-content.with-firewall {
+  flex: 1;
+}
+
 .terminal-content.with-snippet {
   flex: 1;
 }
@@ -2775,6 +2839,7 @@ defineExpose({
 .terminal-external-dock :deep(.command-history-panel),
 .terminal-external-dock :deep(.server-monitor-panel),
 .terminal-external-dock :deep(.docker-panel),
+.terminal-external-dock :deep(.firewall-panel),
 .terminal-external-dock :deep(.terminal-ai-panel),
 .terminal-external-dock :deep(.terminal-file-panel),
 .terminal-external-dock :deep(.quick-command-panel) {
@@ -2788,6 +2853,7 @@ defineExpose({
 .terminal-external-dock :deep(.panel-header),
 .terminal-external-dock :deep(.monitor-header),
 .terminal-external-dock :deep(.docker-header),
+.terminal-external-dock :deep(.firewall-header),
 .terminal-external-dock :deep(.chat-header),
 .terminal-external-dock .sidebar-header {
   min-height: 44px !important;
@@ -2803,6 +2869,7 @@ defineExpose({
 .terminal-external-dock :deep(.panel-header h3),
 .terminal-external-dock :deep(.monitor-header h3),
 .terminal-external-dock :deep(.docker-header h3),
+.terminal-external-dock :deep(.firewall-header h3),
 .terminal-external-dock :deep(.chat-header .title),
 .terminal-external-dock .sidebar-header h3 {
   color: var(--text-primary) !important;

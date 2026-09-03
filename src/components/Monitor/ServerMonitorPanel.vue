@@ -10,13 +10,22 @@
         >
           {{ isMonitoring ? '⏸' : '▶' }}
         </button>
-        <button @click="refreshMetrics" class="btn-refresh" :disabled="!isMonitoring" title="刷新">
+        <button
+          @click="refreshMetrics"
+          class="btn-refresh"
+          :disabled="!isMonitoring || refreshing"
+          title="刷新"
+        >
           🔄
         </button>
         <button @click="$emit('close')" class="btn-close" title="关闭监控">
           ×
         </button>
       </div>
+    </div>
+
+    <div v-if="errorMessage" class="monitor-error">
+      {{ errorMessage }}
     </div>
 
     <div v-if="!isMonitoring" class="monitor-empty">
@@ -71,7 +80,7 @@
             :style="{ width: `${metrics.disk.usage}%`, background: getDiskColor(metrics.disk.usage) }"
           ></div>
         </div>
-        <div class="metric-info">{{ formatBytes(metrics.disk.free) }} 可用</div>
+        <div class="metric-info">{{ formatDiskInfo(metrics.disk) }}</div>
       </div>
 
       <!-- 系统信息 -->
@@ -146,6 +155,7 @@
           <thead>
             <tr>
               <th style="text-align: left;">容器</th>
+              <th style="text-align: right;">状态</th>
               <th style="text-align: right;">CPU</th>
               <th style="text-align: right;">MEM</th>
             </tr>
@@ -153,6 +163,7 @@
           <tbody>
             <tr v-for="container in metrics.dockerContainers" :key="container.name">
               <td class="truncate" :title="container.name">{{ container.name }}</td>
+              <td class="truncate" style="text-align: right;" :title="container.status">{{ container.status }}</td>
               <td style="text-align: right;">{{ container.cpu }}</td>
               <td style="text-align: right;">{{ container.memory }}</td>
             </tr>
@@ -180,7 +191,28 @@ defineEmits<{
 
 const isMonitoring = ref(false)
 const metrics = ref<any>(null)
+const errorMessage = ref('')
+const refreshing = ref(false)
 let metricsUnsubscribe: (() => void) | null = null
+let errorUnsubscribe: (() => void) | null = null
+
+const formatMonitorError = (error: any) => {
+  return error?.message || String(error || '监控采集失败')
+}
+
+const startMonitoring = async () => {
+  errorMessage.value = ''
+  const result = await window.electronAPI.serverMonitor?.start?.(props.sessionId, {
+    interval: 3000
+  })
+  if (result?.success === false) {
+    errorMessage.value = result.error || '监控启动失败'
+    isMonitoring.value = false
+    return
+  }
+
+  isMonitoring.value = true
+}
 
 // 切换监控
 const toggleMonitoring = async () => {
@@ -188,28 +220,41 @@ const toggleMonitoring = async () => {
     await window.electronAPI.serverMonitor?.stop?.(props.sessionId)
     isMonitoring.value = false
   } else {
-    await window.electronAPI.serverMonitor?.start?.(props.sessionId)
-    isMonitoring.value = true
+    await startMonitoring()
   }
 }
 
 // 刷新指标
 const refreshMetrics = async () => {
   if (!isMonitoring.value) return
+  refreshing.value = true
+  errorMessage.value = ''
   try {
-    const result = await window.electronAPI.serverMonitor?.getMetrics?.(props.sessionId)
+    const result = await window.electronAPI.serverMonitor?.refresh?.(props.sessionId)
     if (result?.success && result.data) {
       metrics.value = result.data
+    } else if (result?.success === false) {
+      errorMessage.value = result.error || '监控刷新失败'
     }
-  } catch (error) {
+  } catch (error: any) {
+    errorMessage.value = formatMonitorError(error)
     console.error('Failed to refresh metrics:', error)
+  } finally {
+    refreshing.value = false
   }
 }
 
 // 监听指标更新
 const handleMetricsUpdate = (sessionId: string, data: any) => {
   if (sessionId === props.sessionId) {
+    errorMessage.value = ''
     metrics.value = data
+  }
+}
+
+const handleMonitorError = (sessionId: string, error: any) => {
+  if (sessionId === props.sessionId) {
+    errorMessage.value = formatMonitorError(error)
   }
 }
 
@@ -224,6 +269,17 @@ const formatBytes = (bytes: number): string => {
 // 格式化速度
 const formatSpeed = (bytesPerSecond: number): string => {
   return `${formatBytes(bytesPerSecond)}/s`
+}
+
+const formatDiskInfo = (disk: any): string => {
+  const filesystems = Array.isArray(disk?.filesystems) ? disk.filesystems : []
+  if (filesystems.length === 0) {
+    return `${formatBytes(disk.free)} 可用`
+  }
+
+  const busiest = [...filesystems].sort((a, b) => (b.usage || 0) - (a.usage || 0))[0]
+  const mountInfo = busiest?.mount ? ` · 最高 ${busiest.mount} ${Number(busiest.usage || 0).toFixed(0)}%` : ''
+  return `${formatBytes(disk.free)} 可用 · ${filesystems.length} 挂载${mountInfo}`
 }
 
 // 格式化运行时间
@@ -263,6 +319,9 @@ const getDiskColor = (usage: number): string => {
 onMounted(() => {
   const unsub = window.electronAPI.serverMonitor?.onMetrics?.(handleMetricsUpdate)
   if (unsub) metricsUnsubscribe = unsub
+  const unsubError = window.electronAPI.serverMonitor?.onError?.(handleMonitorError)
+  if (unsubError) errorUnsubscribe = unsubError
+  void startMonitoring()
 })
 
 onUnmounted(() => {
@@ -272,6 +331,10 @@ onUnmounted(() => {
   if (metricsUnsubscribe) {
     metricsUnsubscribe()
     metricsUnsubscribe = null
+  }
+  if (errorUnsubscribe) {
+    errorUnsubscribe()
+    errorUnsubscribe = null
   }
 })
 </script>
@@ -342,6 +405,17 @@ onUnmounted(() => {
   background: var(--error-color);
   border-color: var(--error-color);
   color: white;
+}
+
+.monitor-error {
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--error-color);
+  font-size: var(--text-xs);
+  line-height: 1.45;
 }
 
 .monitor-empty,

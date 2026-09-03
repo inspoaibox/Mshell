@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
+import { randomBytes } from 'node:crypto'
 import type { TerminalBackgroundConfig } from '../../src/types/terminal-background'
 
 // 快捷键配置
@@ -18,6 +19,13 @@ export interface TerminalShortcutConfig {
   alt: boolean
   shift: boolean
   description: string
+}
+
+export interface AgentMcpSettings {
+  enabled: boolean
+  host: '127.0.0.1'
+  port: number
+  token: string
 }
 
 export interface AppSettings {
@@ -70,6 +78,7 @@ export interface AppSettings {
     autoCheck: boolean
     autoDownload: boolean
   }
+  agentMcp: AgentMcpSettings
   // 全局快捷键配置
   shortcuts?: Record<string, ShortcutConfig>
   // 终端内快捷键配置
@@ -143,6 +152,12 @@ class AppSettingsManager {
       updates: {
         autoCheck: true,
         autoDownload: false
+      },
+      agentMcp: {
+        enabled: false,
+        host: '127.0.0.1',
+        port: 47821,
+        token: randomBytes(32).toString('base64url')
       }
     }
   }
@@ -169,6 +184,25 @@ class AppSettingsManager {
     return this.getSystemDownloadsPath()
   }
 
+  private normalizeAgentMcpSettings(
+    value?: Partial<AgentMcpSettings> | null
+  ): AgentMcpSettings {
+    const port =
+      typeof value?.port === 'number' && Number.isInteger(value.port) && value.port >= 1024 && value.port <= 65535
+        ? value.port
+        : 47821
+
+    return {
+      enabled: value?.enabled === true,
+      host: '127.0.0.1',
+      port,
+      token:
+        typeof value?.token === 'string' && value.token.trim().length >= 32
+          ? value.token
+          : randomBytes(32).toString('base64url')
+    }
+  }
+
   private load(): void {
     try {
       if (fs.existsSync(this.settingsFile)) {
@@ -190,6 +224,10 @@ class AppSettingsManager {
           ssh: { ...this.settings.ssh, ...loaded.ssh },
           security: { ...this.settings.security, ...loaded.security },
           updates: { ...this.settings.updates, ...loaded.updates },
+          agentMcp: this.normalizeAgentMcpSettings({
+            ...this.settings.agentMcp,
+            ...(loaded.agentMcp || {})
+          }),
           shortcuts: loaded.shortcuts ?? this.settings.shortcuts,
           terminalShortcuts: loaded.terminalShortcuts ?? this.settings.terminalShortcuts
         }
@@ -232,6 +270,10 @@ class AppSettingsManager {
       ssh: { ...this.settings.ssh, ...updates.ssh },
       security: { ...this.settings.security, ...updates.security },
       updates: { ...this.settings.updates, ...updates.updates },
+      agentMcp: this.normalizeAgentMcpSettings({
+        ...this.settings.agentMcp,
+        ...(updates.agentMcp || {})
+      }),
       shortcuts: updates.shortcuts !== undefined ? updates.shortcuts : this.settings.shortcuts,
       terminalShortcuts:
         updates.terminalShortcuts !== undefined

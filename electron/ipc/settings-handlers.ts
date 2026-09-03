@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, app } from 'electron'
 import { appSettingsManager, AppSettings } from '../utils/app-settings'
 import { auditLogManager, AuditAction } from '../managers/AuditLogManager'
 import { sessionManager } from '../managers/SessionManager'
+import { mcpServerManager } from '../managers/MCPServerManager'
 
 // 缓存上一次的开机启动设置值，避免重复调用
 let lastStartWithSystem: boolean | undefined = undefined
@@ -16,6 +17,15 @@ export function registerSettingsHandlers() {
     await appSettingsManager.updateSettings(updates)
     const settings = appSettingsManager.getSettings()
 
+    if (updates.agentMcp !== undefined) {
+      const mcpResult = await mcpServerManager.applySettings(settings.agentMcp)
+      if (!mcpResult.success) {
+        await appSettingsManager.updateSettings({ agentMcp: previousSettings.agentMcp })
+        await mcpServerManager.applySettings(previousSettings.agentMcp)
+        return mcpResult
+      }
+    }
+
     if (
       previousSettings.security.savePasswords !== false &&
       settings.security.savePasswords === false
@@ -23,10 +33,20 @@ export function registerSettingsHandlers() {
       await sessionManager.removeSavedSecrets()
     }
 
+    const auditUpdates = updates.agentMcp
+      ? {
+          ...updates,
+          agentMcp: {
+            ...updates.agentMcp,
+            token: updates.agentMcp.token ? '***REDACTED***' : updates.agentMcp.token
+          }
+        }
+      : updates
+
     if (settings.general.enableAuditLog !== false) {
       auditLogManager.log(AuditAction.SETTINGS_UPDATE, {
         resource: 'app-settings',
-        details: { updates },
+        details: { updates: auditUpdates },
         success: true
       })
     }
@@ -54,8 +74,9 @@ export function registerSettingsHandlers() {
 
   ipcMain.handle('settings:reset', async () => {
     await appSettingsManager.resetToDefaults()
-    
+
     const settings = appSettingsManager.getSettings()
+    await mcpServerManager.applySettings(settings.agentMcp)
     if (settings.general.enableAuditLog !== false) {
       auditLogManager.log(AuditAction.SETTINGS_UPDATE, {
         resource: 'app-settings',

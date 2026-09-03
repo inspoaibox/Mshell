@@ -45,6 +45,9 @@ export enum AuditAction {
   
   // 命令执行
   COMMAND_EXECUTE = 'command.execute',
+
+  // Agent/MCP 工具调用
+  MCP_TOOL_CALL = 'mcp.tool_call',
   
   // 设置更改
   SETTINGS_UPDATE = 'settings.update',

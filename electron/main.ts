@@ -27,6 +27,7 @@ import { registerSyncHandlers } from './ipc/sync-handlers'
 import { registerQuickCommandHandlers } from './ipc/quick-command-handlers'
 import { registerLazyScriptHandlers } from './ipc/lazy-script-handlers'
 import { registerDockerHandlers } from './ipc/docker-handlers'
+import { registerMCPHandlers } from './ipc/mcp-handlers'
 import {
   handleTerminalBackgroundProtocol,
   registerTerminalBackgroundHandlers,
@@ -41,6 +42,7 @@ import { sessionLockManager } from './managers/SessionLockManager'
 import { aiManager } from './managers/AIManager'
 import { updateManager } from './managers/UpdateManager'
 import { auditLogManager } from './managers/AuditLogManager'
+import { mcpServerManager } from './managers/MCPServerManager'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -170,6 +172,7 @@ registerQuickCommandHandlers()
 registerLazyScriptHandlers()
 registerDockerHandlers()
 registerTerminalBackgroundHandlers()
+registerMCPHandlers()
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -445,6 +448,16 @@ if (gotSingleInstanceLock && !isInstallerQuitRequest()) {
     // 初始化 AI 管理器
     await aiManager.initialize()
 
+    // 初始化本机 Agent/MCP 服务（默认关闭）
+    const mcpResult = await mcpServerManager.initialize()
+    if (!mcpResult.success) {
+      logger.logError(
+        'system',
+        'MCP 服务初始化失败',
+        new Error(mcpResult.error || 'Unknown MCP error')
+      )
+    }
+
     // 应用启动时打开设置
     const settings = appSettingsManager.getSettings()
     app.setLoginItemSettings({
@@ -502,6 +515,7 @@ app.on('before-quit', () => {
   backupManager.cleanup()
   syncManager.cleanup()
   aiManager.cleanup()
+  void mcpServerManager.stop()
 })
 
 function getTrayIconPaths() {

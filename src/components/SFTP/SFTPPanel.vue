@@ -1015,6 +1015,53 @@ const markTransfersFailedByIds = (transferIds: string[], error?: string) => {
   })
 }
 
+const getPathFileName = (path: string) => path.split(/[/\\]/).filter(Boolean).pop() || path
+
+const ensureTransferFromRecord = (taskId: string, record: TransferRecord) => {
+  if (!record || !taskId) return
+
+  const existing = transfers.value.find((transfer) => transfer.id === taskId)
+  const transferred = normalizeByteCount(record.transferred)
+  const total = normalizeByteCount(record.totalSize)
+  const progress = normalizeProgressPercentage(calculateProgressPercentage(transferred, total))
+  const name =
+    record.type === 'upload'
+      ? getPathFileName(record.localPath)
+      : getPathFileName(record.remotePath)
+
+  if (existing) {
+    existing.status = record.status as Transfer['status']
+    existing.transferred = transferred
+    existing.total = total
+    existing.progress = progress
+    existing.localPath = record.localPath
+    existing.remotePath = record.remotePath
+    existing.targetPath = record.type === 'upload' ? record.remotePath : record.localPath
+    existing.lastProgressAt = Date.now()
+    existing.stalled = false
+    return
+  }
+
+  transfers.value.unshift({
+    id: taskId,
+    name,
+    type: record.type,
+    status: record.status as Transfer['status'],
+    progress,
+    speed: 0,
+    eta: 0,
+    transferred,
+    total,
+    lastProgressAt: Date.now(),
+    stalled: false,
+    targetPath: record.type === 'upload' ? record.remotePath : record.localPath,
+    localPath: record.localPath,
+    remotePath: record.remotePath,
+    priority: 3,
+    startTime: record.createdAt ? new Date(record.createdAt) : new Date()
+  })
+}
+
 const applyTransferBatchResults = (
   result: Partial<TransferBatchResult> | undefined,
   items: TransferBatchItem[],
@@ -1369,6 +1416,7 @@ onMounted(async () => {
     await applyDefaultLocalPath(true)
 
     await loadSessions()
+    await loadActiveTransferRecords()
     await loadIncompleteTransfers()
     loadTransferHistory()
   } catch (error) {
@@ -1377,6 +1425,10 @@ onMounted(async () => {
   }
 
   // 监听传输进度事件（保存取消函数以便清理）
+  const unsubStarted = window.electronAPI.sftp.onStarted((taskId: string, record: TransferRecord) => {
+    ensureTransferFromRecord(taskId, record)
+  })
+
   const unsubProgress = window.electronAPI.sftp.onProgress((taskId: string, progress: any) => {
     const transfer = transfers.value.find((t) => t.id === taskId)
     if (transfer && transfer.status === 'active') {
@@ -1407,7 +1459,10 @@ onMounted(async () => {
   })
 
   // 保存清理函数
-  sftpListenerCleanups.push(unsubProgress, unsubComplete, unsubError)
+  sftpListenerCleanups.push(unsubStarted, unsubProgress, unsubComplete, unsubError)
+  loadActiveTransferRecords().catch((error) => {
+    console.error('[SFTPPanel] Failed to refresh active transfers after listener setup:', error)
+  })
 
   const transferWatchdog = window.setInterval(() => {
     const now = Date.now()
@@ -1494,6 +1549,7 @@ const connectSession = async (session: SessionConfig) => {
     await loadFirstAccessibleRemoteDirectory([remotePath.value, '/', '/tmp'])
 
     // 加载未完成的传输
+    await loadActiveTransferRecords()
     await loadIncompleteTransfers()
 
     // 如果有未完成的传输，提示用户
@@ -2797,6 +2853,19 @@ const loadIncompleteTransfers = async () => {
     }
   } catch (error: any) {
     console.error('Failed to load incomplete transfers:', error)
+  }
+}
+
+const loadActiveTransferRecords = async () => {
+  try {
+    const result = await window.electronAPI.sftp.getAllTransferRecords()
+    if (!result.success || !result.data) return
+
+    result.data
+      .filter((record: TransferRecord) => record.status === 'active')
+      .forEach((record: TransferRecord) => ensureTransferFromRecord(getTransferRecordId(record), record))
+  } catch (error: any) {
+    console.error('Failed to load active transfers:', error)
   }
 }
 

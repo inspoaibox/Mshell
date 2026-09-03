@@ -61,6 +61,13 @@ class TransferPausedError extends Error {
   }
 }
 
+class TransferCancelledError extends Error {
+  constructor(public readonly taskId: string) {
+    super(`Transfer cancelled: ${taskId}`)
+    this.name = 'TransferCancelledError'
+  }
+}
+
 const RESUMABLE_TRANSFER_STATUSES = new Set<TransferRecord['status']>([
   'pending',
   'active',
@@ -74,6 +81,8 @@ const RESUMABLE_TRANSFER_STATUSES = new Set<TransferRecord['status']>([
 export class SFTPManager extends EventEmitter {
   private sftpClients: Map<string, any>
   private sshClients: Map<string, Client>
+  private sftpInitGenerations: Map<string, number>
+  private pendingSftpInitializations: Map<string, { client: Client; promise: Promise<void> }>
   private transferTasks: Map<string, TransferTask>
   // 暂停控制：存储每个任务的中止控制器，用于真正中断流传输
   private pauseControllers: Map<
@@ -85,6 +94,8 @@ export class SFTPManager extends EventEmitter {
     super()
     this.sftpClients = new Map()
     this.sshClients = new Map()
+    this.sftpInitGenerations = new Map()
+    this.pendingSftpInitializations = new Map()
     this.transferTasks = new Map()
     this.pauseControllers = new Map()
 
@@ -140,25 +151,82 @@ export class SFTPManager extends EventEmitter {
    * 初始化 SFTP 会话
    */
   async initSFTP(connectionId: string, sshClient: Client): Promise<void> {
-    try {
-      return new Promise((resolve, reject) => {
-        sshClient.sftp((err, sftp) => {
-          if (err) {
-            const appError = ErrorHandler.createSFTPError(
-              `Failed to initialize SFTP: ${err.message}`
-            )
-            reject(appError)
-            return
-          }
+    if (this.hasSFTP(connectionId, sshClient)) {
+      return
+    }
 
-          this.sftpClients.set(connectionId, sftp)
-          this.sshClients.set(connectionId, sshClient)
+    const pending = this.pendingSftpInitializations.get(connectionId)
+    if (pending?.client === sshClient) {
+      return pending.promise
+    }
+
+    // SSH automatic reconnect replaces its Client instance. A channel attached to
+    // the previous client cannot service the new connection and must be recreated.
+    if (this.hasSFTP(connectionId)) {
+      this.closeSFTP(connectionId)
+    }
+
+    const generation = (this.sftpInitGenerations.get(connectionId) || 0) + 1
+    this.sftpInitGenerations.set(connectionId, generation)
+
+    const promise = new Promise<void>((resolve, reject) => {
+      sshClient.sftp((err, sftp) => {
+        if (err) {
+          const appError = ErrorHandler.createSFTPError(`Failed to initialize SFTP: ${err.message}`)
+          reject(appError)
+          return
+        }
+
+        if (this.sftpInitGenerations.get(connectionId) !== generation) {
+          try {
+            sftp.end()
+          } catch {}
           resolve()
-        })
+          return
+        }
+
+        this.sftpClients.set(connectionId, sftp)
+        this.sshClients.set(connectionId, sshClient)
+        resolve()
       })
+    })
+
+    this.pendingSftpInitializations.set(connectionId, { client: sshClient, promise })
+    try {
+      await promise
     } catch (error) {
       throw ErrorHandler.handle(error as Error, `SFTP Init ${connectionId}`)
+    } finally {
+      const current = this.pendingSftpInitializations.get(connectionId)
+      if (current?.client === sshClient) {
+        this.pendingSftpInitializations.delete(connectionId)
+      }
     }
+  }
+
+  hasSFTP(connectionId: string, sshClient?: Client): boolean {
+    if (!this.sftpClients.has(connectionId)) {
+      return false
+    }
+
+    return !sshClient || this.sshClients.get(connectionId) === sshClient
+  }
+
+  async getFileSize(connectionId: string, filePath: string): Promise<number> {
+    const sftp = this.sftpClients.get(connectionId)
+    if (!sftp) {
+      throw ErrorHandler.createSFTPError(`SFTP client not found for connection: ${connectionId}`)
+    }
+
+    return new Promise((resolve, reject) => {
+      sftp.stat(filePath, (err: Error, stats: { size: number }) => {
+        if (err) {
+          reject(ErrorHandler.handle(err, `SFTP Stat ${filePath}`))
+          return
+        }
+        resolve(Number(stats.size) || 0)
+      })
+    })
   }
 
   /**
@@ -259,7 +327,10 @@ export class SFTPManager extends EventEmitter {
         status: 'active',
         transferred: startPosition
       })
+      record = transferRecordManager.getRecord(taskId) || record
     }
+
+    this.emit('started', taskId, record)
 
     if (resumable && record && startPosition >= totalSize && totalSize > 0) {
       await transferRecordManager
@@ -292,15 +363,7 @@ export class SFTPManager extends EventEmitter {
       )
     }
 
-    return this._uploadWithFastPut(
-      sftp,
-      localPath,
-      remotePath,
-      taskId,
-      task,
-      totalSize,
-      onProgress
-    )
+    return this._uploadWithFastPut(sftp, localPath, remotePath, taskId, task, totalSize, onProgress)
   }
 
   /**
@@ -473,6 +536,10 @@ export class SFTPManager extends EventEmitter {
           reject(new TransferPausedError(taskId))
           return
         }
+        if (task.status === 'cancelled') {
+          reject(new TransferCancelledError(taskId))
+          return
+        }
         task.status = 'completed'
         task.progress.percentage = 100
         await transferRecordManager
@@ -491,6 +558,10 @@ export class SFTPManager extends EventEmitter {
           reject(new TransferPausedError(taskId))
           return
         }
+        if (task.status === 'cancelled') {
+          reject(new TransferCancelledError(taskId))
+          return
+        }
         task.status = 'failed'
         task.error = err.message
         await transferRecordManager
@@ -507,6 +578,10 @@ export class SFTPManager extends EventEmitter {
         }
         if (task.status === 'paused') {
           reject(new TransferPausedError(taskId))
+          return
+        }
+        if (task.status === 'cancelled') {
+          reject(new TransferCancelledError(taskId))
           return
         }
         task.status = 'failed'
@@ -578,7 +653,10 @@ export class SFTPManager extends EventEmitter {
         status: 'active',
         transferred: startPosition
       })
+      record = transferRecordManager.getRecord(taskId) || record
     }
+
+    this.emit('started', taskId, record)
 
     if (resumable && record && startPosition >= totalSize && totalSize > 0) {
       await transferRecordManager
@@ -645,7 +723,6 @@ export class SFTPManager extends EventEmitter {
             .catch(console.error)
           lastRecordUpdate = now
         }
-
       }
 
       sftp.fastGet(
@@ -756,6 +833,10 @@ export class SFTPManager extends EventEmitter {
           reject(new TransferPausedError(taskId))
           return
         }
+        if (task.status === 'cancelled') {
+          reject(new TransferCancelledError(taskId))
+          return
+        }
         task.status = 'completed'
         task.progress.percentage = 100
         await transferRecordManager
@@ -774,6 +855,10 @@ export class SFTPManager extends EventEmitter {
           reject(new TransferPausedError(taskId))
           return
         }
+        if (task.status === 'cancelled') {
+          reject(new TransferCancelledError(taskId))
+          return
+        }
         task.status = 'failed'
         task.error = err.message
         await transferRecordManager
@@ -790,6 +875,10 @@ export class SFTPManager extends EventEmitter {
         }
         if (task.status === 'paused') {
           reject(new TransferPausedError(taskId))
+          return
+        }
+        if (task.status === 'cancelled') {
+          reject(new TransferCancelledError(taskId))
           return
         }
         task.status = 'failed'
@@ -946,10 +1035,26 @@ export class SFTPManager extends EventEmitter {
   /**
    * 取消传输任务
    */
-  cancelTask(taskId: string): void {
+  async cancelTask(taskId: string): Promise<void> {
     const task = this.transferTasks.get(taskId)
     if (task) {
       task.status = 'cancelled'
+      const controller = this.pauseControllers.get(taskId)
+      if (controller) {
+        controller.readStream?.pause?.()
+        controller.readStream?.unpipe?.()
+        controller.readStream?.destroy?.()
+        controller.writeStream?.destroy?.()
+        this.pauseControllers.delete(taskId)
+      }
+
+      await transferRecordManager
+        .updateRecord(taskId, {
+          status: 'cancelled',
+          transferred: task.progress.transferred
+        })
+        .catch(console.error)
+
       this.emit('cancelled', taskId)
     }
   }
@@ -1084,6 +1189,10 @@ export class SFTPManager extends EventEmitter {
    * 关闭 SFTP 连接
    */
   closeSFTP(connectionId: string): void {
+    this.sftpInitGenerations.set(
+      connectionId,
+      (this.sftpInitGenerations.get(connectionId) || 0) + 1
+    )
     const sftp = this.sftpClients.get(connectionId)
     if (sftp) {
       sftp.end()
@@ -1146,6 +1255,9 @@ export class SFTPManager extends EventEmitter {
           results.paused.push(file.localPath)
           return
         }
+        if (error instanceof TransferCancelledError) {
+          return
+        }
         results.failed.push({
           path: file.localPath,
           error: error.message
@@ -1190,6 +1302,9 @@ export class SFTPManager extends EventEmitter {
       } catch (error: any) {
         if (error instanceof TransferPausedError) {
           results.paused.push(file.remotePath)
+          return
+        }
+        if (error instanceof TransferCancelledError) {
           return
         }
         results.failed.push({
@@ -1337,6 +1452,60 @@ export class SFTPManager extends EventEmitter {
       })
     } catch (error) {
       throw ErrorHandler.handle(error as Error, `SFTP Read File ${filePath}`)
+    }
+  }
+
+  /**
+   * 读取有大小上限的文本文件，避免远端文件在读取期间增长导致内存占用失控。
+   */
+  async readFileLimited(connectionId: string, filePath: string, maxBytes: number): Promise<string> {
+    try {
+      const sftp = this.sftpClients.get(connectionId)
+      if (!sftp) {
+        throw ErrorHandler.createSFTPError(`SFTP client not found for connection: ${connectionId}`)
+      }
+
+      return new Promise((resolve, reject) => {
+        const chunks: Buffer[] = []
+        const readStream = sftp.createReadStream(filePath)
+        let totalBytes = 0
+        let settled = false
+
+        const fail = (error: Error) => {
+          if (settled) return
+          settled = true
+          try {
+            readStream.destroy()
+          } catch {}
+          reject(error)
+        }
+
+        readStream.on('data', (chunk: Buffer) => {
+          if (settled) return
+
+          totalBytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk)
+          if (totalBytes > maxBytes) {
+            fail(new Error(`文件读取超过上限 ${maxBytes} 字节`))
+            return
+          }
+
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+        })
+
+        readStream.on('end', () => {
+          if (settled) return
+          settled = true
+          resolve(Buffer.concat(chunks).toString('utf-8'))
+        })
+
+        readStream.on('error', (err: Error) => {
+          if (settled) return
+          settled = true
+          reject(ErrorHandler.handle(err, `Read Limited File ${filePath}`))
+        })
+      })
+    } catch (error) {
+      throw ErrorHandler.handle(error as Error, `SFTP Read Limited File ${filePath}`)
     }
   }
 

@@ -72,6 +72,13 @@ export function registerSFTPHandlers() {
       if (!connection) {
         return { success: false, error: 'Connection not found', userMessage: '连接不存在' }
       }
+      if (connection.status !== 'connected') {
+        return {
+          success: false,
+          error: 'Connection is not ready',
+          userMessage: 'SSH 连接当前不可用'
+        }
+      }
 
       await sftpManager.initSFTP(connectionId, connection.client)
       return { success: true }
@@ -98,10 +105,10 @@ export function registerSFTPHandlers() {
       connectionId: string,
       localPath: string,
       remotePath: string,
-      options?: { resumeFromExisting?: boolean }
+      options?: { resumeFromExisting?: boolean; taskId?: string }
     ) => {
       try {
-        const taskId = uuidv4()
+        const taskId = options?.taskId || uuidv4()
         await sftpManager.uploadFile(
           connectionId,
           localPath,
@@ -111,7 +118,7 @@ export function registerSFTPHandlers() {
           true,
           options?.resumeFromExisting === true
         )
-        
+
         // 记录审计日志
         auditLogManager.log(AuditAction.FILE_UPLOAD, {
           sessionId: connectionId,
@@ -119,7 +126,7 @@ export function registerSFTPHandlers() {
           details: { localPath, remotePath },
           success: true
         })
-        
+
         return { success: true, taskId }
       } catch (error: any) {
         auditLogManager.log(AuditAction.FILE_UPLOAD, {
@@ -142,10 +149,10 @@ export function registerSFTPHandlers() {
       connectionId: string,
       remotePath: string,
       localPath: string,
-      options?: { resumeFromExisting?: boolean }
+      options?: { resumeFromExisting?: boolean; taskId?: string }
     ) => {
       try {
-        const taskId = uuidv4()
+        const taskId = options?.taskId || uuidv4()
         await sftpManager.downloadFile(
           connectionId,
           remotePath,
@@ -155,7 +162,7 @@ export function registerSFTPHandlers() {
           true,
           options?.resumeFromExisting === true
         )
-        
+
         // 记录审计日志
         auditLogManager.log(AuditAction.FILE_DOWNLOAD, {
           sessionId: connectionId,
@@ -163,7 +170,7 @@ export function registerSFTPHandlers() {
           details: { localPath, remotePath },
           success: true
         })
-        
+
         return { success: true, taskId }
       } catch (error: any) {
         auditLogManager.log(AuditAction.FILE_DOWNLOAD, {
@@ -192,14 +199,14 @@ export function registerSFTPHandlers() {
   ipcMain.handle('sftp:deleteFile', async (_event, connectionId: string, path: string) => {
     try {
       await sftpManager.deleteFile(connectionId, path)
-      
+
       // 记录审计日志
       auditLogManager.log(AuditAction.FILE_DELETE, {
         sessionId: connectionId,
         resource: path,
         success: true
       })
-      
+
       return { success: true }
     } catch (error: any) {
       auditLogManager.log(AuditAction.FILE_DELETE, {
@@ -218,7 +225,7 @@ export function registerSFTPHandlers() {
     async (_event, connectionId: string, oldPath: string, newPath: string) => {
       try {
         await sftpManager.renameFile(connectionId, oldPath, newPath)
-        
+
         // 记录审计日志
         auditLogManager.log(AuditAction.FILE_RENAME, {
           sessionId: connectionId,
@@ -226,7 +233,7 @@ export function registerSFTPHandlers() {
           details: { oldPath, newPath },
           success: true
         })
-        
+
         return { success: true }
       } catch (error: any) {
         auditLogManager.log(AuditAction.FILE_RENAME, {
@@ -263,7 +270,7 @@ export function registerSFTPHandlers() {
   // 取消传输任务
   ipcMain.handle('sftp:cancelTask', async (_event, taskId: string) => {
     try {
-      sftpManager.cancelTask(taskId)
+      await sftpManager.cancelTask(taskId)
       return { success: true }
     } catch (error: any) {
       return { success: false, error: error.message }
@@ -390,17 +397,14 @@ export function registerSFTPHandlers() {
   )
 
   // 批量删除文件
-  ipcMain.handle(
-    'sftp:deleteFiles',
-    async (_event, connectionId: string, filePaths: string[]) => {
-      try {
-        const results = await sftpManager.deleteFiles(connectionId, filePaths)
-        return { success: true, results }
-      } catch (error: any) {
-        return { success: false, error: error.message }
-      }
+  ipcMain.handle('sftp:deleteFiles', async (_event, connectionId: string, filePaths: string[]) => {
+    try {
+      const results = await sftpManager.deleteFiles(connectionId, filePaths)
+      return { success: true, results }
+    } catch (error: any) {
+      return { success: false, error: error.message }
     }
-  )
+  })
 
   // 批量删除目录
   ipcMain.handle(
@@ -437,14 +441,17 @@ export function registerSFTPHandlers() {
   })
 
   // 写入文件内容
-  ipcMain.handle('sftp:writeFile', async (_event, connectionId: string, filePath: string, content: string) => {
-    try {
-      await sftpManager.writeFile(connectionId, filePath, content)
-      return { success: true }
-    } catch (error: any) {
-      return { success: false, error: error.message }
+  ipcMain.handle(
+    'sftp:writeFile',
+    async (_event, connectionId: string, filePath: string, content: string) => {
+      try {
+        await sftpManager.writeFile(connectionId, filePath, content)
+        return { success: true }
+      } catch (error: any) {
+        return { success: false, error: error.message }
+      }
     }
-  })
+  )
 
   // 创建空文件
   ipcMain.handle('sftp:createFile', async (_event, connectionId: string, filePath: string) => {
@@ -457,14 +464,17 @@ export function registerSFTPHandlers() {
   })
 
   // 复制文件
-  ipcMain.handle('sftp:copyFile', async (_event, connectionId: string, sourcePath: string, targetPath: string) => {
-    try {
-      await sftpManager.copyFile(connectionId, sourcePath, targetPath)
-      return { success: true }
-    } catch (error: any) {
-      return { success: false, error: error.message }
+  ipcMain.handle(
+    'sftp:copyFile',
+    async (_event, connectionId: string, sourcePath: string, targetPath: string) => {
+      try {
+        await sftpManager.copyFile(connectionId, sourcePath, targetPath)
+        return { success: true }
+      } catch (error: any) {
+        return { success: false, error: error.message }
+      }
     }
-  })
+  )
 
   // 修改权限（使用 chmod 别名）
   ipcMain.handle('sftp:chmod', async (_event, connectionId: string, path: string, mode: number) => {
@@ -477,39 +487,49 @@ export function registerSFTPHandlers() {
   })
 
   // 拖曳下载 - 先下载到临时目录，然后启动系统拖曳
-  ipcMain.handle('sftp:startDrag', async (event, connectionId: string, remotePath: string, fileName: string) => {
-    try {
-      const { app, nativeImage } = await import('electron')
-      const path = await import('path')
-      const fs = await import('fs')
-      
-      // 创建临时目录
-      const tempDir = path.join(app.getPath('temp'), 'mshell-drag')
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true })
+  ipcMain.handle(
+    'sftp:startDrag',
+    async (event, connectionId: string, remotePath: string, fileName: string) => {
+      try {
+        const { app, nativeImage } = await import('electron')
+        const path = await import('path')
+        const fs = await import('fs')
+
+        // 创建临时目录
+        const tempDir = path.join(app.getPath('temp'), 'mshell-drag')
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true })
+        }
+
+        const localPath = path.join(tempDir, fileName)
+
+        // 下载文件到临时目录
+        await sftpManager.downloadFile(connectionId, remotePath, localPath, `drag-${Date.now()}`)
+
+        // 创建一个简单的拖曳图标（使用空图标，让系统使用默认图标）
+        const icon = nativeImage.createEmpty()
+
+        // 启动系统拖曳
+        event.sender.startDrag({
+          file: localPath,
+          icon: icon
+        })
+
+        return { success: true, localPath }
+      } catch (error: any) {
+        return { success: false, error: error.message }
       }
-      
-      const localPath = path.join(tempDir, fileName)
-      
-      // 下载文件到临时目录
-      await sftpManager.downloadFile(connectionId, remotePath, localPath, `drag-${Date.now()}`)
-      
-      // 创建一个简单的拖曳图标（使用空图标，让系统使用默认图标）
-      const icon = nativeImage.createEmpty()
-      
-      // 启动系统拖曳
-      event.sender.startDrag({
-        file: localPath,
-        icon: icon
-      })
-      
-      return { success: true, localPath }
-    } catch (error: any) {
-      return { success: false, error: error.message }
     }
-  })
+  )
 
   // 转发 SFTP 事件到渲染进程
+  sftpManager.on('started', (taskId: string, record: any) => {
+    const windows = BrowserWindow.getAllWindows()
+    windows.forEach((win) => {
+      win.webContents.send('sftp:started', taskId, record)
+    })
+  })
+
   sftpManager.on('progress', (taskId: string, progress: any) => {
     const windows = BrowserWindow.getAllWindows()
     windows.forEach((win) => {
@@ -532,107 +552,142 @@ export function registerSFTPHandlers() {
   })
 
   // 远程压缩单个文件或目录
-  ipcMain.handle('sftp:compress', async (_event, connectionId: string, sourcePath: string, archivePath: string) => {
-    try {
-      if (!sourcePath || !archivePath) {
-        return { success: false, error: '参数不完整' }
-      }
-      const connection = sshConnectionManager.getConnection(connectionId)
-      if (!connection) {
-        return { success: false, error: '连接不存在' }
-      }
+  ipcMain.handle(
+    'sftp:compress',
+    async (_event, connectionId: string, sourcePath: string, archivePath: string) => {
+      try {
+        if (!sourcePath || !archivePath) {
+          return { success: false, error: '参数不完整' }
+        }
+        const connection = sshConnectionManager.getConnection(connectionId)
+        if (!connection) {
+          return { success: false, error: '连接不存在' }
+        }
 
-      // 使用单引号包裹路径，并转义路径中的单引号（' -> '\''）
-      const esc = (p: string) => `'${p.replace(/'/g, "'\\''")}'`
-      const ext = archivePath.toLowerCase()
-      let command: string
+        // 使用单引号包裹路径，并转义路径中的单引号（' -> '\''）
+        const esc = (p: string) => `'${p.replace(/'/g, "'\\''")}'`
+        const ext = archivePath.toLowerCase()
+        let command: string
 
-      if (ext.endsWith('.zip')) {
-        command = `cd $(dirname ${esc(sourcePath)}) && zip -r ${esc(archivePath)} $(basename ${esc(sourcePath)})`
-      } else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) {
-        command = `tar -czf ${esc(archivePath)} -C $(dirname ${esc(sourcePath)}) $(basename ${esc(sourcePath)})`
-      } else if (ext.endsWith('.tar')) {
-        command = `tar -cf ${esc(archivePath)} -C $(dirname ${esc(sourcePath)}) $(basename ${esc(sourcePath)})`
-      } else {
-        command = `tar -czf ${esc(archivePath)} -C $(dirname ${esc(sourcePath)}) $(basename ${esc(sourcePath)})`
+        if (ext.endsWith('.zip')) {
+          command = `cd $(dirname ${esc(sourcePath)}) && zip -r ${esc(archivePath)} $(basename ${esc(sourcePath)})`
+        } else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) {
+          command = `tar -czf ${esc(archivePath)} -C $(dirname ${esc(sourcePath)}) $(basename ${esc(sourcePath)})`
+        } else if (ext.endsWith('.tar.bz2')) {
+          command = `tar -cjf ${esc(archivePath)} -C $(dirname ${esc(sourcePath)}) $(basename ${esc(sourcePath)})`
+        } else if (ext.endsWith('.tar.xz')) {
+          command = `tar -cJf ${esc(archivePath)} -C $(dirname ${esc(sourcePath)}) $(basename ${esc(sourcePath)})`
+        } else if (ext.endsWith('.tar')) {
+          command = `tar -cf ${esc(archivePath)} -C $(dirname ${esc(sourcePath)}) $(basename ${esc(sourcePath)})`
+        } else {
+          command = `tar -czf ${esc(archivePath)} -C $(dirname ${esc(sourcePath)}) $(basename ${esc(sourcePath)})`
+        }
+
+        await sshConnectionManager.executeCommand(connectionId, command, 60000)
+        return { success: true }
+      } catch (error: any) {
+        return { success: false, error: error.message }
       }
-
-      await sshConnectionManager.executeCommand(connectionId, command, 60000)
-      return { success: true }
-    } catch (error: any) {
-      return { success: false, error: error.message }
     }
-  })
+  )
 
   // 远程压缩多个文件或目录
-  ipcMain.handle('sftp:compressMultiple', async (_event, connectionId: string, sourcePaths: string[], archivePath: string) => {
-    try {
-      if (!sourcePaths?.length || !archivePath) {
-        return { success: false, error: '参数不完整' }
-      }
-      const connection = sshConnectionManager.getConnection(connectionId)
-      if (!connection) {
-        return { success: false, error: '连接不存在' }
-      }
+  ipcMain.handle(
+    'sftp:compressMultiple',
+    async (_event, connectionId: string, sourcePaths: string[], archivePath: string) => {
+      try {
+        if (!sourcePaths?.length || !archivePath) {
+          return { success: false, error: '参数不完整' }
+        }
+        const connection = sshConnectionManager.getConnection(connectionId)
+        if (!connection) {
+          return { success: false, error: '连接不存在' }
+        }
 
-      const esc = (p: string) => `'${p.replace(/'/g, "'\\''")}'`
-      const ext = archivePath.toLowerCase()
-      const parentDir = sourcePaths[0].substring(0, sourcePaths[0].lastIndexOf('/')) || '/'
-      const fileNames = sourcePaths.map(p => esc(p.substring(p.lastIndexOf('/') + 1))).join(' ')
-      let command: string
+        const esc = (p: string) => `'${p.replace(/'/g, "'\\''")}'`
+        const ext = archivePath.toLowerCase()
+        const parentDir = sourcePaths[0].substring(0, sourcePaths[0].lastIndexOf('/')) || '/'
+        const fileNames = sourcePaths.map((p) => esc(p.substring(p.lastIndexOf('/') + 1))).join(' ')
+        let command: string
 
-      if (ext.endsWith('.zip')) {
-        command = `cd ${esc(parentDir)} && zip -r ${esc(archivePath)} ${fileNames}`
-      } else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) {
-        command = `tar -czf ${esc(archivePath)} -C ${esc(parentDir)} ${fileNames}`
-      } else if (ext.endsWith('.tar')) {
-        command = `tar -cf ${esc(archivePath)} -C ${esc(parentDir)} ${fileNames}`
-      } else {
-        command = `tar -czf ${esc(archivePath)} -C ${esc(parentDir)} ${fileNames}`
+        if (ext.endsWith('.zip')) {
+          command = `cd ${esc(parentDir)} && zip -r ${esc(archivePath)} ${fileNames}`
+        } else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) {
+          command = `tar -czf ${esc(archivePath)} -C ${esc(parentDir)} ${fileNames}`
+        } else if (ext.endsWith('.tar.bz2')) {
+          command = `tar -cjf ${esc(archivePath)} -C ${esc(parentDir)} ${fileNames}`
+        } else if (ext.endsWith('.tar.xz')) {
+          command = `tar -cJf ${esc(archivePath)} -C ${esc(parentDir)} ${fileNames}`
+        } else if (ext.endsWith('.tar')) {
+          command = `tar -cf ${esc(archivePath)} -C ${esc(parentDir)} ${fileNames}`
+        } else {
+          command = `tar -czf ${esc(archivePath)} -C ${esc(parentDir)} ${fileNames}`
+        }
+
+        await sshConnectionManager.executeCommand(connectionId, command, 60000)
+        return { success: true }
+      } catch (error: any) {
+        return { success: false, error: error.message }
       }
-
-      await sshConnectionManager.executeCommand(connectionId, command, 60000)
-      return { success: true }
-    } catch (error: any) {
-      return { success: false, error: error.message }
     }
-  })
+  )
 
   // 远程解压文件
-  ipcMain.handle('sftp:extract', async (_event, connectionId: string, archivePath: string, targetDir: string) => {
-    try {
-      if (!archivePath || !targetDir) {
-        return { success: false, error: '参数不完整' }
+  ipcMain.handle(
+    'sftp:extract',
+    async (_event, connectionId: string, archivePath: string, targetDir: string) => {
+      try {
+        if (!archivePath || !targetDir) {
+          return { success: false, error: '参数不完整' }
+        }
+        const connection = sshConnectionManager.getConnection(connectionId)
+        if (!connection) {
+          return { success: false, error: '连接不存在' }
+        }
+
+        const esc = (p: string) => `'${p.replace(/'/g, "'\\''")}'`
+        const ext = archivePath.toLowerCase()
+
+        // 确保目标目录存在
+        await sshConnectionManager.executeCommand(connectionId, `mkdir -p ${esc(targetDir)}`, 10000)
+
+        let command: string
+        if (ext.endsWith('.zip')) {
+          command = `unzip -o ${esc(archivePath)} -d ${esc(targetDir)}`
+        } else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) {
+          command = `tar -xzf ${esc(archivePath)} -C ${esc(targetDir)}`
+        } else if (ext.endsWith('.tar.bz2')) {
+          command = `tar -xjf ${esc(archivePath)} -C ${esc(targetDir)}`
+        } else if (ext.endsWith('.tar.xz')) {
+          command = `tar -xJf ${esc(archivePath)} -C ${esc(targetDir)}`
+        } else if (ext.endsWith('.tar')) {
+          command = `tar -xf ${esc(archivePath)} -C ${esc(targetDir)}`
+        } else if (ext.endsWith('.gz')) {
+          const outputFile = archivePath.replace(/\.gz$/, '').split('/').pop() || 'output'
+          command = `gunzip -c ${esc(archivePath)} > ${esc(targetDir + '/' + outputFile)}`
+        } else if (ext.endsWith('.bz2')) {
+          const outputFile =
+            archivePath
+              .replace(/\.bz2$/, '')
+              .split('/')
+              .pop() || 'output'
+          command = `bunzip2 -c ${esc(archivePath)} > ${esc(targetDir + '/' + outputFile)}`
+        } else if (ext.endsWith('.xz')) {
+          const outputFile = archivePath.replace(/\.xz$/, '').split('/').pop() || 'output'
+          command = `unxz -c ${esc(archivePath)} > ${esc(targetDir + '/' + outputFile)}`
+        } else if (ext.endsWith('.rar')) {
+          command = `unrar x -o+ ${esc(archivePath)} ${esc(targetDir + '/')}`
+        } else if (ext.endsWith('.7z')) {
+          command = `7z x -aoa ${esc(archivePath)} -o${esc(targetDir)}`
+        } else {
+          return { success: false, error: '不支持的压缩格式' }
+        }
+
+        await sshConnectionManager.executeCommand(connectionId, command, 120000)
+        return { success: true }
+      } catch (error: any) {
+        return { success: false, error: error.message }
       }
-      const connection = sshConnectionManager.getConnection(connectionId)
-      if (!connection) {
-        return { success: false, error: '连接不存在' }
-      }
-
-      const esc = (p: string) => `'${p.replace(/'/g, "'\\''")}'`
-      const ext = archivePath.toLowerCase()
-
-      // 确保目标目录存在
-      await sshConnectionManager.executeCommand(connectionId, `mkdir -p ${esc(targetDir)}`, 10000)
-
-      let command: string
-      if (ext.endsWith('.zip')) {
-        command = `unzip -o ${esc(archivePath)} -d ${esc(targetDir)}`
-      } else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) {
-        command = `tar -xzf ${esc(archivePath)} -C ${esc(targetDir)}`
-      } else if (ext.endsWith('.tar')) {
-        command = `tar -xf ${esc(archivePath)} -C ${esc(targetDir)}`
-      } else if (ext.endsWith('.gz')) {
-        const outputFile = archivePath.replace(/\.gz$/, '').split('/').pop() || 'output'
-        command = `gunzip -c ${esc(archivePath)} > ${esc(targetDir + '/' + outputFile)}`
-      } else {
-        return { success: false, error: '不支持的压缩格式' }
-      }
-
-      await sshConnectionManager.executeCommand(connectionId, command, 120000)
-      return { success: true }
-    } catch (error: any) {
-      return { success: false, error: error.message }
     }
-  })
+  )
 }

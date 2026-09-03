@@ -1,5 +1,9 @@
 import { ipcMain, BrowserWindow } from 'electron'
-import { HostKeyChallengeError, sshConnectionManager } from '../managers/SSHConnectionManager'
+import {
+  HostKeyChallengeError,
+  sshConnectionManager,
+  type SSHCloseDetails
+} from '../managers/SSHConnectionManager'
 import { logger } from '../utils/logger'
 import { knownHostsManager } from '../utils/known-hosts'
 import { auditLogManager, AuditAction } from '../managers/AuditLogManager'
@@ -266,14 +270,20 @@ export function registerSSHHandlers() {
     })
   })
 
-  sshConnectionManager.on('close', (id: string) => {
+  sshConnectionManager.on('close', (id: string, details?: SSHCloseDetails) => {
+    logger.logInfo(
+      'connection',
+      `SSH closed for session ${id}`,
+      details ? JSON.stringify(details) : undefined
+    )
+
     portForwardManager.stopForwardsByConnection(id).catch((error) => {
       logger.logError('connection', `Failed to stop port forwards for session ${id}`, error)
     })
 
     const windows = BrowserWindow.getAllWindows()
     windows.forEach((win) => {
-      win.webContents.send('ssh:close', id)
+      win.webContents.send('ssh:close', id, details)
     })
   })
 

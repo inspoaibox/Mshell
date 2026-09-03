@@ -48,6 +48,14 @@ export interface ServerMetrics {
     used: number // 已用空间
     free: number // 空闲空间
     usage: number // 使用率百分比
+    filesystems?: Array<{
+      filesystem: string
+      mount: string
+      total: number
+      used: number
+      free: number
+      usage: number
+    }>
   }
 
   // 网络信息
@@ -109,6 +117,7 @@ export class ServerMonitorManager extends EventEmitter {
   private configs: Map<string, MonitorConfig>
   private latestMetrics: Map<string, ServerMetrics>
   private lastNetworkStats: Map<string, { bytesIn: number; bytesOut: number; timestamp: number }>
+  private collectionPromises: Map<string, Promise<ServerMetrics | undefined>>
 
   constructor() {
     super()
@@ -117,6 +126,7 @@ export class ServerMonitorManager extends EventEmitter {
     this.configs = new Map()
     this.latestMetrics = new Map()
     this.lastNetworkStats = new Map()
+    this.collectionPromises = new Map()
   }
 
   /**
@@ -128,7 +138,7 @@ export class ServerMonitorManager extends EventEmitter {
 
     // 合并配置
     const fullConfig: MonitorConfig = {
-      interval: config?.interval || 5000,
+      interval: config?.interval || 3000,
       enabled: config?.enabled !== false,
       metrics: {
         cpu: config?.metrics?.cpu !== false,
@@ -145,11 +155,11 @@ export class ServerMonitorManager extends EventEmitter {
     this.sshClients.set(sessionId, sshClient)
 
     // 立即执行一次
-    this.collectMetrics(sessionId)
+    void this.collectMetrics(sessionId)
 
     // 设置定时器
     const timer = setInterval(() => {
-      this.collectMetrics(sessionId)
+      void this.collectMetrics(sessionId)
     }, fullConfig.interval)
 
     this.monitors.set(sessionId, timer)
@@ -167,21 +177,32 @@ export class ServerMonitorManager extends EventEmitter {
 
     this.sshClients.delete(sessionId)
     this.configs.delete(sessionId)
+    this.collectionPromises.delete(sessionId)
   }
 
   /**
    * 收集指标
    */
-  private async collectMetrics(sessionId: string): Promise<void> {
+  private collectMetrics(sessionId: string): Promise<ServerMetrics | undefined> {
+    const existing = this.collectionPromises.get(sessionId)
+    if (existing) return existing
+
+    const promise = this.collectMetricsInternal(sessionId).finally(() => {
+      this.collectionPromises.delete(sessionId)
+    })
+    this.collectionPromises.set(sessionId, promise)
+    return promise
+  }
+
+  private async collectMetricsInternal(sessionId: string): Promise<ServerMetrics | undefined> {
     const client = this.sshClients.get(sessionId)
     const config = this.configs.get(sessionId)
 
-    if (!client || !config) return
+    if (!client || !config) return undefined
 
     try {
       const metrics: Partial<ServerMetrics> = {
-        sessionId,
-        timestamp: new Date().toISOString()
+        sessionId
       }
 
       // 收集各项指标
@@ -214,15 +235,18 @@ export class ServerMonitorManager extends EventEmitter {
       }
 
       metrics.system = await this.collectSystemInfo(client)
+      metrics.timestamp = new Date().toISOString()
 
       // 保存最新指标
       this.latestMetrics.set(sessionId, metrics as ServerMetrics)
 
       // 发送事件
       this.emit('metrics', sessionId, metrics)
+      return metrics as ServerMetrics
     } catch (error) {
       console.error(`Failed to collect metrics for ${sessionId}:`, error)
       this.emit('error', sessionId, error)
+      return undefined
     }
   }
 
@@ -232,7 +256,7 @@ export class ServerMonitorManager extends EventEmitter {
   private async collectCPUMetrics(client: Client): Promise<ServerMetrics['cpu']> {
     // CPU 使用率
     const cpuUsage = await this.executeCommand(client,
-      "top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'"
+      "awk '/^cpu / {print $2,$3,$4,$5,$6,$7,$8}' /proc/stat; sleep 0.25; awk '/^cpu / {print $2,$3,$4,$5,$6,$7,$8}' /proc/stat"
     )
 
     // 负载平均值
@@ -246,9 +270,22 @@ export class ServerMonitorManager extends EventEmitter {
     )
 
     const loadValues = loadAvg.trim().split(' ').map(Number)
+    const cpuLines = cpuUsage.trim().split('\n')
+    let usage = 0
+    if (cpuLines.length >= 2) {
+      const first = cpuLines[0].trim().split(/\s+/).map(Number)
+      const second = cpuLines[1].trim().split(/\s+/).map(Number)
+      const idle1 = (first[3] || 0) + (first[4] || 0)
+      const idle2 = (second[3] || 0) + (second[4] || 0)
+      const total1 = first.reduce((sum, value) => sum + (value || 0), 0)
+      const total2 = second.reduce((sum, value) => sum + (value || 0), 0)
+      const totalDiff = total2 - total1
+      const idleDiff = idle2 - idle1
+      usage = totalDiff > 0 ? ((totalDiff - idleDiff) / totalDiff) * 100 : 0
+    }
 
     return {
-      usage: parseFloat(cpuUsage.trim()) || 0,
+      usage,
       loadAverage: loadValues.length === 3 ? loadValues : [0, 0, 0],
       cores: parseInt(cores.trim()) || 1
     }
@@ -279,17 +316,38 @@ export class ServerMonitorManager extends EventEmitter {
    */
   private async collectDiskMetrics(client: Client): Promise<ServerMetrics['disk']> {
     const diskInfo = await this.executeCommand(client,
-      "df -B1 / | tail -1 | awk '{print $2,$3,$4}'"
+      "df -B1 -P -x tmpfs -x devtmpfs -x squashfs -x overlay 2>/dev/null | awk 'NR>1 {print $1\"|\"$6\"|\"$2\"|\"$3\"|\"$4}'"
     )
 
-    const values = diskInfo.trim().split(' ').map(Number)
-    const [total, used, free] = values
+    const filesystems = diskInfo
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map(line => {
+        const [filesystem, mount, total, used, free] = line.split('|')
+        const totalValue = Number(total) || 0
+        const usedValue = Number(used) || 0
+        const freeValue = Number(free) || 0
+        return {
+          filesystem: filesystem || '',
+          mount: mount || '',
+          total: totalValue,
+          used: usedValue,
+          free: freeValue,
+          usage: totalValue > 0 ? (usedValue / totalValue) * 100 : 0
+        }
+      })
+
+    const total = filesystems.reduce((sum, item) => sum + item.total, 0)
+    const used = filesystems.reduce((sum, item) => sum + item.used, 0)
+    const free = filesystems.reduce((sum, item) => sum + item.free, 0)
 
     return {
       total: total || 0,
       used: used || 0,
       free: free || 0,
-      usage: total > 0 ? (used / total) * 100 : 0
+      usage: total > 0 ? (used / total) * 100 : 0,
+      filesystems
     }
   }
 
@@ -306,17 +364,16 @@ export class ServerMonitorManager extends EventEmitter {
       }
     }
 
-    // 获取第一个非 lo 的网络接口的流量数据
+    // 汇总所有非 lo 网络接口的流量数据
     const netInfo = await this.executeCommand(client,
-      "cat /proc/net/dev | awk 'NR>2 && $1 !~ /^lo:/ {print $1,$2,$3,$10,$11; exit}'"
+      "cat /proc/net/dev | awk 'NR>2 {gsub(\":\", \"\", $1); if ($1 != \"lo\") {bi+=$2; pi+=$3; bo+=$10; po+=$11}} END {print bi,pi,bo,po}'"
     )
 
     const parts = netInfo.trim().split(/\s+/)
-    // parts[0] 是接口名（带冒号），parts[1..4] 是数据
-    const bytesIn = parseInt(parts[1]) || 0
-    const packetsIn = parseInt(parts[2]) || 0
-    const bytesOut = parseInt(parts[3]) || 0
-    const packetsOut = parseInt(parts[4]) || 0
+    const bytesIn = parseInt(parts[0]) || 0
+    const packetsIn = parseInt(parts[1]) || 0
+    const bytesOut = parseInt(parts[2]) || 0
+    const packetsOut = parseInt(parts[3]) || 0
 
     let speedIn = 0
     let speedOut = 0
@@ -450,6 +507,13 @@ export class ServerMonitorManager extends EventEmitter {
   }
 
   /**
+   * 立即刷新指标
+   */
+  async refreshMetrics(sessionId: string): Promise<ServerMetrics | undefined> {
+    return this.collectMetrics(sessionId)
+  }
+
+  /**
    * 获取所有监控会话
    */
   getMonitoredSessions(): string[] {
@@ -522,31 +586,49 @@ export class ServerMonitorManager extends EventEmitter {
 
       if (hasDocker.trim() !== 'yes') return []
 
-      // 获取容器统计信息
-      // Name, CPU%, Mem%, NetIO, Status
-      // 注意：docker stats 比较慢，可能需要优化，或者只获取运行中的容器
-      // 使用 --no-stream 获取一次性快照
-      const cmd = 'docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}|{{.MemPerc}}|{{.NetIO}}"' // |分隔避免空格解析问题
-      const statsResult = await this.executeCommand(client, cmd)
+      const psResult = await this.executeCommand(
+        client,
+        'docker ps -a --format "{{.Names}}|{{.Status}}" 2>/dev/null'
+      ).catch(() => '')
+      if (!psResult.trim()) return []
 
-      if (!statsResult.trim()) return []
+      const statsResult = await this.executeCommand(
+        client,
+        'docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}|{{.MemPerc}}|{{.NetIO}}" 2>/dev/null'
+      ).catch(() => '')
 
-      // 获取状态信息（简单起见，这里假设 stats 只返回 running 的容器，或者我们混合 ps 命令）
-      // docker stats 默认只显示 running
-
-      return statsResult.trim().split('\n')
+      const statsMap = new Map<string, { cpu: string; memory: string; netIO: string }>()
+      statsResult
+        .trim()
+        .split('\n')
         .filter(line => line.trim())
-        .map(line => {
+        .forEach(line => {
           const [name, cpu, mem, netIO] = line.split('|')
-          return {
-            name: name || 'unknown',
-            cpu: cpu || '0%',
-            memory: mem || '0%',
-            netIO: netIO || '0/0',
-            status: 'Running'
+          if (name) {
+            statsMap.set(name, {
+              cpu: cpu || '-',
+              memory: mem || '-',
+              netIO: netIO || '-'
+            })
           }
         })
-        .slice(0, 5) // 限制显示前5个
+
+      return psResult
+        .trim()
+        .split('\n')
+        .filter(line => line.trim())
+        .map(line => {
+          const [name, status] = line.split('|')
+          const stats = statsMap.get(name)
+          return {
+            name: name || 'unknown',
+            cpu: stats?.cpu || '-',
+            memory: stats?.memory || '-',
+            netIO: stats?.netIO || '-',
+            status: status || 'unknown'
+          }
+        })
+        .slice(0, 10)
     } catch (e) {
       return []
     }

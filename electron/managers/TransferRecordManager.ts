@@ -13,7 +13,7 @@ export interface TransferRecord {
   remotePath: string
   totalSize: number
   transferred: number
-  status: 'pending' | 'active' | 'paused' | 'completed' | 'failed'
+  status: 'pending' | 'active' | 'paused' | 'completed' | 'failed' | 'cancelled'
   createdAt: string
   updatedAt: string
   connectionId: string

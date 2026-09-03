@@ -240,6 +240,10 @@
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useAIStore } from '@/stores/ai'
 import { terminalManager } from '@/utils/terminal-manager'
+import {
+  buildTerminalExecutePayload,
+  buildTerminalInsertPayload
+} from '@/utils/terminal-command-execution'
 import { marked } from 'marked'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
@@ -699,14 +703,22 @@ const handleCodeBlockClick = (e: MouseEvent) => {
   } else if (target.classList.contains('insert-btn')) {
     const code = target.getAttribute('data-code') || ''
     const decodedCode = decodeHtmlEntities(code)
+    const inst = terminalManager.get(props.connectionId)
     // 插入到当前终端（不执行）
-    window.electronAPI?.ssh?.write(props.connectionId, decodedCode)
+    window.electronAPI?.ssh?.write(
+      props.connectionId,
+      buildTerminalInsertPayload(decodedCode, inst?.bracketedPasteEnabled ?? false)
+    )
     ElMessage.success('已插入到终端')
   } else if (target.classList.contains('run-btn')) {
     const code = target.getAttribute('data-code') || ''
     const decodedCode = decodeHtmlEntities(code)
-    // 插入并执行（添加换行符）
-    window.electronAPI?.ssh?.write(props.connectionId, decodedCode + '\n')
+    const inst = terminalManager.get(props.connectionId)
+    // 插入并执行：多行命令复用终端粘贴保护
+    window.electronAPI?.ssh?.write(
+      props.connectionId,
+      buildTerminalExecutePayload(decodedCode, inst?.bracketedPasteEnabled ?? false)
+    )
     ElMessage.success('已执行命令')
   }
 }

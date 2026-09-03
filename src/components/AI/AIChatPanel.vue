@@ -93,6 +93,8 @@
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useAIStore } from '@/stores/ai'
 import { useAppStore } from '@/stores/app'
+import { terminalManager } from '@/utils/terminal-manager'
+import { buildTerminalInsertPayload } from '@/utils/terminal-command-execution'
 import { marked } from 'marked'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
@@ -194,7 +196,11 @@ const handleCodeBlockClick = (e: MouseEvent) => {
         ElMessage.warning('请先打开一个终端会话')
         return
       }
-      window.electronAPI?.ssh?.write?.(activeTab, code)
+      const inst = terminalManager.get(activeTab)
+      window.electronAPI?.ssh?.write?.(
+        activeTab,
+        buildTerminalInsertPayload(code, inst?.bracketedPasteEnabled ?? false)
+      )
       ElMessage.success('已插入终端')
     }
   } catch (err) {
