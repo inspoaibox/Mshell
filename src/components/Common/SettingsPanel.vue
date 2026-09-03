@@ -1635,7 +1635,7 @@ const DEFAULT_RESTORE_OPTIONS = [
 const restoreOptions = ref<string[]>([...DEFAULT_RESTORE_OPTIONS])
 const backupLoading = ref(false)
 
-const appVersion = ref('0.2.11')
+const appVersion = ref('0.2.12')
 
 const mcpStatus = ref({
   enabled: false,

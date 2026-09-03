@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => {
 })
 
 vi.mock('electron', () => ({
-  app: { getVersion: () => '0.2.11' },
+  app: { getVersion: () => '0.2.12' },
   BrowserWindow: { getAllWindows: () => [] }
 }))
 
@@ -55,7 +55,7 @@ vi.mock('../../utils/logger', () => ({
   logger: { logInfo: vi.fn(), logError: vi.fn() }
 }))
 
-import { mcpServerManager } from '../MCPServerManager'
+import { ensureMcpWebCrypto, mcpServerManager } from '../MCPServerManager'
 
 async function getAvailablePort(): Promise<number> {
   const server = createServer()
@@ -103,6 +103,28 @@ describe('MCPServerManager', () => {
     vi.clearAllMocks()
   })
 
+  it('provides Web Crypto when the Electron main process does not expose it globally', () => {
+    const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
+
+    try {
+      Object.defineProperty(globalThis, 'crypto', {
+        configurable: true,
+        value: undefined
+      })
+
+      ensureMcpWebCrypto()
+
+      expect(globalThis.crypto).toBeDefined()
+      expect(globalThis.crypto.randomUUID).toBeTypeOf('function')
+    } finally {
+      if (originalCrypto) {
+        Object.defineProperty(globalThis, 'crypto', originalCrypto)
+      } else {
+        delete (globalThis as { crypto?: Crypto }).crypto
+      }
+    }
+  })
+
   it('requires a bearer token and only lists currently connected SSH sessions', async () => {
     const port = await getAvailablePort()
     mocks.settings.port = port
@@ -127,6 +149,17 @@ describe('MCPServerManager', () => {
 
     const unauthorized = await postMcp(port, { jsonrpc: '2.0', id: 1, method: 'initialize' }, false)
     expect(unauthorized.status).toBe(401)
+
+    const bareToken = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: 'POST',
+      headers: {
+        Authorization: mocks.settings.token,
+        Accept: 'application/json, text/event-stream',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1.1, method: 'initialize' })
+    })
+    expect(bareToken.status).toBe(401)
 
     const tooLarge = await postMcp(port, {
       jsonrpc: '2.0',

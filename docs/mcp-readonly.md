@@ -8,7 +8,98 @@ MShell 可以向本机运行的 Codex、Claude 等支持 MCP 的 Agent 提供当
 2. 保持需要读取的 SSH 会话处于已连接状态。
 3. 使用页面中的“复制 Codex 配置”或“复制 Claude 配置”按钮，写入对应客户端配置。
 
-Codex 使用环境变量传递 Bearer 令牌。复制的内容包含 PowerShell 会话变量和 `config.toml` 配置：先在启动 Codex 的同一 PowerShell 窗口设置 `MSHELL_MCP_TOKEN`，再启动 Codex。令牌重新生成后，需要更新环境变量并重启 Agent。
+Codex 可以使用直接 `Authorization` 标头或 Bearer 令牌环境变量认证。MShell 的“复制 Codex 配置”按钮提供的是 PowerShell 会话变量和 `config.toml` 的环境变量配置；令牌重新生成后，需要更新配置并重启 Agent。
+
+## 在 Codex 图形界面中添加
+
+在 Codex 的“连接至自定义 MCP”页面，选择“流式 HTTP”（Streamable HTTP），不要选择“STDIO”。MShell 已经作为本机 HTTP 服务运行，不需要 Codex 再启动一个命令行进程。
+
+按以下内容填写：
+
+| 字段                | 推荐的直接标头模式                  |
+| ------------------- | ----------------------------------- |
+| 名称                | `MShell`，也可以使用其他名称        |
+| 类型                | `流式 HTTP`                         |
+| URL / 服务端点      | `http://127.0.0.1:47821/mcp`        |
+| Bearer 令牌环境变量 | 留空                                |
+| 标头键              | `Authorization`                     |
+| 标头值              | `Bearer <MShell 中复制的 MCP 令牌>` |
+
+标头值必须包含开头的 `Bearer` 和一个空格。只填写令牌本身会被 MShell 按 `401 Unauthorized` 拒绝。例如，填写 `abc123` 是错误的，填写 `Bearer abc123` 才是正确格式。
+
+也可以选择环境变量模式，但不要与直接标头模式混用：
+
+1. 在启动 Codex 的环境中，将 `MSHELL_MCP_TOKEN` 的值设置为 MShell 中复制的令牌。
+2. 在 Codex 的“Bearer 令牌环境变量”字段中填写 `MSHELL_MCP_TOKEN`，这里填写的是变量名称，不是令牌内容。
+3. 删除 `Authorization` 标头，避免两个认证来源产生冲突。
+
+填写完成后保存，完全退出并重新打开 Codex，再新建任务加载 MCP 工具。
+
+以下内容不适用于 MShell：
+
+- 不要把 `http://127.0.0.1:47821/mcp` 填到“启动命令”或“参数”中。
+- 不要填写 `npx`、`node`、`python` 等启动命令。
+- 不需要填写 STDIO 参数、工作目录或本地脚本路径。
+
+## 使用 Codex CLI 添加
+
+在启动 Codex 的同一个 PowerShell 窗口中执行：
+
+```powershell
+$env:MSHELL_MCP_TOKEN = '<从 MShell 复制的令牌>'
+codex mcp add mshell --url http://127.0.0.1:47821/mcp --bearer-token-env-var MSHELL_MCP_TOKEN
+codex mcp list
+```
+
+检查或移除已有配置：
+
+```powershell
+codex mcp get mshell
+codex mcp remove mshell
+```
+
+也可以手动写入 `~/.codex/config.toml`：
+
+```toml
+[mcp_servers.mshell]
+url = "http://127.0.0.1:47821/mcp"
+bearer_token_env_var = "MSHELL_MCP_TOKEN"
+```
+
+PowerShell 环境变量只对当前窗口及其子进程有效。若 Codex 是从开始菜单或其他图形启动器打开的，它可能不会继承该变量；此时应从同一个 PowerShell 窗口启动 Codex，或在 Codex 图形界面中配置请求头。
+
+## STDIO 与流式 HTTP 的区别
+
+| 类型      | 谁启动服务                                     | 典型配置                           | MShell 是否使用 |
+| --------- | ---------------------------------------------- | ---------------------------------- | --------------- |
+| STDIO     | Codex 启动本地命令并通过标准输入输出通信       | 启动命令、参数、环境变量、工作目录 | 否              |
+| 流式 HTTP | MShell 自己运行 HTTP 服务，Codex 通过 URL 访问 | URL、Authorization 请求头          | 是              |
+
+只有在接入另一个明确提供 STDIO 入口的 MCP 服务器时，才填写“启动命令”和“参数”。把 MShell 当作 STDIO 添加会导致连接失败。
+
+## 首次验证流程
+
+配置完成后，按“列出会话、确认连接、读取文件”的顺序验证：
+
+1. 确认 MShell MCP 服务为“运行中”，并且至少有一个 SSH 会话状态为“已连接”。
+2. 在 Codex 中先发送：
+
+   ```text
+   请调用 list_ssh_sessions，列出当前已连接的 SSH 会话。
+   不要执行命令，不要修改文件。
+   只返回 connectionId、主机、端口、用户名和会话名称。
+   ```
+
+3. 从返回结果中确认目标服务器，并明确指定一个 `connectionId`。不要让 Agent 根据主机名、用户名或列表顺序自行猜测。
+4. 再发送：
+
+   ```text
+   使用 connectionId="这里填写已确认的 ID"。
+   不要执行命令，不要修改文件。
+   请读取 /etc/os-release，只告诉我文件是否存在，不要输出文件内容。
+   ```
+
+5. 读取目录时使用 `list_remote_files`；读取文本时使用 `read_remote_file`。当前没有单独的文件存在性工具，判断文件是否存在会通过读取结果完成。
 
 ## 服务端点
 
@@ -33,5 +124,9 @@ Codex 使用环境变量传递 Bearer 令牌。复制的内容包含 PowerShell 
 - 单次目录列表最多返回 `2000` 项；单个远程文件最多读取 `1 MiB`。
 - 每次 Agent 工具调用都会写入 MShell 的审计日志。
 - SSH 自动重连后，MShell 会按当前 SSH 客户端重建只读 SFTP 通道，避免使用旧连接遗留的通道。
+- MCP 服务当前运行在 MShell Windows 桌面端；Android 端不能作为 MCP HTTP 服务端。
+- MCP 端点只监听本机 `127.0.0.1`。不要通过端口转发、反向代理、内网穿透或防火墙把 `47821` 暴露给其他设备。
+- MCP 令牌不是 SSH 密码，也不是同步加密密码；三者必须分别保管。
+- 读取配置文件、日志和代码仍可能暴露业务数据。只允许 Agent 读取完成当前任务所需的最小路径。
 
 该能力适合让 Agent 做状态检查、阅读配置或分析日志。需要改变服务器状态的操作仍应由用户在 MShell 终端中明确执行。

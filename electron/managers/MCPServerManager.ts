@@ -1,4 +1,4 @@
-import { timingSafeEqual, randomBytes } from 'node:crypto'
+import { timingSafeEqual, randomBytes, webcrypto } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { app, BrowserWindow } from 'electron'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -9,6 +9,19 @@ import { sshConnectionManager, type SSHConnection } from './SSHConnectionManager
 import { sftpManager } from './SFTPManager'
 import { appSettingsManager, type AgentMcpSettings } from '../utils/app-settings'
 import { logger } from '../utils/logger'
+
+// Electron's main-process Node runtime may not expose Web Crypto globally,
+// while the MCP Streamable HTTP transport expects the Web Crypto global.
+export function ensureMcpWebCrypto(): void {
+  if (typeof globalThis.crypto !== 'undefined') return
+
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: webcrypto
+  })
+}
+
+ensureMcpWebCrypto()
 
 const MCP_PATH = '/mcp'
 const DEFAULT_MAX_READ_BYTES = 1024 * 1024
