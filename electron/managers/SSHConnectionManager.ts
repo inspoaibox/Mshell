@@ -512,7 +512,12 @@ export class SSHConnectionManager extends EventEmitter {
   /**
    * 执行命令并获取输出（用于自动补全等功能）
    */
-  async executeCommand(id: string, command: string, timeout: number = 5000): Promise<string> {
+  async executeCommand(
+    id: string,
+    command: string,
+    timeout: number = 5000,
+    maxOutputBytes?: number
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       const connection = this.connections.get(id)
       if (!connection || !connection.client) {
@@ -522,7 +527,9 @@ export class SSHConnectionManager extends EventEmitter {
 
       let output = ''
       let errorOutput = ''
-      let timeoutHandle: NodeJS.Timeout
+      let outputBytes = 0
+      let settled = false
+      let timeoutHandle: NodeJS.Timeout | undefined
 
       connection.client.exec(command, (err, stream) => {
         if (err) {
@@ -530,22 +537,48 @@ export class SSHConnectionManager extends EventEmitter {
           return
         }
 
+        const rejectOnce = (error: Error) => {
+          if (settled) return
+          settled = true
+          if (timeoutHandle) clearTimeout(timeoutHandle)
+          reject(error)
+        }
+
+        const appendOutput = (data: Buffer, stderr = false) => {
+          if (settled) return
+          outputBytes += data.length
+          if (maxOutputBytes && outputBytes > maxOutputBytes) {
+            rejectOnce(new Error(`Command output exceeded limit of ${maxOutputBytes} bytes`))
+            stream.close()
+            return
+          }
+
+          if (stderr) {
+            errorOutput += data.toString('utf8')
+          } else {
+            output += data.toString('utf8')
+          }
+        }
+
         // 设置超时
         timeoutHandle = setTimeout(() => {
+          rejectOnce(new Error(`Command execution timeout: ${command}`))
           stream.close()
-          reject(new Error(`Command execution timeout: ${command}`))
         }, timeout)
 
         stream.on('data', (data: Buffer) => {
-          output += data.toString('utf8')
+          appendOutput(data)
         })
 
         stream.stderr.on('data', (data: Buffer) => {
-          errorOutput += data.toString('utf8')
+          appendOutput(data, true)
         })
 
         stream.on('close', (code: number) => {
-          clearTimeout(timeoutHandle)
+          if (settled) return
+          settled = true
+          if (timeoutHandle) clearTimeout(timeoutHandle)
+          connection.lastActivity = new Date()
 
           if (code === 0) {
             resolve(output)
@@ -555,8 +588,7 @@ export class SSHConnectionManager extends EventEmitter {
         })
 
         stream.on('error', (err: Error) => {
-          clearTimeout(timeoutHandle)
-          reject(err)
+          rejectOnce(err)
         })
       })
     })

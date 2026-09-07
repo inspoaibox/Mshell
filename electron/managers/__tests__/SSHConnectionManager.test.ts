@@ -422,6 +422,36 @@ describe('SSHConnectionManager', () => {
    * Additional unit tests for specific methods
    */
   describe('Unit tests', () => {
+    it('should stop capturing command output after the configured byte limit', async () => {
+      const id = 'test-output-limit'
+      const streamHandlers: Record<string, Function> = {}
+      const stream = {
+        on: vi.fn((event: string, handler: Function) => {
+          streamHandlers[event] = handler
+        }),
+        stderr: { on: vi.fn() },
+        close: vi.fn()
+      }
+      const client = {
+        exec: vi.fn((_command: string, callback: Function) => callback(null, stream)),
+        end: vi.fn()
+      }
+
+      ;(manager as any).connections.set(id, {
+        id,
+        status: 'connected',
+        client,
+        options: { host: 'localhost', port: 22, username: 'test' },
+        lastActivity: new Date()
+      })
+
+      const result = manager.executeCommand(id, 'cat /large-file', 1000, 10)
+      streamHandlers.data(Buffer.alloc(11))
+
+      await expect(result).rejects.toThrow('Command output exceeded limit of 10 bytes')
+      expect(stream.close).toHaveBeenCalledOnce()
+    })
+
     it('should write data to connection', async () => {
       const id = 'test-write'
       await manager.connect(id, {

@@ -15,13 +15,14 @@ const mocks = vi.hoisted(() => {
     updateSettings: vi.fn().mockResolvedValue(undefined),
     getAllConnections: vi.fn(),
     getConnection: vi.fn(),
+    executeCommand: vi.fn(),
     hasSFTP: vi.fn(),
     initSFTP: vi.fn()
   }
 })
 
 vi.mock('electron', () => ({
-  app: { getVersion: () => '0.2.12' },
+  app: { getVersion: () => '0.2.13' },
   BrowserWindow: { getAllWindows: () => [] }
 }))
 
@@ -33,7 +34,8 @@ vi.mock('../AuditLogManager', () => ({
 vi.mock('../SSHConnectionManager', () => ({
   sshConnectionManager: {
     getAllConnections: mocks.getAllConnections,
-    getConnection: mocks.getConnection
+    getConnection: mocks.getConnection,
+    executeCommand: mocks.executeCommand
   }
 }))
 
@@ -142,6 +144,14 @@ describe('MCPServerManager', () => {
         lastActivity: new Date('2026-09-03T00:00:00.000Z')
       }
     ])
+    mocks.getConnection.mockReturnValue({
+      id: 'connected-session',
+      status: 'connected',
+      client: {},
+      options: { host: 'server.example', port: 22, username: 'root', sessionName: 'Production' },
+      lastActivity: new Date('2026-09-03T00:00:00.000Z')
+    })
+    mocks.executeCommand.mockResolvedValue('Linux server 6.8.0 x86_64\n')
 
     await expect(mcpServerManager.applySettings({ ...mocks.settings })).resolves.toEqual({
       success: true
@@ -194,7 +204,8 @@ describe('MCPServerManager', () => {
       'list_ssh_sessions',
       'get_ssh_connection_status',
       'list_remote_files',
-      'read_remote_file'
+      'read_remote_file',
+      'execute_readonly_command'
     ])
 
     const sessionsResponse = await postMcp(port, {
@@ -209,6 +220,61 @@ describe('MCPServerManager', () => {
     expect(sessions).toEqual([
       expect.objectContaining({ connectionId: 'connected-session', status: 'connected' })
     ])
+
+    const queryResponse = await postMcp(port, {
+      jsonrpc: '2.0',
+      id: 5,
+      method: 'tools/call',
+      params: {
+        name: 'execute_readonly_command',
+        arguments: { connectionId: 'connected-session', command: 'uname -a' }
+      }
+    })
+    const queryPayload = await readMcpPayload(queryResponse)
+    const queryResult = JSON.parse(queryPayload.result.content[0].text)
+    expect(queryResult).toEqual({
+      connectionId: 'connected-session',
+      command: 'uname -a',
+      output: 'Linux server 6.8.0 x86_64\n',
+      outputBytes: 26,
+      truncated: false
+    })
+    expect(mocks.executeCommand).toHaveBeenCalledWith(
+      'connected-session',
+      'uname -a',
+      10_000,
+      256 * 1024
+    )
+
+    mocks.executeCommand.mockResolvedValueOnce('x'.repeat(100 * 1024))
+    const largeQueryResponse = await postMcp(port, {
+      jsonrpc: '2.0',
+      id: 55,
+      method: 'tools/call',
+      params: {
+        name: 'execute_readonly_command',
+        arguments: { connectionId: 'connected-session', command: 'journalctl -n 10000' }
+      }
+    })
+    const largeQueryPayload = await readMcpPayload(largeQueryResponse)
+    expect(largeQueryPayload.error).toBeUndefined()
+    const largeQueryResult = JSON.parse(largeQueryPayload.result.content[0].text)
+    expect(largeQueryResult.output).toHaveLength(64 * 1024)
+    expect(largeQueryResult.outputBytes).toBe(100 * 1024)
+    expect(largeQueryResult.truncated).toBe(true)
+
+    const rejectedResponse = await postMcp(port, {
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'tools/call',
+      params: {
+        name: 'execute_readonly_command',
+        arguments: { connectionId: 'connected-session', command: 'rm -rf /tmp/example' }
+      }
+    })
+    const rejectedPayload = await readMcpPayload(rejectedResponse)
+    expect(rejectedPayload.result.isError).toBe(true)
+    expect(mocks.executeCommand).toHaveBeenCalledTimes(2)
     expect(mocks.auditLog).toHaveBeenCalled()
   })
 })

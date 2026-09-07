@@ -67,7 +67,7 @@ MShell 是一款现代化、功能丰富的 SSH 客户端，基于 Electron、Vu
 - ✅ **凭据加密**: 使用 Windows DPAPI 加密存储
 - ✅ **审计日志**: 完整的操作记录
 
-安全产品使用说明书：[`docs/security-manual.md`](docs/security-manual.md)，包含凭据保护、主机指纹、会话锁、备份同步、日志、MCP 只读接入和事件响应流程。
+安全产品使用说明书：[`docs/security-manual.md`](docs/security-manual.md)，包含凭据保护、主机指纹、会话锁、备份同步、日志、MCP 文件读取与受限查询命令和事件响应流程。
 
 ### 💾 数据管理
 - ✅ **备份与恢复**: 加密备份会话、片段和设置

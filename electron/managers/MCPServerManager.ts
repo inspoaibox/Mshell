@@ -9,6 +9,10 @@ import { sshConnectionManager, type SSHConnection } from './SSHConnectionManager
 import { sftpManager } from './SFTPManager'
 import { appSettingsManager, type AgentMcpSettings } from '../utils/app-settings'
 import { logger } from '../utils/logger'
+import {
+  MCP_READ_ONLY_QUERY_PROGRAMS,
+  validateMcpReadOnlyCommand
+} from '../utils/mcp-readonly-command'
 
 // Electron's main-process Node runtime may not expose Web Crypto globally,
 // while the MCP Streamable HTTP transport expects the Web Crypto global.
@@ -27,6 +31,10 @@ const MCP_PATH = '/mcp'
 const DEFAULT_MAX_READ_BYTES = 1024 * 1024
 const MAX_LIST_ENTRIES = 2000
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024
+const DEFAULT_QUERY_TIMEOUT_MS = 10_000
+const MAX_QUERY_TIMEOUT_MS = 20_000
+const MAX_QUERY_OUTPUT_BYTES = 64 * 1024
+const MAX_QUERY_CAPTURE_BYTES = 256 * 1024
 
 class MCPRequestError extends Error {
   constructor(
@@ -353,8 +361,8 @@ class MCPServerManager {
       },
       {
         instructions:
-          'MShell exposes read-only tools for SSH sessions currently connected in the desktop application. ' +
-          'Call list_ssh_sessions first and use a returned connectionId.'
+          'MShell exposes read-only tools for SSH sessions currently connected in the desktop application, ' +
+          'including restricted query-command execution. Call list_ssh_sessions first and use a returned connectionId.'
       }
     )
 
@@ -489,6 +497,59 @@ class MCPServerManager {
           return this.toToolResult(result)
         } catch (error) {
           return this.toToolError('read_remote_file', { connectionId, filePath }, error)
+        }
+      }
+    )
+
+    server.registerTool(
+      'execute_readonly_command',
+      {
+        title: 'Execute a read-only SSH query command',
+        description:
+          'Execute one restricted read-only query command on a currently connected SSH session and return its output. ' +
+          'Shell pipelines, redirection, command chains, script interpreters, sudo, and modifying commands are rejected. ' +
+          `Supported programs: ${MCP_READ_ONLY_QUERY_PROGRAMS.join(', ')}.`,
+        inputSchema: {
+          connectionId: z.string().min(1).max(200),
+          command: z.string().min(1).max(2000),
+          timeoutMs: z.number().int().min(1000).max(MAX_QUERY_TIMEOUT_MS).optional()
+        }
+      },
+      async ({ connectionId, command, timeoutMs }) => {
+        try {
+          this.requireConnectedConnection(connectionId)
+          const validatedCommand = validateMcpReadOnlyCommand(command)
+          const output = await sshConnectionManager.executeCommand(
+            connectionId,
+            validatedCommand,
+            timeoutMs || DEFAULT_QUERY_TIMEOUT_MS,
+            MAX_QUERY_CAPTURE_BYTES
+          )
+          const outputBuffer = Buffer.from(output, 'utf8')
+          const truncated = outputBuffer.length > MAX_QUERY_OUTPUT_BYTES
+          const visibleOutput = truncated
+            ? outputBuffer.subarray(0, MAX_QUERY_OUTPUT_BYTES).toString('utf8')
+            : output
+          const result = {
+            connectionId,
+            command: validatedCommand,
+            output: visibleOutput,
+            outputBytes: outputBuffer.length,
+            truncated
+          }
+          this.auditToolCall(
+            'execute_readonly_command',
+            {
+              connectionId,
+              command: validatedCommand,
+              outputBytes: outputBuffer.length,
+              truncated
+            },
+            true
+          )
+          return this.toToolResult(result)
+        } catch (error) {
+          return this.toToolError('execute_readonly_command', { connectionId, command }, error)
         }
       }
     )
