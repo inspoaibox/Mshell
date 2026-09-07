@@ -1087,10 +1087,11 @@
           <div class="settings-section">
             <h3>本机 Agent / MCP</h3>
             <el-alert type="info" :closable="false" show-icon class="mcp-notice">
-              <template #title>让 Codex、Claude 等 Agent 查询当前已连接的 SSH 会话</template>
+              <template #title>让 Codex、Claude 等 Agent 操作当前已连接的 SSH 会话</template>
               <template #default>
-                当前仅开放只读能力：会话列表、连接状态、远程目录、远程文本文件和受限查询命令。
-                查询结果会返回 Agent；不开放任意 Shell、文件写入、密码、私钥或 Electron IPC。
+                默认能力以只读为主：会话列表、连接状态、远程目录、远程文本文件和受限查询命令。
+                写文件或执行修改命令时，每次调用都必须显式传入 allowWrite=true；不暴露密码、私钥或
+                Electron IPC。
               </template>
             </el-alert>
 
@@ -1148,6 +1149,7 @@
                 <li>只能操作 MShell 当前已经连接的 SSH 会话。</li>
                 <li>远程文件读取限制为单文件 1 MiB，目录最多返回 2000 项。</li>
                 <li>查询命令限制为单条白名单命令，禁止管道、重定向和修改类操作。</li>
+                <li>写文件和修改命令必须逐次携带 allowWrite=true，并按高风险操作记录审计。</li>
                 <li>每次 Agent 工具调用都会写入现有审计日志。</li>
               </ul>
             </div>
@@ -1636,7 +1638,7 @@ const DEFAULT_RESTORE_OPTIONS = [
 const restoreOptions = ref<string[]>([...DEFAULT_RESTORE_OPTIONS])
 const backupLoading = ref(false)
 
-const appVersion = ref('0.2.13')
+const appVersion = ref('0.2.14')
 
 const mcpStatus = ref({
   enabled: false,

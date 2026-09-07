@@ -17,12 +17,13 @@ const mocks = vi.hoisted(() => {
     getConnection: vi.fn(),
     executeCommand: vi.fn(),
     hasSFTP: vi.fn(),
-    initSFTP: vi.fn()
+    initSFTP: vi.fn(),
+    writeFile: vi.fn()
   }
 })
 
 vi.mock('electron', () => ({
-  app: { getVersion: () => '0.2.13' },
+  app: { getVersion: () => '0.2.14' },
   BrowserWindow: { getAllWindows: () => [] }
 }))
 
@@ -42,7 +43,8 @@ vi.mock('../SSHConnectionManager', () => ({
 vi.mock('../SFTPManager', () => ({
   sftpManager: {
     hasSFTP: mocks.hasSFTP,
-    initSFTP: mocks.initSFTP
+    initSFTP: mocks.initSFTP,
+    writeFile: mocks.writeFile
   }
 }))
 
@@ -205,7 +207,9 @@ describe('MCPServerManager', () => {
       'get_ssh_connection_status',
       'list_remote_files',
       'read_remote_file',
-      'execute_readonly_command'
+      'execute_readonly_command',
+      'write_remote_file',
+      'execute_command'
     ])
 
     const sessionsResponse = await postMcp(port, {
@@ -275,6 +279,102 @@ describe('MCPServerManager', () => {
     const rejectedPayload = await readMcpPayload(rejectedResponse)
     expect(rejectedPayload.result.isError).toBe(true)
     expect(mocks.executeCommand).toHaveBeenCalledTimes(2)
+
+    const deniedWriteResponse = await postMcp(port, {
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'tools/call',
+      params: {
+        name: 'write_remote_file',
+        arguments: {
+          connectionId: 'connected-session',
+          filePath: '/tmp/mshell.txt',
+          content: 'hello\n'
+        }
+      }
+    })
+    const deniedWritePayload = await readMcpPayload(deniedWriteResponse)
+    expect(deniedWritePayload.result.isError).toBe(true)
+    expect(mocks.writeFile).not.toHaveBeenCalled()
+
+    mocks.hasSFTP.mockReturnValue(true)
+    mocks.writeFile.mockResolvedValue(undefined)
+    const writeResponse = await postMcp(port, {
+      jsonrpc: '2.0',
+      id: 8,
+      method: 'tools/call',
+      params: {
+        name: 'write_remote_file',
+        arguments: {
+          connectionId: 'connected-session',
+          filePath: '/tmp/mshell.txt',
+          content: 'hello\n',
+          allowWrite: true
+        }
+      }
+    })
+    const writePayload = await readMcpPayload(writeResponse)
+    expect(JSON.parse(writePayload.result.content[0].text)).toEqual({
+      connectionId: 'connected-session',
+      filePath: '/tmp/mshell.txt',
+      bytes: 6,
+      written: true
+    })
+    expect(mocks.writeFile).toHaveBeenCalledWith('connected-session', '/tmp/mshell.txt', 'hello\n')
+
+    const deniedCommandResponse = await postMcp(port, {
+      jsonrpc: '2.0',
+      id: 9,
+      method: 'tools/call',
+      params: {
+        name: 'execute_command',
+        arguments: { connectionId: 'connected-session', command: 'touch /tmp/mshell-command' }
+      }
+    })
+    const deniedCommandPayload = await readMcpPayload(deniedCommandResponse)
+    expect(deniedCommandPayload.result.isError).toBe(true)
+    expect(mocks.executeCommand).toHaveBeenCalledTimes(2)
+
+    mocks.executeCommand.mockResolvedValueOnce('updated\n')
+    const commandResponse = await postMcp(port, {
+      jsonrpc: '2.0',
+      id: 10,
+      method: 'tools/call',
+      params: {
+        name: 'execute_command',
+        arguments: {
+          connectionId: 'connected-session',
+          command: 'touch /tmp/mshell-command',
+          allowWrite: true
+        }
+      }
+    })
+    const commandPayload = await readMcpPayload(commandResponse)
+    expect(JSON.parse(commandPayload.result.content[0].text)).toEqual({
+      connectionId: 'connected-session',
+      command: 'touch /tmp/mshell-command',
+      output: 'updated\n',
+      outputBytes: 8,
+      truncated: false,
+      executed: true
+    })
+    expect(mocks.executeCommand).toHaveBeenLastCalledWith(
+      'connected-session',
+      'touch /tmp/mshell-command',
+      20_000,
+      2 * 1024 * 1024
+    )
+    const commandAudit = mocks.auditLog.mock.calls.find(
+      ([, entry]) => entry.resource === 'execute_command' && entry.success === true
+    )
+    expect(commandAudit?.[1].details).toEqual(
+      expect.objectContaining({
+        commandSha256: expect.any(String),
+        commandLength: 'touch /tmp/mshell-command'.length,
+        allowWrite: true
+      })
+    )
+    expect(commandAudit?.[1].details).not.toHaveProperty('command')
     expect(mocks.auditLog).toHaveBeenCalled()
   })
 })

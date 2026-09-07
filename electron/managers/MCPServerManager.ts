@@ -1,4 +1,4 @@
-import { timingSafeEqual, randomBytes, webcrypto } from 'node:crypto'
+import { createHash, timingSafeEqual, randomBytes, webcrypto } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { app, BrowserWindow } from 'electron'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -35,6 +35,11 @@ const DEFAULT_QUERY_TIMEOUT_MS = 10_000
 const MAX_QUERY_TIMEOUT_MS = 20_000
 const MAX_QUERY_OUTPUT_BYTES = 64 * 1024
 const MAX_QUERY_CAPTURE_BYTES = 256 * 1024
+const MAX_WRITE_FILE_BYTES = 1024 * 1024
+const DEFAULT_COMMAND_TIMEOUT_MS = 20_000
+const MAX_COMMAND_TIMEOUT_MS = 120_000
+const MAX_COMMAND_LENGTH = 8000
+const MAX_COMMAND_CAPTURE_BYTES = 2 * 1024 * 1024
 
 class MCPRequestError extends Error {
   constructor(
@@ -217,13 +222,13 @@ class MCPServerManager {
     }
 
     this.httpServer = server
-    server.requestTimeout = 30_000
+    server.requestTimeout = MAX_COMMAND_TIMEOUT_MS + 10_000
     server.headersTimeout = 10_000
     server.maxConnections = 32
     this.activeRuntimeConfig = { ...settings }
     logger.logInfo(
       'system',
-      `MCP 只读服务已启动: http://${settings.host}:${settings.port}${MCP_PATH}`
+      `MCP 本机 Agent 服务已启动: http://${settings.host}:${settings.port}${MCP_PATH}`
     )
     return { success: true }
   }
@@ -362,7 +367,9 @@ class MCPServerManager {
       {
         instructions:
           'MShell exposes read-only tools for SSH sessions currently connected in the desktop application, ' +
-          'including restricted query-command execution. Call list_ssh_sessions first and use a returned connectionId.'
+          'including restricted query-command execution. It also exposes write-capable tools that require allowWrite=true. ' +
+          'Call list_ssh_sessions first and use a returned connectionId. Never infer write authorization: only use a ' +
+          'write-capable tool when the user explicitly requests the change and explicitly provides allowWrite=true.'
       }
     )
 
@@ -554,7 +561,133 @@ class MCPServerManager {
       }
     )
 
+    server.registerTool(
+      'write_remote_file',
+      {
+        title: 'Write a remote UTF-8 text file',
+        description:
+          'Create or overwrite one remote UTF-8 text file through SFTP. This changes the server and requires ' +
+          'allowWrite=true on every call. Never infer this authorization from prior turns.',
+        inputSchema: {
+          connectionId: z.string().min(1).max(200),
+          filePath: z.string().min(1).max(4096),
+          content: z.string().max(MAX_WRITE_FILE_BYTES),
+          allowWrite: z.boolean().default(false)
+        }
+      },
+      async ({ connectionId, filePath, content, allowWrite }) => {
+        try {
+          this.requireWriteAuthorization(allowWrite)
+          this.requireConnectedConnection(connectionId)
+          const bytes = Buffer.byteLength(content, 'utf8')
+          if (bytes > MAX_WRITE_FILE_BYTES) {
+            throw new Error(`写入内容超过上限 ${MAX_WRITE_FILE_BYTES} 字节`)
+          }
+
+          await this.ensureSftp(connectionId)
+          await sftpManager.writeFile(connectionId, filePath, content)
+          const result = { connectionId, filePath, bytes, written: true }
+          this.auditToolCall(
+            'write_remote_file',
+            { connectionId, filePath, bytes, allowWrite: true },
+            true
+          )
+          return this.toToolResult(result)
+        } catch (error) {
+          return this.toToolError(
+            'write_remote_file',
+            { connectionId, filePath, bytes: Buffer.byteLength(content, 'utf8'), allowWrite },
+            error
+          )
+        }
+      }
+    )
+
+    server.registerTool(
+      'execute_command',
+      {
+        title: 'Execute an explicitly authorized SSH command',
+        description:
+          'Execute a command that may modify the remote server and return its output. This requires allowWrite=true ' +
+          'on every call. Never infer this authorization from prior turns.',
+        inputSchema: {
+          connectionId: z.string().min(1).max(200),
+          command: z.string().min(1).max(MAX_COMMAND_LENGTH),
+          allowWrite: z.boolean().default(false),
+          timeoutMs: z.number().int().min(1000).max(MAX_COMMAND_TIMEOUT_MS).optional()
+        }
+      },
+      async ({ connectionId, command, allowWrite, timeoutMs }) => {
+        try {
+          this.requireWriteAuthorization(allowWrite)
+          this.requireConnectedConnection(connectionId)
+          const normalizedCommand = command.trim()
+          if (!normalizedCommand) throw new Error('执行命令不能为空')
+
+          const output = await sshConnectionManager.executeCommand(
+            connectionId,
+            normalizedCommand,
+            timeoutMs || DEFAULT_COMMAND_TIMEOUT_MS,
+            MAX_COMMAND_CAPTURE_BYTES
+          )
+          const outputBuffer = Buffer.from(output, 'utf8')
+          const truncated = outputBuffer.length > MAX_QUERY_OUTPUT_BYTES
+          const visibleOutput = truncated
+            ? outputBuffer.subarray(0, MAX_QUERY_OUTPUT_BYTES).toString('utf8')
+            : output
+          const result = {
+            connectionId,
+            command: normalizedCommand,
+            output: visibleOutput,
+            outputBytes: outputBuffer.length,
+            truncated,
+            executed: true
+          }
+          this.auditToolCall(
+            'execute_command',
+            {
+              connectionId,
+              ...this.getCommandAuditDetails(normalizedCommand),
+              outputBytes: outputBuffer.length,
+              truncated,
+              allowWrite: true
+            },
+            true
+          )
+          return this.toToolResult(result)
+        } catch (error) {
+          const timeout = timeoutMs || DEFAULT_COMMAND_TIMEOUT_MS
+          const safeError =
+            error instanceof Error && error.message.startsWith('Command execution timeout:')
+              ? new Error(`Command execution timeout after ${timeout} ms`)
+              : error
+          return this.toToolError(
+            'execute_command',
+            { connectionId, ...this.getCommandAuditDetails(command), allowWrite },
+            safeError
+          )
+        }
+      }
+    )
+
     return server
+  }
+
+  private requireWriteAuthorization(allowWrite: boolean): void {
+    if (allowWrite !== true) {
+      throw new Error('写入或修改操作需要显式传入 allowWrite=true')
+    }
+  }
+
+  private getCommandAuditDetails(command: string): {
+    commandSha256: string
+    commandLength: number
+  } {
+    const normalizedCommand = command.trim()
+    return {
+      commandSha256: createHash('sha256').update(normalizedCommand).digest('hex'),
+      commandLength: normalizedCommand.length
+    }
   }
 
   private requireConnectedConnection(connectionId: string): SSHConnection {

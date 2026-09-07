@@ -190,7 +190,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
-  // 本机 Agent/MCP 只读服务
+  // 本机 Agent/MCP 安全接入服务
   mcp: {
     getStatus: () => ipcRenderer.invoke('mcp:getStatus'),
     getConfig: () => ipcRenderer.invoke('mcp:getConfig'),
