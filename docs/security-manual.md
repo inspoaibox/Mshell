@@ -1,6 +1,6 @@
 # MShell 安全产品使用说明书
 
-- 文档版本：v0.2.14
+- 文档版本：v0.2.15
 - 适用产品：MShell Windows 桌面端、MShell Android 客户端
 - 更新时间：2026-09-07
 

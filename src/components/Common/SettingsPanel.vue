@@ -1085,7 +1085,12 @@
         <!-- Agent/MCP 接入 -->
         <el-tab-pane label="Agent 接入" name="agent-mcp">
           <div class="settings-section">
-            <h3>本机 Agent / MCP</h3>
+            <div class="mcp-section-header">
+              <h3>本机 Agent / MCP</h3>
+              <el-button :icon="QuestionFilled" @click="showMcpGuideDialog = true">
+                使用详情
+              </el-button>
+            </div>
             <el-alert type="info" :closable="false" show-icon class="mcp-notice">
               <template #title>让 Codex、Claude 等 Agent 操作当前已连接的 SSH 会话</template>
               <template #default>
@@ -1194,6 +1199,288 @@
         </el-tab-pane>
       </el-tabs>
     </div>
+
+    <el-dialog
+      v-model="showMcpGuideDialog"
+      title="Agent / MCP 使用详情"
+      width="900px"
+      top="5vh"
+      class="mcp-guide-dialog"
+      append-to-body
+      destroy-on-close
+    >
+      <div class="mcp-guide">
+        <el-alert type="warning" :closable="false" show-icon>
+          <template #title>写文件和修改命令属于高风险能力</template>
+          <template #default>
+            每次工具调用都必须显式传入 allowWrite=true。该参数不是第二个密码，持有 MCP Token
+            的客户端也可以提交它。
+          </template>
+        </el-alert>
+
+        <el-tabs v-model="mcpGuideTab" class="mcp-guide-tabs">
+          <el-tab-pane label="接入配置" name="setup">
+            <div class="mcp-guide-content">
+              <section>
+                <h4>启用顺序</h4>
+                <ol>
+                  <li>先在 MShell 中连接目标 SSH 会话。</li>
+                  <li>打开“启用 MCP 服务”，确认状态为“服务运行中”。</li>
+                  <li>复制服务端点和访问令牌，再配置 Codex 或 Claude。</li>
+                  <li>保存客户端配置后，完全退出并重开 Agent，然后新建任务。</li>
+                </ol>
+              </section>
+
+              <section>
+                <h4>Codex 图形界面</h4>
+                <div class="mcp-guide-table-wrap">
+                  <table class="mcp-guide-table">
+                    <thead>
+                      <tr>
+                        <th>字段</th>
+                        <th>填写内容</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>类型</td>
+                        <td>流式 HTTP，不要选择 STDIO</td>
+                      </tr>
+                      <tr>
+                        <td>URL</td>
+                        <td>
+                          <code>{{ mcpStatus.endpoint }}</code>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Bearer 令牌环境变量</td>
+                        <td>直接标头模式下留空</td>
+                      </tr>
+                      <tr>
+                        <td>标头键</td>
+                        <td><code>Authorization</code></td>
+                      </tr>
+                      <tr>
+                        <td>标头值</td>
+                        <td><code>Bearer &lt;MShell MCP Token&gt;</code></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p>
+                  标头值必须包含 <code>Bearer</code> 和后面的空格。不要同时配置直接标头和 Bearer
+                  环境变量。
+                </p>
+              </section>
+
+              <section>
+                <h4>Codex CLI</h4>
+                <pre><code>$env:MSHELL_MCP_TOKEN = '&lt;MShell MCP Token&gt;'
+codex mcp add mshell --url {{ mcpStatus.endpoint }} --bearer-token-env-var MSHELL_MCP_TOKEN
+codex mcp list</code></pre>
+              </section>
+
+              <div class="mcp-guide-actions">
+                <el-button
+                  :icon="DocumentCopy"
+                  :disabled="!mcpStatus.running"
+                  @click="copyCodexMcpConfig"
+                >
+                  复制 Codex 配置
+                </el-button>
+                <el-button
+                  :icon="DocumentCopy"
+                  :disabled="!mcpStatus.running"
+                  @click="copyClaudeMcpConfig"
+                >
+                  复制 Claude 配置
+                </el-button>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="工具与流程" name="tools">
+            <div class="mcp-guide-content">
+              <section>
+                <h4>可用工具</h4>
+                <div class="mcp-guide-table-wrap">
+                  <table class="mcp-guide-table">
+                    <thead>
+                      <tr>
+                        <th>工具</th>
+                        <th>作用</th>
+                        <th>写入参数</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><code>list_ssh_sessions</code></td>
+                        <td>列出已连接会话</td>
+                        <td>不需要</td>
+                      </tr>
+                      <tr>
+                        <td><code>get_ssh_connection_status</code></td>
+                        <td>读取连接状态</td>
+                        <td>不需要</td>
+                      </tr>
+                      <tr>
+                        <td><code>list_remote_files</code></td>
+                        <td>列出远程目录</td>
+                        <td>不需要</td>
+                      </tr>
+                      <tr>
+                        <td><code>read_remote_file</code></td>
+                        <td>读取 UTF-8 文本</td>
+                        <td>不需要</td>
+                      </tr>
+                      <tr>
+                        <td><code>execute_readonly_command</code></td>
+                        <td>执行白名单查询命令</td>
+                        <td>不需要</td>
+                      </tr>
+                      <tr>
+                        <td><code>write_remote_file</code></td>
+                        <td>创建或完整覆盖文本文件</td>
+                        <td><code>allowWrite=true</code></td>
+                      </tr>
+                      <tr>
+                        <td><code>execute_command</code></td>
+                        <td>执行可能修改服务器的命令</td>
+                        <td><code>allowWrite=true</code></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section>
+                <h4>推荐调用流程</h4>
+                <ol>
+                  <li>
+                    调用 <code>list_ssh_sessions</code>，让用户确认目标 <code>connectionId</code>。
+                  </li>
+                  <li>读取文件或运行查询，确认当前服务器状态。</li>
+                  <li>写入前展示完整路径、差异或命令，并等待用户明确确认。</li>
+                  <li>只在本次写入调用中传入 <code>allowWrite=true</code>。</li>
+                  <li>写入完成后重新读取文件或执行查询，验证实际结果。</li>
+                </ol>
+              </section>
+
+              <section>
+                <h4>查询示例</h4>
+                <pre><code>先调用 list_ssh_sessions，并让我确认 connectionId。
+确认后调用 execute_readonly_command 执行 df -h。
+读取 output 并总结磁盘使用情况，不要修改服务器。</code></pre>
+              </section>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="写入规则" name="write">
+            <div class="mcp-guide-content">
+              <section>
+                <h4>allowWrite 参数</h4>
+                <ul>
+                  <li>参数必须是布尔值 <code>true</code>，字符串 <code>"true"</code> 无效。</li>
+                  <li>缺少参数或传入 <code>false</code> 时，MShell 会拒绝并记录失败审计。</li>
+                  <li>参数只作用于当前工具调用，不会永久开启写入权限。</li>
+                  <li>不得根据历史对话推断授权，每次写入都应重新确认目标和内容。</li>
+                </ul>
+              </section>
+
+              <section>
+                <h4>写文件</h4>
+                <pre><code>先读取 /etc/example.conf 并展示修改前后的差异。
+等待我确认后，调用 write_remote_file：
+filePath=/etc/example.conf
+content=&lt;确认后的完整文件内容&gt;
+allowWrite=true</code></pre>
+                <ul>
+                  <li>单次最多写入 1 MiB UTF-8 文本。</li>
+                  <li>目标已存在时会完整覆盖，不是局部补丁。</li>
+                  <li>写入前应保留旧内容或创建备份，避免覆盖后无法恢复。</li>
+                </ul>
+              </section>
+
+              <section>
+                <h4>修改命令</h4>
+                <pre><code>调用 execute_command：
+command=systemctl restart nginx
+allowWrite=true
+读取返回的 output，并且不要执行其他命令。</code></pre>
+                <ul>
+                  <li>修改命令不经过查询白名单，可以执行删除、覆盖、安装和服务重启。</li>
+                  <li>命令最长 8000 个字符，默认超时 20 秒，最大 120 秒。</li>
+                  <li>超时或客户端断开不代表远程进程已经回滚。</li>
+                </ul>
+              </section>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="故障排查" name="troubleshooting">
+            <div class="mcp-guide-content">
+              <section>
+                <h4>常见问题</h4>
+                <div class="mcp-guide-table-wrap">
+                  <table class="mcp-guide-table">
+                    <thead>
+                      <tr>
+                        <th>现象</th>
+                        <th>处理方式</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>没有 MShell 工具</td>
+                        <td>确认服务运行，完全重启 Agent 并新建任务。</td>
+                      </tr>
+                      <tr>
+                        <td>401 Unauthorized</td>
+                        <td>检查标头是否为 <code>Bearer &lt;Token&gt;</code>，令牌是否已更新。</td>
+                      </tr>
+                      <tr>
+                        <td>没有 SSH 会话</td>
+                        <td>MShell 只返回状态为“已连接”的会话。</td>
+                      </tr>
+                      <tr>
+                        <td>写入被拒绝</td>
+                        <td>
+                          确认使用写入工具，且本次调用传入布尔值 <code>allowWrite=true</code>。
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>查询命令被拒绝</td>
+                        <td>查询工具不支持管道、重定向、脚本和修改类命令。</td>
+                      </tr>
+                      <tr>
+                        <td>命令超时</td>
+                        <td>缩小查询范围，或在允许范围内提高 <code>timeoutMs</code>。</td>
+                      </tr>
+                      <tr>
+                        <td>输出被截断</td>
+                        <td>检查 <code>truncated</code>，并使用更精确的过滤或分页参数。</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section>
+                <h4>安全处理</h4>
+                <ul>
+                  <li>MCP Token 出现在截图、日志或聊天中时，立即在本页重新生成。</li>
+                  <li>不要通过端口转发、反向代理或内网穿透暴露本机 MCP 端口。</li>
+                  <li>高风险操作后检查审计日志，并验证服务、配置和新连接是否正常。</li>
+                </ul>
+              </section>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+
+      <template #footer>
+        <el-button @click="showMcpGuideDialog = false">关闭</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 编辑快捷键对话框 -->
     <el-dialog v-model="showEditShortcutDialog" title="编辑快捷键" width="500px">
@@ -1464,7 +1751,15 @@
 <script setup lang="ts">
 import { ref, onMounted, toRaw, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Download, Upload, Refresh, Lock, Unlock } from '@element-plus/icons-vue'
+import {
+  DocumentCopy,
+  Download,
+  Upload,
+  Refresh,
+  Lock,
+  Unlock,
+  QuestionFilled
+} from '@element-plus/icons-vue'
 import { themes } from '@/utils/terminal-themes'
 import { applyAppShellTheme } from '@/utils/app-appearance'
 import { keyboardShortcutManager, type ShortcutConfig } from '@/utils/keyboard-shortcuts'
@@ -1495,6 +1790,8 @@ const props = withDefaults(
 )
 
 const activeTab = ref(props.initialTab)
+const showMcpGuideDialog = ref(false)
+const mcpGuideTab = ref('setup')
 
 // 主题相关状态
 const availableThemes = themes
@@ -1638,7 +1935,7 @@ const DEFAULT_RESTORE_OPTIONS = [
 const restoreOptions = ref<string[]>([...DEFAULT_RESTORE_OPTIONS])
 const backupLoading = ref(false)
 
-const appVersion = ref('0.2.14')
+const appVersion = ref('0.2.15')
 
 const mcpStatus = ref({
   enabled: false,
@@ -3764,6 +4061,27 @@ const testShortcuts = () => {
   margin-bottom: var(--spacing-lg);
 }
 
+.mcp-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.mcp-section-header h3 {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.mcp-section-header .el-button {
+  flex-shrink: 0;
+}
+
 .mcp-inline-field {
   display: flex;
   align-items: center;
@@ -3798,6 +4116,174 @@ const testShortcuts = () => {
 .mcp-safety-list ul {
   margin: var(--spacing-xs) 0 0;
   padding-left: var(--spacing-lg);
+}
+
+.mcp-guide-dialog {
+  max-width: calc(100vw - 32px);
+}
+
+.mcp-guide {
+  display: flex;
+  min-width: 0;
+  max-height: 74vh;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.mcp-guide-tabs {
+  min-width: 0;
+}
+
+.mcp-guide-tabs :deep(.el-tabs__header) {
+  margin-bottom: var(--spacing-md);
+}
+
+.mcp-guide-tabs :deep(.el-tabs__nav-wrap) {
+  overflow-x: auto;
+}
+
+.mcp-guide-tabs :deep(.el-tabs__content) {
+  overflow: visible;
+}
+
+.mcp-guide-content {
+  display: flex;
+  max-height: calc(74vh - 126px);
+  flex-direction: column;
+  gap: var(--spacing-lg);
+  overflow-y: auto;
+  padding-right: var(--spacing-sm);
+}
+
+.mcp-guide-content section {
+  padding-bottom: var(--spacing-lg);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.mcp-guide-content section:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.mcp-guide-content h4 {
+  margin: 0 0 var(--spacing-sm);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.mcp-guide-content p,
+.mcp-guide-content li {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.75;
+}
+
+.mcp-guide-content p {
+  margin: var(--spacing-sm) 0 0;
+}
+
+.mcp-guide-content ol,
+.mcp-guide-content ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  margin: 0;
+  padding-left: var(--spacing-xl);
+}
+
+.mcp-guide-content code {
+  padding: 2px 5px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.mcp-guide-content pre {
+  overflow-x: auto;
+  margin: 0;
+  padding: var(--spacing-md);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--terminal-bg, #101418);
+  color: var(--terminal-foreground, #e7eef7);
+}
+
+.mcp-guide-content pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  line-height: 1.65;
+  white-space: pre;
+}
+
+.mcp-guide-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-light);
+}
+
+.mcp-guide-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  table-layout: fixed;
+}
+
+.mcp-guide-table th,
+.mcp-guide-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-light);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.mcp-guide-table th {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.mcp-guide-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.mcp-guide-table th:first-child,
+.mcp-guide-table td:first-child {
+  width: 32%;
+}
+
+.mcp-guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+@media (max-width: 640px) {
+  .mcp-section-header {
+    align-items: flex-start;
+  }
+
+  .mcp-guide {
+    max-height: 78vh;
+  }
+
+  .mcp-guide-content {
+    max-height: calc(78vh - 126px);
+    padding-right: 2px;
+  }
+
+  .mcp-guide-table {
+    min-width: 600px;
+  }
 }
 
 .terminal-background-form {

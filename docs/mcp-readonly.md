@@ -7,6 +7,7 @@ MShell 可以向本机运行的 Codex、Claude 等支持 MCP 的 Agent 提供当
 1. 在 MShell 的“设置 - Agent 接入”中打开“启用 MCP 服务”。
 2. 保持需要读取的 SSH 会话处于已连接状态。
 3. 使用页面中的“复制 Codex 配置”或“复制 Claude 配置”按钮，写入对应客户端配置。
+4. 配置字段、工具清单、写入规则和故障处理可直接点击该页面右上角的“使用详情”查看。
 
 Codex 可以使用直接 `Authorization` 标头或 Bearer 令牌环境变量认证。MShell 的“复制 Codex 配置”按钮提供的是 PowerShell 会话变量和 `config.toml` 的环境变量配置；令牌重新生成后，需要更新配置并重启 Agent。
 

@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => {
 })
 
 vi.mock('electron', () => ({
-  app: { getVersion: () => '0.2.14' },
+  app: { getVersion: () => '0.2.15' },
   BrowserWindow: { getAllWindows: () => [] }
 }))
 
