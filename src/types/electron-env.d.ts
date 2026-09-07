@@ -459,6 +459,7 @@ export interface ElectronAPI {
       success: boolean
       data?: {
         enabled: boolean
+        allowWriteEnabled: boolean
         running: boolean
         host: '127.0.0.1'
         port: number
@@ -471,6 +472,7 @@ export interface ElectronAPI {
       success: boolean
       data?: {
         enabled: boolean
+        allowWriteEnabled: boolean
         running: boolean
         host: '127.0.0.1'
         port: number
@@ -481,6 +483,7 @@ export interface ElectronAPI {
     }>
     start: () => Promise<{ success: boolean; error?: string }>
     stop: () => Promise<{ success: boolean; error?: string }>
+    setWriteEnabled: (enabled: boolean) => Promise<{ success: boolean; error?: string }>
     regenerateToken: () => Promise<{ success: boolean; error?: string }>
   }
   terminalBackground: {

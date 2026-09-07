@@ -1,6 +1,6 @@
 # MShell 安全产品使用说明书
 
-- 文档版本：v0.2.15
+- 文档版本：v0.2.16
 - 适用产品：MShell Windows 桌面端、MShell Android 客户端
 - 更新时间：2026-09-07
 
@@ -15,7 +15,7 @@ MShell 的安全目标是：
 - 在连接前验证 SSH 主机指纹，识别主机身份变化。
 - 通过会话锁、Android PIN/生物识别保护本机界面。
 - 让高风险操作有明确的确认边界，并保留可查询的操作记录。
-- 为本机 Agent 提供 SSH 读取、受限查询和逐次显式授权的写入能力。
+- 为本机 Agent 提供 SSH 读取、受限查询和由本机开关控制的写入能力。
 
 MShell 的安全边界以“本机设备已经可信、操作系统账户没有被攻破、用户确认的 SSH 主机可信”为前提。若 Windows/Android 设备、用户账户、Agent 进程或远程服务器本身已被入侵，软件层面的保护不能保证数据安全。
 
@@ -216,7 +216,7 @@ GitHub/GitLab Token 只用于访问远程同步服务，不等于同步数据加
 
 ## 10. 本机 Agent / MCP 安全接入
 
-本节是完整使用流程。当前 MCP 实现提供会话读取、文件读取、受限查询命令，以及要求 `allowWrite=true` 的文件写入和修改命令能力。详细工具说明也见 [mcp-readonly.md](mcp-readonly.md)。
+本节是完整使用流程。当前 MCP 实现提供会话读取、文件读取、受限查询命令，以及由“设置 - Agent 接入 - 允许写入与修改”控制的文件写入和修改命令能力。详细工具说明也见 [mcp-readonly.md](mcp-readonly.md)。
 
 ### 10.1 功能和边界
 
@@ -237,16 +237,16 @@ MCP 服务默认关闭，启动后只监听：
 | list_remote_files         | 通过已连接会话的 SFTP 列出远程目录。               |
 | read_remote_file          | 通过 SFTP 读取 UTF-8 文本文件。                    |
 | execute_readonly_command  | 执行单条白名单查询命令，并返回命令和标准输出。     |
-| write_remote_file         | 显式授权后创建或完整覆盖远程 UTF-8 文本文件。      |
-| execute_command           | 显式授权后执行可能修改服务器的命令并返回输出。     |
+| write_remote_file         | 开启写入开关后创建或完整覆盖远程 UTF-8 文本文件。  |
+| execute_command           | 开启写入开关后执行可能修改服务器的命令并返回输出。 |
 
 MCP 不提供：
 
-- 未携带 `allowWrite=true` 的文件写入或修改命令。
+- 写入开关关闭时的文件写入或修改命令。
 - 直接控制现有交互式终端输入流。
 - 独立暴露 SSH 密码、私钥、passphrase、代理凭据和 Electron IPC。
 
-带 `allowWrite=true` 的 `execute_command` 可以执行任意远程 Shell 命令，包括删除文件、安装软件、修改权限、重启服务和调整防火墙。该参数是防误操作门槛，不是额外密码或人工审批机制；任何持有 MCP Token 的客户端都可能主动提交该参数。
+写入开关开启后，`execute_command` 可以执行任意远程 Shell 命令，包括删除文件、安装软件、修改权限、重启服务和调整防火墙。该开关是本机能力控制，不是额外密码或人工审批机制；开启期间，任何持有 MCP Token 的客户端都可以调用写入工具。
 
 - SSH 密码、私钥、passphrase、代理凭据和 Electron IPC。
 
@@ -347,9 +347,10 @@ STDIO 和流式 HTTP 是两种不同的 MCP 传输方式。STDIO 由 Codex 启�
 5. 需要读取目录时调用 list_remote_files，传入明确路径。
 6. 需要阅读文本时调用 read_remote_file，传入明确文件路径。
 7. 需要查询系统状态时调用 execute_readonly_command，传入一条白名单查询命令。
-8. 需要写文件时，先读取旧内容、展示差异并等待确认，再调用 write_remote_file 且传入 allowWrite=true。
-9. 需要执行修改命令时，先展示完整命令并等待确认，再调用 execute_command 且传入 allowWrite=true。
-10. 操作完成后检查 Agent 输出中是否包含密码、Token、私钥或不应离开本机的业务数据。
+8. 需要修改时，在“Agent 接入”中开启“允许写入与修改”。
+9. Agent 可调用 write_remote_file 或 execute_command 连续完成本次任务，不需要逐次传入写入参数。
+10. 重要配置建议先读取旧内容或备份，完成后重新读取或查询验证结果。
+11. 任务结束后关闭“允许写入与修改”，并检查输出中是否包含不应离开本机的业务数据。
 
 推荐先发送以下请求，让 Agent 只列出会话，不执行任何操作：
 
@@ -376,13 +377,14 @@ STDIO 和流式 HTTP 是两种不同的 MCP 传输方式。STDIO 由 Codex 启�
 写文件示例：
 
     使用 connectionId="这里填写已确认的 ID"。
-    先读取 /etc/example.conf 并显示修改前后的差异，等待我确认。
-    确认后调用 write_remote_file 写入完整新内容，并设置 allowWrite=true。
+    “允许写入与修改”已经开启。
+    调用 write_remote_file，把完整新内容写入 /etc/example.conf。
 
 修改命令示例：
 
     使用 connectionId="这里填写已确认的 ID"。
-    调用 execute_command 执行 systemctl restart nginx，设置 allowWrite=true。
+    “允许写入与修改”已经开启。
+    调用 execute_command 执行 systemctl restart nginx。
     读取返回的 output 并告诉我执行结果，不要执行其他命令。
 
 ### 10.7 工具调用规则
@@ -393,7 +395,8 @@ Agent 应遵循以下顺序：
 2. 用户确认目标 connectionId
 3. get_ssh_connection_status（需要确认状态时）
 4. list_remote_files、read_remote_file 或 execute_readonly_command
-5. 用户明确授权后，才调用 write_remote_file 或 execute_command，并在本次调用传入 allowWrite=true
+5. 用户开启“允许写入与修改”后，才调用 write_remote_file 或 execute_command
+6. 当前任务完成后关闭写入开关
 
 约束：
 
@@ -405,7 +408,8 @@ Agent 应遵循以下顺序：
 - 查询命令采用程序和操作白名单，不支持管道、重定向、命令串、Shell 展开、脚本解释器、sudo 和修改类操作。
 - write_remote_file 每次最多写入 1 MiB UTF-8 文本；已存在的目标文件会被完整覆盖。
 - execute_command 最长 8000 个字符，默认超时 20 秒，最大 120 秒，底层输出捕获上限为 2 MiB。
-- allowWrite=true 只授权当前工具调用，不会永久打开写入；但服务端无法确认该参数是否真的由人类输入。
+- 写入开关关闭后，服务端立即拒绝 write_remote_file 和 execute_command；查询与读取工具不受影响。
+- 写入开关会保存在本机，重启后仍保持上次状态；开启期间任何持有 MCP Token 的客户端都可以调用写入工具。
 - 修改命令超时或 MCP 客户端断开时，不能保证远程进程已经停止或自动回滚。
 - Agent 只能读取当前已连接会话；断开或重连期间调用会返回不可用错误。
 - SSH 自动重连成功后，MShell 会按新的 SSH 客户端重建 SFTP 通道，Agent 需要重新确认会话状态。

@@ -23,6 +23,7 @@ export interface TerminalShortcutConfig {
 
 export interface AgentMcpSettings {
   enabled: boolean
+  allowWriteEnabled: boolean
   host: '127.0.0.1'
   port: number
   token: string
@@ -155,6 +156,7 @@ class AppSettingsManager {
       },
       agentMcp: {
         enabled: false,
+        allowWriteEnabled: false,
         host: '127.0.0.1',
         port: 47821,
         token: randomBytes(32).toString('base64url')
@@ -194,6 +196,7 @@ class AppSettingsManager {
 
     return {
       enabled: value?.enabled === true,
+      allowWriteEnabled: value?.allowWriteEnabled === true,
       host: '127.0.0.1',
       port,
       token:

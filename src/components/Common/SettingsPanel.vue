@@ -1095,7 +1095,7 @@
               <template #title>让 Codex、Claude 等 Agent 操作当前已连接的 SSH 会话</template>
               <template #default>
                 默认能力以只读为主：会话列表、连接状态、远程目录、远程文本文件和受限查询命令。
-                写文件或执行修改命令时，每次调用都必须显式传入 allowWrite=true；不暴露密码、私钥或
+                只有开启“允许写入与修改”后，Agent 才能写文件或执行修改命令；不暴露密码、私钥或
                 Electron IPC。
               </template>
             </el-alert>
@@ -1111,6 +1111,34 @@
                   {{ mcpStatus.running ? '服务运行中' : '默认关闭，仅监听本机' }}
                 </span>
               </el-form-item>
+
+              <el-form-item label="允许写入与修改">
+                <el-switch
+                  v-model="settings.agentMcp.allowWriteEnabled"
+                  :loading="mcpWriteLoading"
+                  @change="handleMcpWriteToggle"
+                />
+                <span class="form-hint">
+                  {{
+                    settings.agentMcp.allowWriteEnabled
+                      ? '已开启，Agent 可以写文件和执行任意修改命令'
+                      : '默认关闭，所有写入和修改操作由服务端拒绝'
+                  }}
+                </span>
+              </el-form-item>
+
+              <el-alert
+                v-if="settings.agentMcp.allowWriteEnabled"
+                type="warning"
+                :closable="false"
+                show-icon
+                class="mcp-write-notice"
+              >
+                <template #title>写入能力已开启</template>
+                <template #default>
+                  持有当前 MCP Token 的 Agent 可以覆盖远程文件并执行修改命令。完成操作后建议关闭。
+                </template>
+              </el-alert>
 
               <el-form-item label="服务端点">
                 <div class="mcp-inline-field">
@@ -1154,7 +1182,7 @@
                 <li>只能操作 MShell 当前已经连接的 SSH 会话。</li>
                 <li>远程文件读取限制为单文件 1 MiB，目录最多返回 2000 项。</li>
                 <li>查询命令限制为单条白名单命令，禁止管道、重定向和修改类操作。</li>
-                <li>写文件和修改命令必须逐次携带 allowWrite=true，并按高风险操作记录审计。</li>
+                <li>“允许写入与修改”关闭时，写文件和修改命令会被服务端拒绝。</li>
                 <li>每次 Agent 工具调用都会写入现有审计日志。</li>
               </ul>
             </div>
@@ -1213,8 +1241,8 @@
         <el-alert type="warning" :closable="false" show-icon>
           <template #title>写文件和修改命令属于高风险能力</template>
           <template #default>
-            每次工具调用都必须显式传入 allowWrite=true。该参数不是第二个密码，持有 MCP Token
-            的客户端也可以提交它。
+            只有开启“允许写入与修改”后才能使用写入工具。开关不是第二个密码，持有 MCP Token
+            的客户端在开启期间可以修改服务器。
           </template>
         </el-alert>
 
@@ -1309,7 +1337,7 @@ codex mcp list</code></pre>
                       <tr>
                         <th>工具</th>
                         <th>作用</th>
-                        <th>写入参数</th>
+                        <th>写入开关</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1341,12 +1369,12 @@ codex mcp list</code></pre>
                       <tr>
                         <td><code>write_remote_file</code></td>
                         <td>创建或完整覆盖文本文件</td>
-                        <td><code>allowWrite=true</code></td>
+                        <td>必须开启</td>
                       </tr>
                       <tr>
                         <td><code>execute_command</code></td>
                         <td>执行可能修改服务器的命令</td>
-                        <td><code>allowWrite=true</code></td>
+                        <td>必须开启</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1359,10 +1387,11 @@ codex mcp list</code></pre>
                   <li>
                     调用 <code>list_ssh_sessions</code>，让用户确认目标 <code>connectionId</code>。
                   </li>
-                  <li>读取文件或运行查询，确认当前服务器状态。</li>
-                  <li>写入前展示完整路径、差异或命令，并等待用户明确确认。</li>
-                  <li>只在本次写入调用中传入 <code>allowWrite=true</code>。</li>
+                  <li>需要修改时，在设置中开启“允许写入与修改”。</li>
+                  <li>Agent 可以连续执行本次任务所需的文件写入和修改命令。</li>
+                  <li>重要配置建议先读取旧内容或备份，但不要求每次重复确认。</li>
                   <li>写入完成后重新读取文件或执行查询，验证实际结果。</li>
+                  <li>任务完成后关闭“允许写入与修改”。</li>
                 </ol>
               </section>
 
@@ -1378,22 +1407,23 @@ codex mcp list</code></pre>
           <el-tab-pane label="写入规则" name="write">
             <div class="mcp-guide-content">
               <section>
-                <h4>allowWrite 参数</h4>
+                <h4>写入开关</h4>
                 <ul>
-                  <li>参数必须是布尔值 <code>true</code>，字符串 <code>"true"</code> 无效。</li>
-                  <li>缺少参数或传入 <code>false</code> 时，MShell 会拒绝并记录失败审计。</li>
-                  <li>参数只作用于当前工具调用，不会永久开启写入权限。</li>
-                  <li>不得根据历史对话推断授权，每次写入都应重新确认目标和内容。</li>
+                  <li>
+                    开关关闭时，<code>write_remote_file</code> 和
+                    <code>execute_command</code> 会被服务端拒绝。
+                  </li>
+                  <li>开关开启后，写入工具不再要求每次传入额外参数。</li>
+                  <li>设置会保存在本机，重启 MShell 后仍保持上次状态。</li>
+                  <li>完成写入后建议关闭，减少 Token 泄露后的影响范围。</li>
                 </ul>
               </section>
 
               <section>
                 <h4>写文件</h4>
-                <pre><code>先读取 /etc/example.conf 并展示修改前后的差异。
-等待我确认后，调用 write_remote_file：
+                <pre><code>开启“允许写入与修改”后，调用 write_remote_file：
 filePath=/etc/example.conf
-content=&lt;确认后的完整文件内容&gt;
-allowWrite=true</code></pre>
+content=&lt;完整文件内容&gt;</code></pre>
                 <ul>
                   <li>单次最多写入 1 MiB UTF-8 文本。</li>
                   <li>目标已存在时会完整覆盖，不是局部补丁。</li>
@@ -1403,9 +1433,8 @@ allowWrite=true</code></pre>
 
               <section>
                 <h4>修改命令</h4>
-                <pre><code>调用 execute_command：
+                <pre><code>开启“允许写入与修改”后，调用 execute_command：
 command=systemctl restart nginx
-allowWrite=true
 读取返回的 output，并且不要执行其他命令。</code></pre>
                 <ul>
                   <li>修改命令不经过查询白名单，可以执行删除、覆盖、安装和服务重启。</li>
@@ -1443,9 +1472,7 @@ allowWrite=true
                       </tr>
                       <tr>
                         <td>写入被拒绝</td>
-                        <td>
-                          确认使用写入工具，且本次调用传入布尔值 <code>allowWrite=true</code>。
-                        </td>
+                        <td>在“Agent 接入”中开启“允许写入与修改”，无需额外调用参数。</td>
                       </tr>
                       <tr>
                         <td>查询命令被拒绝</td>
@@ -1859,6 +1886,7 @@ const settings = ref({
   },
   agentMcp: {
     enabled: false,
+    allowWriteEnabled: false,
     host: '127.0.0.1' as const,
     port: 47821,
     token: ''
@@ -1935,10 +1963,11 @@ const DEFAULT_RESTORE_OPTIONS = [
 const restoreOptions = ref<string[]>([...DEFAULT_RESTORE_OPTIONS])
 const backupLoading = ref(false)
 
-const appVersion = ref('0.2.15')
+const appVersion = ref('0.2.16')
 
 const mcpStatus = ref({
   enabled: false,
+  allowWriteEnabled: false,
   running: false,
   host: '127.0.0.1' as const,
   port: 47821,
@@ -1946,6 +1975,7 @@ const mcpStatus = ref({
   token: ''
 })
 const mcpLoading = ref(false)
+const mcpWriteLoading = ref(false)
 const mcpTokenVisible = ref(false)
 const maskedMcpToken = computed(() => {
   const token = settings.value.agentMcp.token
@@ -2168,6 +2198,7 @@ const loadMcpStatus = async () => {
     settings.value.agentMcp = {
       ...settings.value.agentMcp,
       enabled: result.data.enabled,
+      allowWriteEnabled: result.data.allowWriteEnabled,
       host: result.data.host,
       port: result.data.port,
       token: result.data.token
@@ -2199,6 +2230,27 @@ const handleMcpToggle = async (enabled: boolean | string | number) => {
     ElMessage.error('MCP 服务状态更新失败')
   } finally {
     mcpLoading.value = false
+  }
+}
+
+const handleMcpWriteToggle = async (enabled: boolean | string | number) => {
+  const nextEnabled = Boolean(enabled)
+  mcpWriteLoading.value = true
+  try {
+    const result = await window.electronAPI.mcp.setWriteEnabled(nextEnabled)
+    if (!result.success) {
+      settings.value.agentMcp.allowWriteEnabled = !nextEnabled
+      ElMessage.error(result.error || 'MCP 写入权限更新失败')
+      return
+    }
+    await loadMcpStatus()
+    ElMessage.success(nextEnabled ? 'MCP 写入与修改能力已开启' : 'MCP 写入与修改能力已关闭')
+  } catch (error) {
+    settings.value.agentMcp.allowWriteEnabled = !nextEnabled
+    console.error('Failed to update MCP write access:', error)
+    ElMessage.error('MCP 写入权限更新失败')
+  } finally {
+    mcpWriteLoading.value = false
   }
 }
 
@@ -4059,6 +4111,11 @@ const testShortcuts = () => {
 
 .mcp-notice {
   margin-bottom: var(--spacing-lg);
+}
+
+.mcp-write-notice {
+  width: min(760px, 100%);
+  margin: calc(-1 * var(--spacing-sm)) 0 var(--spacing-lg);
 }
 
 .mcp-section-header {

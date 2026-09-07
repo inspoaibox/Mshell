@@ -58,6 +58,7 @@ type ActiveRequest = {
 
 export interface McpServerStatus {
   enabled: boolean
+  allowWriteEnabled: boolean
   running: boolean
   host: '127.0.0.1'
   port: number
@@ -88,6 +89,7 @@ class MCPServerManager {
     const settings = appSettingsManager.getSettings().agentMcp
     return {
       enabled: settings.enabled,
+      allowWriteEnabled: settings.allowWriteEnabled,
       running: this.httpServer !== null,
       host: settings.host,
       port: settings.port,
@@ -127,6 +129,15 @@ class MCPServerManager {
 
     this.broadcastSettingsChanged()
     return result
+  }
+
+  async setWriteEnabled(allowWriteEnabled: boolean): Promise<McpOperationResult> {
+    const current = appSettingsManager.getSettings().agentMcp
+    await appSettingsManager.updateSettings({
+      agentMcp: { ...current, allowWriteEnabled }
+    })
+    this.broadcastSettingsChanged()
+    return { success: true }
   }
 
   async regenerateToken(): Promise<McpOperationResult> {
@@ -367,9 +378,9 @@ class MCPServerManager {
       {
         instructions:
           'MShell exposes read-only tools for SSH sessions currently connected in the desktop application, ' +
-          'including restricted query-command execution. It also exposes write-capable tools that require allowWrite=true. ' +
-          'Call list_ssh_sessions first and use a returned connectionId. Never infer write authorization: only use a ' +
-          'write-capable tool when the user explicitly requests the change and explicitly provides allowWrite=true.'
+          'including restricted query-command execution. Write-capable tools are available only while the user enables ' +
+          'write access in MShell settings. Call list_ssh_sessions first and use a returned connectionId. Never use a ' +
+          'write-capable tool unless the user explicitly requests the change.'
       }
     )
 
@@ -566,18 +577,17 @@ class MCPServerManager {
       {
         title: 'Write a remote UTF-8 text file',
         description:
-          'Create or overwrite one remote UTF-8 text file through SFTP. This changes the server and requires ' +
-          'allowWrite=true on every call. Never infer this authorization from prior turns.',
+          'Create or overwrite one remote UTF-8 text file through SFTP. This changes the server and is available only ' +
+          'while write access is enabled in MShell settings.',
         inputSchema: {
           connectionId: z.string().min(1).max(200),
           filePath: z.string().min(1).max(4096),
-          content: z.string().max(MAX_WRITE_FILE_BYTES),
-          allowWrite: z.boolean().default(false)
+          content: z.string().max(MAX_WRITE_FILE_BYTES)
         }
       },
-      async ({ connectionId, filePath, content, allowWrite }) => {
+      async ({ connectionId, filePath, content }) => {
         try {
-          this.requireWriteAuthorization(allowWrite)
+          this.requireWriteEnabled()
           this.requireConnectedConnection(connectionId)
           const bytes = Buffer.byteLength(content, 'utf8')
           if (bytes > MAX_WRITE_FILE_BYTES) {
@@ -589,14 +599,14 @@ class MCPServerManager {
           const result = { connectionId, filePath, bytes, written: true }
           this.auditToolCall(
             'write_remote_file',
-            { connectionId, filePath, bytes, allowWrite: true },
+            { connectionId, filePath, bytes, writeEnabled: true },
             true
           )
           return this.toToolResult(result)
         } catch (error) {
           return this.toToolError(
             'write_remote_file',
-            { connectionId, filePath, bytes: Buffer.byteLength(content, 'utf8'), allowWrite },
+            { connectionId, filePath, bytes: Buffer.byteLength(content, 'utf8') },
             error
           )
         }
@@ -608,18 +618,17 @@ class MCPServerManager {
       {
         title: 'Execute an explicitly authorized SSH command',
         description:
-          'Execute a command that may modify the remote server and return its output. This requires allowWrite=true ' +
-          'on every call. Never infer this authorization from prior turns.',
+          'Execute a command that may modify the remote server and return its output. This is available only while ' +
+          'write access is enabled in MShell settings.',
         inputSchema: {
           connectionId: z.string().min(1).max(200),
           command: z.string().min(1).max(MAX_COMMAND_LENGTH),
-          allowWrite: z.boolean().default(false),
           timeoutMs: z.number().int().min(1000).max(MAX_COMMAND_TIMEOUT_MS).optional()
         }
       },
-      async ({ connectionId, command, allowWrite, timeoutMs }) => {
+      async ({ connectionId, command, timeoutMs }) => {
         try {
-          this.requireWriteAuthorization(allowWrite)
+          this.requireWriteEnabled()
           this.requireConnectedConnection(connectionId)
           const normalizedCommand = command.trim()
           if (!normalizedCommand) throw new Error('执行命令不能为空')
@@ -650,7 +659,7 @@ class MCPServerManager {
               ...this.getCommandAuditDetails(normalizedCommand),
               outputBytes: outputBuffer.length,
               truncated,
-              allowWrite: true
+              writeEnabled: true
             },
             true
           )
@@ -663,7 +672,7 @@ class MCPServerManager {
               : error
           return this.toToolError(
             'execute_command',
-            { connectionId, ...this.getCommandAuditDetails(command), allowWrite },
+            { connectionId, ...this.getCommandAuditDetails(command) },
             safeError
           )
         }
@@ -673,9 +682,9 @@ class MCPServerManager {
     return server
   }
 
-  private requireWriteAuthorization(allowWrite: boolean): void {
-    if (allowWrite !== true) {
-      throw new Error('写入或修改操作需要显式传入 allowWrite=true')
+  private requireWriteEnabled(): void {
+    if (appSettingsManager.getSettings().agentMcp.allowWriteEnabled !== true) {
+      throw new Error('MCP 写入与修改能力未开启，请先在设置的 Agent 接入页面启用')
     }
   }
 

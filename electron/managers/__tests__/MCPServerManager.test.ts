@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => {
   const settings = {
     enabled: true,
+    allowWriteEnabled: false,
     host: '127.0.0.1' as const,
     port: 47821,
     token: 'test-mcp-token-that-is-long-enough-for-auth'
@@ -23,7 +24,7 @@ const mocks = vi.hoisted(() => {
 })
 
 vi.mock('electron', () => ({
-  app: { getVersion: () => '0.2.15' },
+  app: { getVersion: () => '0.2.16' },
   BrowserWindow: { getAllWindows: () => [] }
 }))
 
@@ -104,6 +105,7 @@ async function readMcpPayload(response: Response): Promise<any> {
 describe('MCPServerManager', () => {
   afterEach(async () => {
     await mcpServerManager.stop()
+    mocks.settings.allowWriteEnabled = false
     vi.clearAllMocks()
   })
 
@@ -127,6 +129,13 @@ describe('MCPServerManager', () => {
         delete (globalThis as { crypto?: Crypto }).crypto
       }
     }
+  })
+
+  it('persists the server-side write access switch', async () => {
+    await expect(mcpServerManager.setWriteEnabled(true)).resolves.toEqual({ success: true })
+    expect(mocks.updateSettings).toHaveBeenCalledWith({
+      agentMcp: expect.objectContaining({ allowWriteEnabled: true })
+    })
   })
 
   it('requires a bearer token and only lists currently connected SSH sessions', async () => {
@@ -289,7 +298,8 @@ describe('MCPServerManager', () => {
         arguments: {
           connectionId: 'connected-session',
           filePath: '/tmp/mshell.txt',
-          content: 'hello\n'
+          content: 'hello\n',
+          allowWrite: true
         }
       }
     })
@@ -297,6 +307,7 @@ describe('MCPServerManager', () => {
     expect(deniedWritePayload.result.isError).toBe(true)
     expect(mocks.writeFile).not.toHaveBeenCalled()
 
+    mocks.settings.allowWriteEnabled = true
     mocks.hasSFTP.mockReturnValue(true)
     mocks.writeFile.mockResolvedValue(undefined)
     const writeResponse = await postMcp(port, {
@@ -308,8 +319,7 @@ describe('MCPServerManager', () => {
         arguments: {
           connectionId: 'connected-session',
           filePath: '/tmp/mshell.txt',
-          content: 'hello\n',
-          allowWrite: true
+          content: 'hello\n'
         }
       }
     })
@@ -322,19 +332,25 @@ describe('MCPServerManager', () => {
     })
     expect(mocks.writeFile).toHaveBeenCalledWith('connected-session', '/tmp/mshell.txt', 'hello\n')
 
+    mocks.settings.allowWriteEnabled = false
     const deniedCommandResponse = await postMcp(port, {
       jsonrpc: '2.0',
       id: 9,
       method: 'tools/call',
       params: {
         name: 'execute_command',
-        arguments: { connectionId: 'connected-session', command: 'touch /tmp/mshell-command' }
+        arguments: {
+          connectionId: 'connected-session',
+          command: 'touch /tmp/mshell-command',
+          allowWrite: true
+        }
       }
     })
     const deniedCommandPayload = await readMcpPayload(deniedCommandResponse)
     expect(deniedCommandPayload.result.isError).toBe(true)
     expect(mocks.executeCommand).toHaveBeenCalledTimes(2)
 
+    mocks.settings.allowWriteEnabled = true
     mocks.executeCommand.mockResolvedValueOnce('updated\n')
     const commandResponse = await postMcp(port, {
       jsonrpc: '2.0',
@@ -344,8 +360,7 @@ describe('MCPServerManager', () => {
         name: 'execute_command',
         arguments: {
           connectionId: 'connected-session',
-          command: 'touch /tmp/mshell-command',
-          allowWrite: true
+          command: 'touch /tmp/mshell-command'
         }
       }
     })
@@ -371,7 +386,7 @@ describe('MCPServerManager', () => {
       expect.objectContaining({
         commandSha256: expect.any(String),
         commandLength: 'touch /tmp/mshell-command'.length,
-        allowWrite: true
+        writeEnabled: true
       })
     )
     expect(commandAudit?.[1].details).not.toHaveProperty('command')

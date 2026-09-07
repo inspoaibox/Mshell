@@ -196,6 +196,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getConfig: () => ipcRenderer.invoke('mcp:getConfig'),
     start: () => ipcRenderer.invoke('mcp:start'),
     stop: () => ipcRenderer.invoke('mcp:stop'),
+    setWriteEnabled: (enabled: boolean) => ipcRenderer.invoke('mcp:setWriteEnabled', enabled),
     regenerateToken: () => ipcRenderer.invoke('mcp:regenerateToken')
   },
 

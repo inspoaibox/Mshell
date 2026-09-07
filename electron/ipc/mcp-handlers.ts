@@ -15,6 +15,10 @@ export function registerMCPHandlers() {
     return mcpServerManager.setEnabled(false)
   })
 
+  ipcMain.handle('mcp:setWriteEnabled', async (_event, enabled: boolean) => {
+    return mcpServerManager.setWriteEnabled(enabled === true)
+  })
+
   ipcMain.handle('mcp:regenerateToken', async () => {
     return mcpServerManager.regenerateToken()
   })
