@@ -714,11 +714,11 @@ echo "将 SSH 端口修改为 $NEW_PORT"</code></pre>
             </div>
             <div>
               <strong>部署到终端</strong>
-              <p>只把脚本文件写到远程主机，不立即运行。</p>
+              <p>在后台只同步脚本文件，不改动当前终端的提示符和输入行。</p>
             </div>
             <div>
               <strong>运行脚本</strong>
-              <p>未部署时先部署，再运行远程脚本文件。</p>
+              <p>先同步文件，再切换到目标终端运行；输出结束后恢复真实 Shell 提示符和输入焦点。</p>
             </div>
           </div>
         </section>
@@ -743,6 +743,7 @@ echo "当前用户: $TARGET_USER"</code></pre>
             <li>修改 SSH、防火墙、用户权限前，建议保留当前连接并另开窗口测试。</li>
             <li>脚本文件名建议统一使用英文、数字和短横线，例如 <code>init-ssh.sh</code>。</li>
             <li>变量替换只是文本替换，脚本里仍要自行处理引号和参数安全。</li>
+            <li>脚本运行超过 10 分钟时会停止等待完成标记，但不会强制终止远程进程，请返回目标终端检查。</li>
           </ul>
         </section>
       </div>
@@ -833,6 +834,9 @@ echo "当前用户: $TARGET_USER"</code></pre>
           <span>{{ selectedTargetTerminal.name || selectedTargetTerminal.session.name }}</span>
           <code>{{ formatTerminalMeta(selectedTargetTerminal) }}</code>
         </div>
+        <p v-if="targetTerminalIntent === 'run'" class="target-terminal-hint">
+          运行前请确认目标终端停留在可输入命令的 Shell 提示符；脚本输出将在该终端实时显示。
+        </p>
       </div>
 
       <template #footer>
@@ -846,7 +850,7 @@ echo "当前用户: $TARGET_USER"</code></pre>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Delete,
@@ -865,6 +869,12 @@ import {
 import { useAppStore, type Tab } from '@/stores/app'
 import { terminalManager } from '@/utils/terminal-manager'
 import { buildTerminalExecutePayload } from '@/utils/terminal-command-execution'
+import {
+  appendScriptOutputBuffer,
+  buildInteractiveScriptCommand,
+  createScriptRunToken,
+  findScriptCompletion
+} from '@/utils/terminal-script-execution'
 
 type LazyScriptType = 'command' | 'shell' | 'steps'
 type LazyScriptRunMode = 'copy' | 'paste' | 'execute'
@@ -1026,6 +1036,7 @@ const activeScriptFileName = computed(() =>
 )
 const remoteScriptsDir = '~/.mshell/scripts'
 const scriptExecutionTimeoutMs = 10 * 60 * 1000
+const clearCurrentTerminalLine = '\x15\x0b'
 const remoteScriptPath = computed(() => `${remoteScriptsDir}/${activeScriptFileName.value}`)
 const quotedRemoteScriptPath = computed(
   () => `${remoteScriptsDir}/${shellQuotePathSegment(activeScriptFileName.value)}`
@@ -1747,8 +1758,6 @@ const deployScript = async () => {
       scriptExecutionTimeoutMs
     )
 
-    writeScriptResultToTerminal('部署脚本', result, targetTerminalId)
-
     if (!result.success) {
       ElMessage.error(result.error || '部署失败')
       return
@@ -1796,24 +1805,88 @@ const runScript = async () => {
 
   executingScript.value = true
   try {
-    const result = await window.electronAPI.ssh.executeCommand(
+    const deployResult = await window.electronAPI.ssh.executeCommand(
       targetTerminalId,
-      await buildSilentRunCommand(targetTerminalId),
+      buildDeployCommand(),
       scriptExecutionTimeoutMs
     )
+    if (!deployResult.success) {
+      ElMessage.error(deployResult.error || '脚本同步失败')
+      return
+    }
 
-    writeScriptResultToTerminal('运行脚本', result, targetTerminalId)
-
-    if (!result.success) {
-      ElMessage.error(result.error || '脚本运行失败')
+    const exitCode = await runScriptInInteractiveTerminal(targetTerminalId)
+    if (exitCode !== 0) {
+      ElMessage.error(`脚本执行失败，退出码 ${exitCode}`)
       return
     }
 
     await markUsed()
-    ElMessage.success(`脚本已运行，结果已输出到 ${formatTargetTerminalName(targetTerminalId)}`)
+    ElMessage.success(`脚本执行完成：${formatTargetTerminalName(targetTerminalId)}`)
     await maybeUpdateActiveSessionPortAfterSuccessfulRun(script, targetTerminalId)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '脚本运行失败')
   } finally {
     executingScript.value = false
+  }
+}
+
+const runScriptInInteractiveTerminal = async (targetTerminalId: string): Promise<number> => {
+  const instance = terminalManager.get(targetTerminalId)
+  if (!instance) throw new Error('目标终端尚未初始化，请打开终端后重试')
+  if (!instance.echoEnabled) {
+    throw new Error('目标终端正在等待密码或其他隐藏输入，请先完成或取消当前操作')
+  }
+
+  const token = createScriptRunToken()
+  const command = buildInteractiveScriptCommand(quotedRemoteScriptPath.value, token)
+  let outputBuffer = ''
+  let settled = false
+  let unsubscribe: () => void = () => undefined
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  const completion = new Promise<number>((resolve, reject) => {
+    const cleanup = () => {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+      unsubscribe()
+    }
+
+    unsubscribe = terminalManager.subscribeOutput(targetTerminalId, (chunk) => {
+      if (settled) return
+      outputBuffer = appendScriptOutputBuffer(outputBuffer, chunk)
+      const status = findScriptCompletion(outputBuffer, token)
+      if (status === null) return
+      settled = true
+      cleanup()
+      resolve(status)
+    })
+
+    timeoutHandle = setTimeout(() => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(
+        new Error(
+          `脚本运行超过 ${Math.round(scriptExecutionTimeoutMs / 60000)} 分钟，可能仍在终端中执行，请检查输出。`
+        )
+      )
+    }, scriptExecutionTimeoutMs)
+  })
+
+  appStore.activeTab = targetTerminalId
+  appStore.setActiveView('sessions')
+  await nextTick()
+  terminalManager.requestScrollToBottom(targetTerminalId)
+  terminalManager.focus(targetTerminalId)
+  window.electronAPI.ssh.write(
+    targetTerminalId,
+    clearCurrentTerminalLine +
+      buildTerminalExecutePayload(command, instance.bracketedPasteEnabled)
+  )
+
+  try {
+    return await completion
+  } finally {
+    terminalManager.focus(targetTerminalId)
   }
 }
 
@@ -1950,61 +2023,6 @@ const markUsed = async () => {
   if (!selectedScript.value) return
   await window.electronAPI.lazyScript.incrementUsage(selectedScript.value.id)
   selectedScript.value.usageCount += 1
-}
-
-const buildSilentRunCommand = async (targetTerminalId: string) => {
-  const command = buildCheckedRunCommand({ showSyncMessage: false })
-  const currentDir = await resolveCurrentTerminalDirectory(targetTerminalId)
-  return currentDir ? `cd ${shellQuote(currentDir)} && ${command}` : command
-}
-
-const resolveCurrentTerminalDirectory = async (targetTerminalId: string) => {
-  try {
-    const result = await window.electronAPI.ssh.getCurrentDirectory(targetTerminalId)
-    return result.success && result.data ? result.data.trim() : ''
-  } catch {
-    return ''
-  }
-}
-
-const writeScriptResultToTerminal = (
-  action: string,
-  result: { success: boolean; data?: string; error?: string },
-  targetTerminalId: string
-) => {
-  const scriptName = selectedScript.value?.name || '未命名脚本'
-  const scriptPath = isCommandScript.value ? '单条命令' : remoteScriptPath.value
-  const output = result.success ? result.data || '' : formatCommandError(result.error)
-  const statusText = result.success ? '成功' : '失败'
-  const statusColor = result.success ? '\x1b[32m' : '\x1b[31m'
-  const cyan = '\x1b[36m'
-  const dim = '\x1b[90m'
-  const reset = '\x1b[0m'
-  const border = '============================================================'
-
-  const block = [
-    '',
-    `${cyan}${border}${reset}`,
-    `${cyan}MShell ${action}${reset}`,
-    `${dim}脚本：${scriptName}${reset}`,
-    `${dim}路径：${scriptPath}${reset}`,
-    `${dim}时间：${new Date().toLocaleString()}${reset}`,
-    `${statusColor}状态：${statusText}${reset}`,
-    `${cyan}${border}${reset}`,
-    output.trim() || '(无输出)',
-    `${cyan}${border}${reset}`,
-    ''
-  ].join('\n')
-
-  terminalManager.writeLocalOutput(targetTerminalId, toTerminalLineEndings(block))
-}
-
-const formatCommandError = (error?: string) => {
-  if (!error) return '执行失败'
-  if (error.startsWith('Command execution timeout:')) {
-    return `执行超时，已超过 ${Math.round(scriptExecutionTimeoutMs / 1000)} 秒。远程命令可能仍在执行，请检查服务器状态。`
-  }
-  return error
 }
 
 const validateTerminalReady = () => {
@@ -2211,8 +2229,6 @@ const normalizeScriptFileName = (value: string) => {
 }
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
 const shellQuotePathSegment = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
-const toTerminalLineEndings = (value: string) =>
-  value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '\r\n')
 </script>
 
 <style scoped>
@@ -3321,6 +3337,12 @@ const toTerminalLineEndings = (value: string) =>
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.target-terminal-hint {
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.6;
 }
 
 @container lazy-detail (max-width: 520px) {

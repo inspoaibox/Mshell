@@ -516,7 +516,8 @@ export class SSHConnectionManager extends EventEmitter {
     id: string,
     command: string,
     timeout: number = 5000,
-    maxOutputBytes?: number
+    maxOutputBytes?: number,
+    stdin?: string
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       const connection = this.connections.get(id)
@@ -590,6 +591,8 @@ export class SSHConnectionManager extends EventEmitter {
         stream.on('error', (err: Error) => {
           rejectOnce(err)
         })
+
+        if (stdin !== undefined) stream.end(stdin)
       })
     })
   }

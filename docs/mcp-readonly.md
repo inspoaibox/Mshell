@@ -128,6 +128,58 @@ PowerShell 环境变量只对当前窗口及其子进程有效。若 Codex 是�
 - 不支持管道、重定向、`;`、`&&`、命令替换、脚本解释器、`sudo` 或不在白名单中的程序。
 - `systemctl restart`、`docker stop`、`iptables -F`、`find -delete` 等修改操作会被拒绝。
 
+## 数据库查询
+
+`query_database` 不需要开启“允许写入与修改”。它通过已连接的 SSH 会话查询数据库，可读取账号有权限访问的业务表、日志表、系统目录和表结构，不维护业务表白名单。
+
+当用户没有明确给出数据库类型、容器或主机、数据库名和数据库用户时，Agent 必须先调用 `discover_database_targets`。该工具只读取数据库客户端、容器名称和镜像、应用容器、发布端口、非秘密数据库用户名，以及能够安全枚举的数据库名称；不会返回密码或完整容器环境变量。
+
+发现结果包含 `targets`、`applications` 和 `requiresSelection`。同一服务器存在多个数据库、站点或应用时，Agent 必须把候选项交给用户确认业务目标，再把选中目标的 `engine`、`container`、`database` 和 `username` 原样用于 `query_database`。不能根据活动连接、名称相似、列表顺序、默认数据库或端口自行判断目标。发现工具只能提供候选关系，不能证明某个网站必然使用某个数据库。
+
+支持 `engine=mysql`、`mariadb`、`postgresql`、`sqlite`，以及通过可选的 `container` 参数在 Docker 容器内运行客户端。其他数据库引擎尚未接入，不能用此工具执行任意数据库 Shell。
+
+前提：
+
+- 远程 Linux 主机或目标容器内安装对应的 `mysql`、`mariadb`、`psql` 或 `sqlite3` 客户端，以及 GNU `timeout`。容器模式在容器内部执行超时控制。
+- MySQL 需要 5.7.8+，MariaDB 需要 10.1+，psql 需要支持 `--csv`，SQLite CLI 需要支持 `-safe` 和 `-readonly`。复杂 SQL 还需要相应数据库版本支持。
+- 使用数据库只读账号，在远程提前配置 `.my.cnf`、`.pgpass` 或 peer/socket 认证。容器模式的认证配置也必须在容器中可用；不要把密码放进工具参数、SQL 或连接 URL。
+- PostgreSQL 容器的 `username` 和 `database` 必须与容器初始化时的账号和数据库一致，不要默认使用 `postgres/postgres`。容器内通过本地 socket 已能认证时不需要 `.pgpass`；从宿主机通过 TCP 连接且服务端要求密码时才需要非交互凭据。
+- 服务端只读事务、SQL 校验不能代替数据库最小权限配置。自定义类型、视图、外部表和函数扩展的行为由数据库服务器控制，不应使用超级用户作为查询账号。
+
+参数：
+
+| 参数 | 含义 |
+| --- | --- |
+| `connectionId` | 已确认的 SSH 会话 ID |
+| `engine` | `mysql`、`mariadb`、`postgresql`、`sqlite` |
+| `database` | 数据库名称；SQLite 使用远程绝对文件路径，不接受 URI |
+| `query` | 单条 SQL，最多 20000 个字符 |
+| `host`、`port`、`username` | 可选连接参数，SQLite 不使用这些参数 |
+| `container` | 可选 Docker 容器名或 ID |
+| `maxRows` | SELECT 返回行数上限，默认 200，最大 2000 |
+| `timeoutMs` | 默认 20000，最大 120000 毫秒 |
+
+示例：
+
+```text
+1. 调用 discover_database_targets(connectionId)。
+2. 列出候选的应用容器和业务数据库，让用户确认要查询的网站或程序。
+3. 使用用户确认目标返回的准确参数调用 query_database。
+4. 查询使用稳定的 ORDER BY 和 LIMIT/OFFSET，不读取无关数据库。
+```
+
+支持单条 `SELECT`、查询型 `WITH`、关联、聚合、子查询及常用只读函数。MySQL/MariaDB 还支持可解析的 `SHOW TABLES`、`SHOW COLUMNS`、`SHOW CREATE TABLE`、`DESCRIBE`。也可查询 `information_schema`、PostgreSQL 系统目录和 `sqlite_master` 了解表结构。SQL 方言仍受解析器支持范围限制。
+
+查询入口始终拒绝多条 SQL、修改语句、写锁、`SELECT INTO`、文件输出、客户端转义命令及未确认为只读的函数。即使写入开关已打开，`query_database` 仍是只读；需要修改时使用受开关控制的 `execute_command`。
+
+返回 `output`、`format`（MySQL/MariaDB 为 TSV，其他为 CSV）、`maxRows`、`outputBytes` 和 `truncated`。SELECT 在数据库侧限制行数；元数据查询的 `maxRows` 为 null，受字节上限控制。`truncated` 仅表示输出超过 64 KiB 被截断，不表示已读完所有数据库记录。继续查询请提供稳定的 `ORDER BY` 和 `LIMIT/OFFSET`；关联查询建议明确列名并为重复列起别名。底层捕获超过 256 KiB 时中止查询。
+
+SQL 通过 SSH 标准输入传递，不放入进程命令行。审计只记录 SQL 哈希、长度、引擎和结果大小，不记录 SQL 原文或查询数据。数据库客户端原始错误可能含 SQL 和敏感信息，因此不会直接返回或写入审计。
+
+查询失败会返回 `errorCode`、中文 `message`、`guidance` 和 `retryable`，用于区分数据库用户不存在、数据库不存在、认证失败、客户端缺失、容器不可用、连接失败、查询超时、权限不足等情况。返回内容和审计均不包含原始数据库错误、SQL 原文或凭据。
+
+系统及容器日志仍可使用 `execute_readonly_command`，例如 `journalctl -n 100 --no-pager`、`docker logs --tail 100 app`、`tail -n 100 /var/log/mysql/error.log`。
+
 ## 写文件和执行修改命令
 
 写入能力分为两个工具：
@@ -181,6 +233,8 @@ PowerShell 环境变量只对当前窗口及其子进程有效。若 Codex 是�
 | `list_remote_files`         | 通过该会话的 SFTP 列出一个远程目录。       |
 | `read_remote_file`          | 通过 SFTP 读取一个 UTF-8 文本文件。        |
 | `execute_readonly_command`  | 执行单条白名单查询命令并返回命令和输出。   |
+| `discover_database_targets` | 发现数据库与应用候选目标，要求多目标确认。 |
+| `query_database`            | 查询数据库数据、表结构及日志表，支持 Docker 容器。 |
 | `write_remote_file`         | 开启写入开关后创建或完整覆盖远程文本文件。 |
 | `execute_command`           | 开启写入开关后执行可能修改服务器的命令。   |
 

@@ -1367,6 +1367,16 @@ codex mcp list</code></pre>
                         <td>不需要</td>
                       </tr>
                       <tr>
+                        <td><code>discover_database_targets</code></td>
+                        <td>发现数据库和应用候选目标</td>
+                        <td>不需要</td>
+                      </tr>
+                      <tr>
+                        <td><code>query_database</code></td>
+                        <td>查询数据库数据、表结构和日志记录</td>
+                        <td>不需要</td>
+                      </tr>
+                      <tr>
                         <td><code>write_remote_file</code></td>
                         <td>创建或完整覆盖文本文件</td>
                         <td>必须开启</td>
@@ -1400,6 +1410,20 @@ codex mcp list</code></pre>
                 <pre><code>先调用 list_ssh_sessions，并让我确认 connectionId。
 确认后调用 execute_readonly_command 执行 df -h。
 读取 output 并总结磁盘使用情况，不要修改服务器。</code></pre>
+              </section>
+              <section>
+                <h4>数据库查询</h4>
+                <pre><code>先调用 discover_database_targets(connectionId)。
+如果返回多个数据库或应用容器，列出候选并让我确认目标。
+确认后，把目标中的 engine、container、database、username 原样传给 query_database。
+不要根据活动连接、名称或列表顺序猜测数据库。</code></pre>
+                <p>
+                  支持 MySQL、MariaDB、PostgreSQL 和 SQLite；SQLite 的 database
+                  使用远程绝对文件路径。 服务器或容器内需有对应数据库客户端及 GNU
+                  timeout，并提前配置只读账号认证。 查询无需开启写入，默认最多 200 行，可用
+                  LIMIT/OFFSET 分页；写入仍需开启开关并使用 execute_command。发现结果只是候选，
+                  多站点或多数据库服务器必须由用户确认真实业务目标。
+                </p>
               </section>
             </div>
           </el-tab-pane>
@@ -1963,7 +1987,7 @@ const DEFAULT_RESTORE_OPTIONS = [
 const restoreOptions = ref<string[]>([...DEFAULT_RESTORE_OPTIONS])
 const backupLoading = ref(false)
 
-const appVersion = ref('0.2.16')
+const appVersion = ref('0.2.20')
 
 const mcpStatus = ref({
   enabled: false,

@@ -237,6 +237,7 @@ MCP 服务默认关闭，启动后只监听：
 | list_remote_files         | 通过已连接会话的 SFTP 列出远程目录。               |
 | read_remote_file          | 通过 SFTP 读取 UTF-8 文本文件。                    |
 | execute_readonly_command  | 执行单条白名单查询命令，并返回命令和标准输出。     |
+| query_database            | 通过只读模式查询 MySQL/MariaDB、PostgreSQL、SQLite，可在 Docker 容器内执行。 |
 | write_remote_file         | 开启写入开关后创建或完整覆盖远程 UTF-8 文本文件。  |
 | execute_command           | 开启写入开关后执行可能修改服务器的命令并返回输出。 |
 
@@ -466,6 +467,18 @@ Agent 应遵循以下顺序：
 - TCP、UDP、端口范围和来源 IP 段没有填错。
 - 规则是否持久化，重启后是否仍然存在。
 - 新端口连接已成功验证后，再关闭旧端口。
+
+终端顶部的防火墙面板会优先选择当前服务器的主要管理方式。`iptables (nf_tables)` 与 nftables 属于同一底层规则体系，不应当作两个独立防火墙重复操作。Docker 发布端口单独展示，不计入主机 INPUT 规则数量。
+
+新增开放规则时默认不填写端口，来源优先选择当前 SSH 来源 IP；选择“所有来源”会在执行前显示风险预览，数据库和缓存端口会显示高风险提示。启用 UFW 或 Firewalld 前，MShell 必须识别当前 SSH 来源 IP 和服务端口，并先创建当前连接保护规则；无法识别时会阻止一键启用。
+
+iptables 新增规则默认开启“重启后继续生效”。MShell 会创建 `/etc/mshell/firewall.rules`、`/usr/local/sbin/mshell-firewall-restore` 和 `mshell-firewall.service`，只恢复经过校验的 `MSHELL-INPUT` 专用链，不使用 `iptables-save`，不保存或覆盖 Docker 动态规则。IPv4 与 IPv6 使用 `iptables` 和 `ip6tables` 分别恢复；关闭该选项的规则会标记为“临时”。
+
+持久化功能不依赖 APT、`iptables-persistent` 或 `netfilter-persistent`，适合软件源暂时不可用但已安装 systemd 和 iptables 的服务器。面板只允许删除 MShell 专用链中的可识别规则，不直接删除其他程序维护的 INPUT 规则。原始规则、工具安装和服务启停位于“系统详情”。云厂商安全组不在 MShell 的检测范围内，仍需在云平台单独核对。
+
+服务器已经安装 UFW、Firewalld 或 iptables 任一可管理工具时，面板不再推荐安装其他防火墙。只有完全缺少可管理工具时才显示安装入口；安装系统软件包仍依赖服务器配置的可信软件源。MShell 会识别仓库元数据过期、仓库不可用和网络解析失败，并停止安装，不会关闭 `Valid-Until`、启用不安全仓库或跳过软件包签名验证。
+
+“规则已持久化”只表示重启后会恢复，不代表其他端口已经关闭。如果 INPUT 默认策略仍为 ACCEPT，未列出的端口依然可能从公网访问，面板会单独显示警告。
 
 ### 11.3 SFTP 文件操作
 

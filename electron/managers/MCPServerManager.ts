@@ -10,6 +10,12 @@ import { sftpManager } from './SFTPManager'
 import { appSettingsManager, type AgentMcpSettings } from '../utils/app-settings'
 import { logger } from '../utils/logger'
 import {
+  buildMcpDatabaseDiscoveryCommand,
+  buildMcpDatabaseQuery,
+  classifyMcpDatabaseError,
+  parseMcpDatabaseDiscovery
+} from '../utils/mcp-database-query'
+import {
   MCP_READ_ONLY_QUERY_PROGRAMS,
   validateMcpReadOnlyCommand
 } from '../utils/mcp-readonly-command'
@@ -378,7 +384,10 @@ class MCPServerManager {
       {
         instructions:
           'MShell exposes read-only tools for SSH sessions currently connected in the desktop application, ' +
-          'including restricted query-command execution. Write-capable tools are available only while the user enables ' +
+          'including system/log commands and database discovery/query tools for read-only MySQL, MariaDB, PostgreSQL and SQLite access. ' +
+          'Call discover_database_targets before query_database unless the user already supplied the exact engine, container or host, database and username. ' +
+          'If discovery returns multiple candidates, ask the user to select the target; never infer it from an active connection, a similar name or list order. ' +
+          'Write-capable tools are available only while the user enables ' +
           'write access in MShell settings. Call list_ssh_sessions first and use a returned connectionId. Never use a ' +
           'write-capable tool unless the user explicitly requests the change.'
       }
@@ -526,6 +535,7 @@ class MCPServerManager {
         description:
           'Execute one restricted read-only query command on a currently connected SSH session and return its output. ' +
           'Shell pipelines, redirection, command chains, script interpreters, sudo, and modifying commands are rejected. ' +
+          'For database data and schema queries, use query_database instead. ' +
           `Supported programs: ${MCP_READ_ONLY_QUERY_PROGRAMS.join(', ')}.`,
         inputSchema: {
           connectionId: z.string().min(1).max(200),
@@ -568,6 +578,130 @@ class MCPServerManager {
           return this.toToolResult(result)
         } catch (error) {
           return this.toToolError('execute_readonly_command', { connectionId, command }, error)
+        }
+      }
+    )
+
+    server.registerTool(
+      'discover_database_targets',
+      {
+        title: 'Discover database targets through SSH',
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+        description:
+          'Discover database clients, recognized database containers, safely enumerable database names, and application containers without returning passwords or secret environment variables. ' +
+          'Call this before query_database unless the user already provided the exact target. ' +
+          'When requiresSelection is true or more than one relevant target exists, present the candidates and ask the user which site/program/database to use. ' +
+          'Do not select a database from current activity, naming similarity, defaults, or list order.',
+        inputSchema: {
+          connectionId: z.string().min(1).max(200)
+        }
+      },
+      async ({ connectionId }) => {
+        try {
+          this.requireConnectedConnection(connectionId)
+          const output = await sshConnectionManager.executeCommand(
+            connectionId,
+            buildMcpDatabaseDiscoveryCommand(),
+            MAX_QUERY_TIMEOUT_MS,
+            MAX_QUERY_CAPTURE_BYTES
+          )
+          const discovery = parseMcpDatabaseDiscovery(output)
+          this.auditToolCall(
+            'discover_database_targets',
+            {
+              connectionId,
+              targetCount: discovery.targets.length,
+              applicationCount: discovery.applications.length,
+              requiresSelection: discovery.requiresSelection
+            },
+            true
+          )
+          return this.toToolResult(discovery)
+        } catch (error) {
+          return this.toToolError(
+            'discover_database_targets',
+            { connectionId },
+            new Error('数据库目标发现失败：请确认远程 Shell 和 Docker 查询权限后重试。')
+          )
+        }
+      }
+    )
+
+    server.registerTool(
+      'query_database',
+      {
+        title: 'Query a database through SSH',
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+        description:
+          'Run one read-only SELECT/WITH query, or MySQL/MariaDB SHOW/DESCRIBE, on any accessible business or log table. ' +
+          'Unless the user supplied the exact target, call discover_database_targets first and use its exact engine, container, database and username. ' +
+          'If multiple databases or applications are found, ask the user to choose; never guess from active sessions or names. ' +
+          'No write switch is needed. Supports MySQL 5.7.8+, MariaDB 10.1+, PostgreSQL and SQLite, including Docker containers. ' +
+          'Requires the database CLI and GNU timeout on the remote host or inside the container. ' +
+          'Use a database read-only account with credentials already configured remotely (.my.cnf, .pgpass or peer authentication); never pass passwords. ' +
+          'For PostgreSQL containers, use the database and username chosen when the container was initialized; do not assume postgres/postgres. ' +
+          'database is a database name, or an absolute remote SQLite path. Only known read-only functions are accepted. ' +
+          'SELECT results are capped at maxRows; use ORDER BY with LIMIT/OFFSET for further pages. ' +
+          'Use information_schema, PostgreSQL catalogs or sqlite_master for schema discovery. ' +
+          'Writes must use execute_command with the write switch enabled.',
+        inputSchema: {
+          connectionId: z.string().min(1).max(200),
+          engine: z.enum(['mysql', 'mariadb', 'postgresql', 'sqlite']),
+          database: z.string().min(1).max(4096),
+          query: z.string().min(1).max(20_000),
+          host: z.string().min(1).max(255).optional(),
+          port: z.number().int().min(1).max(65535).optional(),
+          username: z.string().min(1).max(128).optional(),
+          container: z.string().min(1).max(200).optional(),
+          maxRows: z.number().int().min(1).max(2000).optional(),
+          timeoutMs: z.number().int().min(1000).max(120_000).optional()
+        }
+      },
+      async ({ connectionId, ...input }) => {
+        const details = {
+          connectionId,
+          engine: input.engine,
+          querySha256: createHash('sha256').update(input.query).digest('hex'),
+          queryLength: input.query.length
+        }
+        let started = false
+        try {
+          this.requireConnectedConnection(connectionId)
+          const plan = buildMcpDatabaseQuery(input)
+          started = true
+          const output = await sshConnectionManager.executeCommand(
+            connectionId,
+            plan.command,
+            plan.timeoutMs + 5000,
+            MAX_QUERY_CAPTURE_BYTES,
+            plan.stdin
+          )
+          const bytes = Buffer.from(output, 'utf8')
+          const truncated = bytes.length > MAX_QUERY_OUTPUT_BYTES
+          this.auditToolCall(
+            'query_database',
+            { ...details, outputBytes: bytes.length, truncated },
+            true
+          )
+          return this.toToolResult({
+            connectionId,
+            engine: input.engine,
+            database: input.database,
+            format: plan.format,
+            maxRows: plan.maxRows,
+            output: truncated ? bytes.subarray(0, MAX_QUERY_OUTPUT_BYTES).toString('utf8') : output,
+            outputBytes: bytes.length,
+            truncated
+          })
+        } catch (error) {
+          // Database stderr can echo SQL literals and credentials from client configuration.
+          if (!started) return this.toToolError('query_database', details, error)
+          const failure = classifyMcpDatabaseError(error, input)
+          return this.toToolError(
+            'query_database',
+            { ...details, errorCode: failure.errorCode },
+            new Error(JSON.stringify(failure))
+          )
         }
       }
     )

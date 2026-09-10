@@ -1,6 +1,6 @@
 {
   "name": "mshell",
-  "version": "0.2.16",
+  "version": "0.2.20",
   "description": "MShell - Windows SSH Client",
   "main": "dist-electron/main.js",
   "author": "MShell Team",
@@ -46,6 +46,7 @@
     "geoip-lite": "^1.4.10",
     "marked": "^17.0.1",
     "node-cron": "^4.2.1",
+    "node-sql-parser": "^5.4.0",
     "openai": "^6.17.0",
     "pinia": "^2.1.7",
     "scrypt-js": "^3.0.1",

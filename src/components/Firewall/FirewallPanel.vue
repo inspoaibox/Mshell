@@ -1,15 +1,25 @@
 <template>
   <div class="firewall-panel">
-    <div class="firewall-header">
-      <div>
-        <h3>防火墙管理</h3>
-        <p>{{ subtitle }}</p>
+    <header class="firewall-header">
+      <div class="header-copy">
+        <h3>防火墙</h3>
+        <p>{{ systemLabel }}</p>
       </div>
       <div class="header-actions">
-        <el-button :icon="Refresh" :loading="loading" @click="loadOverview">刷新</el-button>
-        <el-button :icon="Close" link @click="$emit('close')" />
+        <el-tooltip content="重新检测" placement="bottom">
+          <el-button
+            :icon="Refresh"
+            circle
+            :loading="loading"
+            aria-label="重新检测防火墙"
+            @click="loadOverview"
+          />
+        </el-tooltip>
+        <el-tooltip content="关闭" placement="bottom">
+          <el-button :icon="Close" circle aria-label="关闭防火墙面板" @click="$emit('close')" />
+        </el-tooltip>
       </div>
-    </div>
+    </header>
 
     <div v-loading="loading || actionLoading" class="firewall-content">
       <el-alert
@@ -21,1112 +31,802 @@
       />
 
       <template v-if="overview">
-        <div class="summary-grid">
-          <div class="summary-card">
-            <span class="label">服务器系统</span>
-            <strong :title="systemLabel">{{ systemLabel }}</strong>
+        <section class="status-band" :class="`is-${protectionState.tone}`">
+          <div class="status-icon">
+            <el-icon><component :is="protectionState.icon" /></el-icon>
           </div>
-          <div class="summary-card" :class="{ 'is-ready': installedTools.length > 0 }">
-            <span class="label">已安装</span>
-            <strong>{{ installedTools.length ? installedTools.map((tool) => tool.label).join(' / ') : '未检测到' }}</strong>
+          <div class="status-copy">
+            <span>服务器入站防护</span>
+            <strong>{{ protectionState.title }}</strong>
+            <p>{{ protectionState.description }}</p>
           </div>
-          <div class="summary-card" :class="{ 'is-ready': activeTools.length > 0 }">
-            <span class="label">运行状态</span>
-            <strong>{{ activeTools.length ? activeTools.map((tool) => tool.label).join(' / ') : '未启用' }}</strong>
+          <div class="status-facts">
+            <span
+              ><b>{{ primaryToolLabel }}</b
+              >管理方式</span
+            >
+            <span
+              ><b>{{ primaryRules.length }}</b
+              >可识别规则</span
+            >
           </div>
-          <div class="summary-card">
-            <span class="label">规则数量</span>
-            <strong>{{ normalizedRules.length }} 条</strong>
-          </div>
-        </div>
+        </section>
 
         <el-alert
-          v-if="overview.needsPrivilege"
+          v-if="overview.needsPrivilege && !overview.canSudo"
           type="warning"
-          title="当前用户不是 root，操作防火墙需要 sudo 权限。若服务器未配置 sudo，安装、启用和修改规则会失败。"
+          title="当前 SSH 用户没有免密 sudo 权限，只能查看状态，无法安全修改防火墙。"
           show-icon
           :closable="false"
         />
-
-        <div class="tool-section">
-          <div class="section-head">
-            <div>
-              <strong>防火墙工具</strong>
-              <span>自动检测当前服务器安装和启用情况</span>
-            </div>
-          </div>
-          <div class="tool-list">
-            <div
-              v-for="tool in overview.tools"
-              :key="tool.id"
-              class="tool-card"
-              :class="{ installed: tool.installed, active: tool.active }"
-            >
-              <div class="tool-main">
-                <span class="tool-dot" />
-                <div>
-                  <strong>{{ tool.label }}</strong>
-                  <span>{{ tool.version || tool.status || '未安装' }}</span>
-                </div>
-              </div>
-              <div class="tool-actions">
-                <el-tag size="small" :type="tool.installed ? 'success' : 'info'">
-                  {{ tool.installed ? '已安装' : '未安装' }}
-                </el-tag>
-                <el-tag v-if="tool.installed" size="small" :type="tool.active ? 'success' : 'warning'">
-                  {{ tool.active ? '已启用' : '未启用' }}
-                </el-tag>
-                <el-button
-                  v-if="tool.installed && canEnable(tool.id)"
-                  size="small"
-                  :disabled="tool.active"
-                  @click="enableFirewall(tool.id)"
-                >
-                  启用
-                </el-button>
-                <el-button
-                  v-if="tool.installed && tool.active && canDisable(tool.id)"
-                  size="small"
-                  type="warning"
-                  plain
-                  @click="disableFirewall(tool.id)"
-                >
-                  停用
-                </el-button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="installedTools.length === 0" class="install-box">
-          <div>
-            <h4>未检测到已安装的防火墙</h4>
-            <p>可以按当前系统推荐安装，也可以手动选择 UFW 或 Firewalld。</p>
-          </div>
-          <div class="install-actions">
-            <el-select v-model="installTarget" size="small">
-              <el-option
-                v-for="option in installOptions"
-                :key="option.value"
-                :label="option.label"
-                :value="option.value"
-              />
-            </el-select>
-            <el-button type="primary" :icon="Download" @click="installFirewall">
-              安装
-            </el-button>
-          </div>
-        </div>
 
         <el-alert
-          v-else-if="manageableTools.length === 0"
+          v-if="usesNftBackend"
           type="info"
-          title="当前仅检测到 nftables 或其他底层规则工具，暂未提供自动改写规则，避免误改系统级规则。你仍可以在下方查看原始规则。"
+          title="当前 iptables 使用 nftables 后端。两者属于同一套底层规则，MShell 将统一通过 iptables 管理。"
           show-icon
           :closable="false"
         />
 
-        <div v-else class="rule-editor">
-          <div class="section-head">
-            <div>
-              <strong>新增放行规则</strong>
-              <span>支持单个或多个端口，来源可填写 IP 或 CIDR 段</span>
-            </div>
-          </div>
-
-          <div class="editor-grid">
-            <div class="editor-field">
-              <label>防火墙</label>
-              <el-select v-model="ruleForm.tool" size="small">
-                <el-option
-                  v-for="tool in manageableTools"
-                  :key="tool.id"
-                  :label="tool.label"
-                  :value="tool.id"
-                />
-              </el-select>
-            </div>
-            <div class="editor-field">
-              <label>端口</label>
-              <el-input v-model="ruleForm.ports" size="small" placeholder="22,80,443 或 1000-2000" />
-            </div>
-            <div class="editor-field">
-              <label>协议</label>
-              <el-radio-group v-model="ruleForm.protocol" size="small">
-                <el-radio-button value="tcp">TCP</el-radio-button>
-                <el-radio-button value="udp">UDP</el-radio-button>
-                <el-radio-button value="both">TCP+UDP</el-radio-button>
-              </el-radio-group>
-            </div>
-            <div class="editor-field">
-              <label>来源</label>
-              <el-input v-model="ruleForm.sources" size="small" placeholder="留空为所有来源，支持多个 IP/CIDR" />
-            </div>
-          </div>
-
-          <div class="common-ports">
-            <span>常用端口</span>
-            <button
-              v-for="preset in portPresets"
-              :key="preset.value"
-              type="button"
-              @click="appendPresetPorts(preset.value)"
-            >
-              {{ preset.label }}
-            </button>
-          </div>
-
-          <div class="editor-actions">
-            <el-button type="primary" :icon="Plus" @click="allowRule">放行端口</el-button>
-          </div>
-        </div>
-
-        <div class="rules-section">
-          <div class="section-head">
-            <div>
-              <strong>当前规则</strong>
-              <span>优先展示可解析规则，复杂规则保留原始内容</span>
-            </div>
-          </div>
-
-          <el-tabs v-model="activeRuleTool" class="rule-tabs">
-            <el-tab-pane
-              v-for="tool in ruleTools"
-              :key="tool.id"
-              :label="`${tool.label} (${rulesByTool(tool.id).length})`"
-              :name="tool.id"
-            >
-              <el-scrollbar class="rule-list">
-                <el-empty
-                  v-if="rulesByTool(tool.id).length === 0"
-                  description="暂无规则"
-                />
-                <div
-                  v-for="rule in rulesByTool(tool.id)"
-                  :key="rule.key"
-                  class="rule-row"
-                >
-                  <div class="rule-info">
-                    <div class="rule-title">
-                      <el-tag size="small" :type="rule.action === 'allow' ? 'success' : 'warning'">
-                        {{ rule.actionLabel }}
-                      </el-tag>
-                      <strong>{{ rule.port || rule.service || rule.summary }}</strong>
-                      <span v-if="rule.protocol">{{ rule.protocol.toUpperCase() }}</span>
-                    </div>
-                    <div class="rule-meta">
-                      <span v-if="rule.source">来源 {{ rule.source }}</span>
-                      <span v-if="rule.target">目标 {{ rule.target }}</span>
-                      <span v-if="rule.persistent === false">可能为临时规则</span>
-                    </div>
-                    <code :title="rule.raw">{{ rule.raw }}</code>
-                  </div>
-                  <el-button
-                    v-if="rule.deletable"
-                    size="small"
-                    type="danger"
-                    plain
-                    :icon="Delete"
-                    @click="deleteRule(rule)"
-                  >
-                    删除
-                  </el-button>
+        <el-tabs v-model="activeSection" class="firewall-tabs">
+          <el-tab-pane label="开放规则" name="rules">
+            <section class="rules-view">
+              <div class="section-header">
+                <div>
+                  <strong>允许访问的服务</strong>
+                  <span>仅显示当前管理方式中可安全识别的入站规则</span>
                 </div>
-              </el-scrollbar>
-            </el-tab-pane>
-          </el-tabs>
-        </div>
+                <el-button
+                  type="primary"
+                  :icon="Plus"
+                  :disabled="!canAddRule"
+                  @click="openRuleDialog"
+                >
+                  添加规则
+                </el-button>
+              </div>
 
-        <div v-if="lastOutput" class="output-box">
-          <div class="output-head">
-            <strong>最近输出</strong>
-            <el-button size="small" link @click="lastOutput = ''">清空</el-button>
-          </div>
-          <pre>{{ lastOutput }}</pre>
-        </div>
+              <el-alert
+                v-if="primaryTool?.id === 'nftables'"
+                type="warning"
+                title="当前仅检测到原生 nftables 服务。为避免破坏复杂 ruleset，暂时只提供查看功能。"
+                :closable="false"
+                show-icon
+              />
+
+              <div v-if="primaryRules.length" class="rule-list">
+                <article v-for="rule in primaryRules" :key="rule.key" class="rule-row">
+                  <span class="rule-indicator" :class="`is-${rule.action}`" />
+                  <div class="rule-main">
+                    <div class="rule-heading">
+                      <strong>{{ rule.service || formatRulePort(rule) }}</strong>
+                      <span>{{ rule.protocol?.toUpperCase() || '全部协议' }}</span>
+                      <el-tag v-if="rule.family" size="small" type="info">{{ rule.family }}</el-tag>
+                      <el-tag v-if="rule.managed && rule.persistent" size="small" type="success"
+                        >开机恢复</el-tag
+                      >
+                      <el-tag v-if="rule.persistent === false" size="small" type="warning"
+                        >临时</el-tag
+                      >
+                    </div>
+                    <div class="rule-source">
+                      <span>{{ rule.actionLabel }}</span>
+                      <span>来源：{{ rule.source || '所有来源' }}</span>
+                    </div>
+                    <details>
+                      <summary>查看原始规则</summary>
+                      <code>{{ rule.raw }}</code>
+                    </details>
+                  </div>
+                  <el-tooltip v-if="rule.deletable" content="删除规则" placement="left">
+                    <el-button
+                      :icon="Delete"
+                      circle
+                      type="danger"
+                      plain
+                      :aria-label="`删除 ${formatRulePort(rule)} 规则`"
+                      @click="deleteRule(rule)"
+                    />
+                  </el-tooltip>
+                </article>
+              </div>
+
+              <div v-else class="empty-rules">
+                <el-icon><Lock /></el-icon>
+                <strong>暂无可识别的开放规则</strong>
+                <p v-if="canAddRule">添加规则时，建议只允许当前 SSH 来源 IP。</p>
+                <p v-else>请在“系统详情”中检查已安装的防火墙工具。</p>
+              </div>
+
+              <section v-if="overview.containerPorts.length" class="container-ports">
+                <div class="section-header compact">
+                  <div>
+                    <strong>容器发布端口</strong>
+                    <span>由 Docker 管理，不计入上方主机入站规则</span>
+                  </div>
+                </div>
+                <div
+                  v-for="item in overview.containerPorts"
+                  :key="`${item.container}:${item.published}`"
+                  class="container-port-row"
+                >
+                  <el-icon><Box /></el-icon>
+                  <div>
+                    <strong>{{ item.container }}</strong>
+                    <span>{{ item.published }}</span>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </el-tab-pane>
+
+          <el-tab-pane label="系统详情" name="details">
+            <section class="details-view">
+              <div class="detail-summary">
+                <div>
+                  <span>操作系统</span><strong :title="systemLabel">{{ systemLabel }}</strong>
+                </div>
+                <div>
+                  <span>当前 SSH 来源</span><strong>{{ overview.sshClientIp || '未识别' }}</strong>
+                </div>
+                <div>
+                  <span>SSH 服务端口</span><strong>{{ overview.sshServerPort || '未识别' }}</strong>
+                </div>
+              </div>
+
+              <div class="detail-section">
+                <div class="section-header compact">
+                  <div><strong>防火墙工具</strong><span>安装和服务状态仅供高级管理使用</span></div>
+                </div>
+                <div class="tool-list">
+                  <div v-for="tool in overview.tools" :key="tool.id" class="tool-row">
+                    <span
+                      class="tool-dot"
+                      :class="{ installed: tool.installed, active: tool.active }"
+                    />
+                    <div class="tool-copy">
+                      <strong>{{ toolDisplayName(tool) }}</strong>
+                      <span>{{ describeTool(tool) }}</span>
+                    </div>
+                    <div class="tool-actions">
+                      <el-tag v-if="isRecommendedInstall(tool)" size="small" type="success">
+                        推荐
+                      </el-tag>
+                      <el-tag
+                        size="small"
+                        :type="tool.active ? 'success' : tool.installed ? 'info' : undefined"
+                      >
+                        {{ tool.active ? '运行中' : tool.installed ? '已安装' : '未安装' }}
+                      </el-tag>
+                      <el-button
+                        v-if="canInstallTool(tool)"
+                        size="small"
+                        :icon="Download"
+                        @click="installFirewall(tool.id)"
+                        >安装</el-button
+                      >
+                      <el-button
+                        v-if="canEnableTool(tool)"
+                        size="small"
+                        :disabled="!canSafelyEnable"
+                        @click="enableFirewall(tool.id)"
+                        >启用</el-button
+                      >
+                      <el-button
+                        v-if="canDisableTool(tool)"
+                        size="small"
+                        type="danger"
+                        plain
+                        @click="disableFirewall(tool.id)"
+                        >停用</el-button
+                      >
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="primaryTool?.id === 'iptables'" class="persistence-status">
+                <el-icon><RefreshRight /></el-icon>
+                <div>
+                  <strong>MShell 规则开机恢复</strong>
+                  <span>{{
+                    overview.persistenceEnabled
+                      ? '已启用，只恢复 MSHELL-INPUT，不保存 Docker 规则'
+                      : '尚未创建，将在首次添加永久规则时自动启用'
+                  }}</span>
+                </div>
+                <el-tag size="small" :type="overview.persistenceEnabled ? 'success' : 'info'">
+                  {{ overview.persistenceEnabled ? '已启用' : '未配置' }}
+                </el-tag>
+              </div>
+
+              <el-alert
+                v-if="overview.tools.some(canEnableTool) && !canSafelyEnable"
+                type="warning"
+                title="未识别到当前 SSH 来源 IP 或服务端口，一键启用已禁用，以避免当前连接被防火墙中断。"
+                :closable="false"
+                show-icon
+              />
+
+              <el-collapse class="advanced-collapse">
+                <el-collapse-item name="raw">
+                  <template #title
+                    ><span class="collapse-title"
+                      ><el-icon><Document /></el-icon>原始规则</span
+                    ></template
+                  >
+                  <div v-for="tool in installedTools" :key="tool.id" class="raw-group">
+                    <strong>{{ toolDisplayName(tool) }}</strong>
+                    <pre>{{ rawRulesFor(tool.id) }}</pre>
+                  </div>
+                </el-collapse-item>
+                <el-collapse-item v-if="lastOutput" name="output">
+                  <template #title
+                    ><span class="collapse-title"
+                      ><el-icon><Monitor /></el-icon>最近操作输出</span
+                    ></template
+                  >
+                  <pre class="command-output">{{ lastOutput }}</pre>
+                </el-collapse-item>
+              </el-collapse>
+            </section>
+          </el-tab-pane>
+        </el-tabs>
       </template>
     </div>
+
+    <el-dialog
+      v-model="ruleDialogVisible"
+      class="firewall-rule-dialog"
+      width="min(520px, calc(100vw - 32px))"
+      :title="ruleStep === 'edit' ? '添加开放规则' : '确认规则'"
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="!actionLoading"
+      :show-close="!actionLoading"
+      @closed="resetRuleDialog"
+    >
+      <template v-if="ruleStep === 'edit'">
+        <div class="dialog-intro">选择要开放的服务，并明确谁可以访问。</div>
+        <div class="rule-form">
+          <div class="form-field">
+            <label for="firewall-preset">服务</label>
+            <el-select id="firewall-preset" v-model="selectedPreset" @change="applyPortPreset">
+              <el-option
+                v-for="preset in FIREWALL_PORT_PRESETS"
+                :key="preset.value"
+                :label="preset.label"
+                :value="preset.value"
+              />
+            </el-select>
+          </div>
+          <div class="form-field">
+            <label for="firewall-ports">端口</label>
+            <el-input
+              id="firewall-ports"
+              v-model="ruleForm.ports"
+              placeholder="例如 443、80,443 或 1000-2000"
+              @input="selectedPreset = 'custom'"
+            />
+            <span>支持单个端口、多个端口和端口范围</span>
+          </div>
+          <div class="form-field">
+            <label>协议</label>
+            <el-radio-group v-model="ruleForm.protocol">
+              <el-radio-button value="tcp">TCP</el-radio-button>
+              <el-radio-button value="udp">UDP</el-radio-button>
+              <el-radio-button value="both">TCP + UDP</el-radio-button>
+            </el-radio-group>
+          </div>
+          <fieldset class="source-options">
+            <legend>允许来源</legend>
+            <label
+              :class="{
+                selected: ruleForm.sourceMode === 'current',
+                disabled: !overview?.sshClientIp
+              }"
+            >
+              <input
+                v-model="ruleForm.sourceMode"
+                type="radio"
+                value="current"
+                :disabled="!overview?.sshClientIp"
+              />
+              <span
+                ><strong>当前 SSH 来源 IP</strong
+                ><small>{{ overview?.sshClientIp || '未识别到当前来源' }} · 推荐</small></span
+              >
+            </label>
+            <label :class="{ selected: ruleForm.sourceMode === 'custom' }">
+              <input v-model="ruleForm.sourceMode" type="radio" value="custom" />
+              <span><strong>指定 IP 或网段</strong><small>仅允许可信设备或网络访问</small></span>
+            </label>
+            <label
+              :class="{
+                selected: ruleForm.sourceMode === 'any',
+                danger: ruleForm.sourceMode === 'any'
+              }"
+            >
+              <input v-model="ruleForm.sourceMode" type="radio" value="any" />
+              <span><strong>所有来源</strong><small>服务将可以从公网访问</small></span>
+            </label>
+          </fieldset>
+          <div v-if="ruleForm.sourceMode === 'custom'" class="form-field">
+            <label for="firewall-sources">IP 或 CIDR</label>
+            <el-input
+              id="firewall-sources"
+              v-model="ruleForm.customSources"
+              placeholder="例如 203.0.113.8 或 10.0.0.0/24"
+            />
+            <span>多个地址可使用逗号或空格分隔</span>
+          </div>
+          <label v-if="primaryTool?.id === 'iptables'" class="persistence-option">
+            <el-switch v-model="ruleForm.persist" aria-label="重启后保留规则" />
+            <span>
+              <strong>重启后继续生效</strong>
+              <small>使用 MShell 专用规则链，不保存 Docker 动态规则</small>
+            </span>
+          </label>
+          <el-alert v-if="formError" type="error" :title="formError" :closable="false" show-icon />
+        </div>
+      </template>
+
+      <template v-else-if="rulePlan">
+        <div class="review-list">
+          <div>
+            <span>端口</span><strong>{{ rulePlan.ports.join(', ') }}</strong>
+          </div>
+          <div>
+            <span>协议</span
+            ><strong>{{ rulePlan.protocols.map((item) => item.toUpperCase()).join(' + ') }}</strong>
+          </div>
+          <div>
+            <span>来源</span
+            ><strong>{{
+              rulePlan.sources.length ? rulePlan.sources.join(', ') : '所有来源'
+            }}</strong>
+          </div>
+          <div>
+            <span>管理方式</span><strong>{{ primaryToolLabel }}</strong>
+          </div>
+          <div>
+            <span>生效方式</span
+            ><strong>{{ rulePlan.persistent ? '永久规则' : '可能需要另行持久化' }}</strong>
+          </div>
+        </div>
+        <el-alert
+          v-for="warning in rulePlan.warnings"
+          :key="warning"
+          :type="rulePlan.risk === 'danger' ? 'error' : 'warning'"
+          :title="warning"
+          :closable="false"
+          show-icon
+        />
+        <el-alert
+          v-if="iptablesOpenByDefault"
+          type="warning"
+          title="当前 INPUT 默认策略为 ACCEPT。该规则会永久保留，但不会阻止其他未列出的端口。"
+          :closable="false"
+          show-icon
+        />
+      </template>
+
+      <template #footer>
+        <el-button :disabled="actionLoading" @click="ruleDialogVisible = false">取消</el-button>
+        <el-button
+          v-if="ruleStep === 'review'"
+          :icon="ArrowLeft"
+          :disabled="actionLoading"
+          @click="ruleStep = 'edit'"
+          >返回修改</el-button
+        >
+        <el-button v-if="ruleStep === 'edit'" type="primary" @click="prepareRuleReview"
+          >检查并继续</el-button
+        >
+        <el-button v-else type="primary" :loading="actionLoading" @click="allowRule"
+          >确认添加</el-button
+        >
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, markRaw, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Close, Delete, Download, Plus, Refresh } from '@element-plus/icons-vue'
-
-type FirewallToolId = 'ufw' | 'firewalld' | 'iptables' | 'nftables'
-type RuleProtocol = 'tcp' | 'udp' | 'both'
-
-interface FirewallTool {
-  id: FirewallToolId
-  label: string
-  installed: boolean
-  active: boolean
-  status: string
-  version: string
-}
-
-interface FirewallOverview {
-  osId: string
-  osName: string
-  packageManager: string
-  needsPrivilege: boolean
-  canSudo: boolean
-  tools: FirewallTool[]
-  rawRules: Record<FirewallToolId, string[]>
-}
-
-interface FirewallRule {
-  key: string
-  tool: FirewallToolId
-  raw: string
-  action: 'allow' | 'deny' | 'reject' | 'unknown'
-  actionLabel: string
-  summary: string
-  port?: string
-  protocol?: string
-  source?: string
-  target?: string
-  service?: string
-  index?: number
-  chain?: string
-  deletable: boolean
-  deletePayload?: Record<string, string | number | undefined>
-  persistent?: boolean
-}
+import {
+  ArrowLeft,
+  Box,
+  CircleCheckFilled,
+  Close,
+  Delete,
+  Document,
+  Download,
+  InfoFilled,
+  Lock,
+  Monitor,
+  Plus,
+  Refresh,
+  RefreshRight,
+  WarningFilled
+} from '@element-plus/icons-vue'
+import {
+  FIREWALL_PORT_PRESETS,
+  FIREWALL_TOOL_LABELS,
+  buildAllowFirewallCommand,
+  buildDeleteFirewallCommand,
+  buildDisableFirewallCommand,
+  buildEnableFirewallCommand,
+  buildFirewallDetectCommand,
+  buildInstallFirewallCommand,
+  classifyFirewallInstallError,
+  createFirewallRulePlan,
+  displayFirewallLabel,
+  normalizeFirewallRules,
+  parseFirewallOverview,
+  recommendedFirewall,
+  selectPrimaryFirewall,
+  shouldOfferFirewallInstall,
+  type FirewallOverview,
+  type FirewallRule,
+  type FirewallRulePlan,
+  type FirewallTool,
+  type FirewallToolId,
+  type RuleProtocol,
+  type RuleSourceMode
+} from '../../utils/firewall-manager'
 
 interface Props {
   connectionId: string
 }
-
 const props = defineProps<Props>()
 defineEmits<{ close: [] }>()
-
-const toolLabels: Record<FirewallToolId, string> = {
-  ufw: 'UFW',
-  firewalld: 'Firewalld',
-  iptables: 'iptables',
-  nftables: 'nftables'
-}
 
 const overview = ref<FirewallOverview | null>(null)
 const loading = ref(false)
 const actionLoading = ref(false)
 const errorMessage = ref('')
 const lastOutput = ref('')
-const activeRuleTool = ref<FirewallToolId>('ufw')
-const installTarget = ref<'auto' | 'ufw' | 'firewalld'>('auto')
+const activeSection = ref<'rules' | 'details'>('rules')
+const ruleDialogVisible = ref(false)
+const ruleStep = ref<'edit' | 'review'>('edit')
+const rulePlan = ref<FirewallRulePlan | null>(null)
+const selectedPreset = ref('custom')
+const formError = ref('')
 const ruleForm = ref({
-  tool: 'ufw' as FirewallToolId,
-  ports: '22,80,443',
+  ports: '',
   protocol: 'tcp' as RuleProtocol,
-  sources: ''
-})
-
-const portPresets = [
-  { label: 'SSH 22', value: '22' },
-  { label: 'HTTP 80', value: '80' },
-  { label: 'HTTPS 443', value: '443' },
-  { label: 'MySQL 3306', value: '3306' },
-  { label: 'Redis 6379', value: '6379' },
-  { label: 'PostgreSQL 5432', value: '5432' },
-  { label: 'Node 3000', value: '3000' },
-  { label: '面板 8888', value: '8888' }
-]
-
-const installOptions = [
-  { label: '自动推荐', value: 'auto' },
-  { label: 'UFW', value: 'ufw' },
-  { label: 'Firewalld', value: 'firewalld' }
-]
-
-const subtitle = computed(() => {
-  if (!overview.value) return '检测服务器防火墙状态和规则'
-  if (activeTools.value.length) {
-    return `已启用 ${activeTools.value.map((tool) => tool.label).join(' / ')}`
-  }
-  if (installedTools.value.length) {
-    return `已安装 ${installedTools.value.map((tool) => tool.label).join(' / ')}，未检测到启用状态`
-  }
-  return '未检测到已安装防火墙'
-})
-
-const systemLabel = computed(() => {
-  if (!overview.value) return '未知'
-  return overview.value.osName || overview.value.osId || '未知系统'
+  sourceMode: 'custom' as RuleSourceMode,
+  customSources: '',
+  persist: true
 })
 
 const installedTools = computed(() => overview.value?.tools.filter((tool) => tool.installed) || [])
 const activeTools = computed(() => installedTools.value.filter((tool) => tool.active))
-const manageableTools = computed(() =>
-  installedTools.value.filter((tool) => ['ufw', 'firewalld', 'iptables'].includes(tool.id))
+const allRules = computed(() => normalizeFirewallRules(overview.value))
+const primaryTool = computed(() =>
+  overview.value ? selectPrimaryFirewall(overview.value) : undefined
 )
-const ruleTools = computed(() => overview.value?.tools.filter((tool) => tool.installed) || [])
-const normalizedRules = computed(() => normalizeRules(overview.value))
+const primaryRules = computed(() =>
+  allRules.value.filter((rule) => rule.tool === primaryTool.value?.id)
+)
+const primaryToolLabel = computed(() =>
+  overview.value ? displayFirewallLabel(primaryTool.value, overview.value) : '检测中'
+)
+const usesNftBackend = computed(
+  () => primaryTool.value?.id === 'iptables' && overview.value?.iptablesBackend === 'nf_tables'
+)
+const iptablesOpenByDefault = computed(() => {
+  if (primaryTool.value?.id !== 'iptables' || !overview.value) return false
+  const policies = Object.values(overview.value.iptablesPolicies).filter(Boolean)
+  return policies.length === 0 || policies.some((policy) => policy === 'ACCEPT')
+})
+const canAddRule = computed(
+  () =>
+    Boolean(primaryTool.value && ['ufw', 'firewalld', 'iptables'].includes(primaryTool.value.id)) &&
+    !(overview.value?.needsPrivilege && !overview.value.canSudo)
+)
+const canSafelyEnable = computed(
+  () =>
+    Boolean(overview.value?.sshClientIp && overview.value?.sshServerPort) &&
+    !(overview.value?.needsPrivilege && !overview.value.canSudo)
+)
+const systemLabel = computed(
+  () => overview.value?.osName || overview.value?.osId || '正在检测服务器'
+)
+const recommendedInstallTool = computed(() =>
+  overview.value ? recommendedFirewall(overview.value) : 'ufw'
+)
+const shouldRecommendInstall = computed(() =>
+  Boolean(overview.value && shouldOfferFirewallInstall(overview.value))
+)
 
-watch(
-  manageableTools,
-  (tools) => {
-    if (!tools.some((tool) => tool.id === ruleForm.value.tool)) {
-      ruleForm.value.tool = (tools[0]?.id || 'ufw') as FirewallToolId
+const protectionState = computed(() => {
+  const activeHighLevel = activeTools.value.filter(
+    (tool) => tool.id === 'ufw' || tool.id === 'firewalld'
+  )
+  const nftServiceActive = activeTools.value.some((tool) => tool.id === 'nftables')
+  if (activeHighLevel.length > 1 || (activeHighLevel.length > 0 && nftServiceActive)) {
+    return {
+      tone: 'warning',
+      icon: markRaw(WarningFilled),
+      title: '检测到多个管理器同时运行',
+      description: '规则可能互相覆盖，请在系统详情中确认后再修改。'
     }
-  },
-  { immediate: true }
-)
-
-watch(
-  ruleTools,
-  (tools) => {
-    if (!tools.some((tool) => tool.id === activeRuleTool.value)) {
-      activeRuleTool.value = (tools[0]?.id || 'ufw') as FirewallToolId
-    }
-  },
-  { immediate: true }
-)
-
-const shellQuote = (value: string) => `'${String(value).replace(/'/g, `'\\''`)}'`
-
-const runSSHCommand = async (command: string, timeout = 60000) => {
-  const result = await window.electronAPI.ssh.executeCommand(props.connectionId, command, timeout)
-  if (!result?.success) {
-    throw new Error(result?.error || 'SSH 命令执行失败')
   }
+  if (iptablesOpenByDefault.value) {
+    return {
+      tone: 'warning',
+      icon: markRaw(WarningFilled),
+      title: primaryRules.value.length
+        ? '规则已配置，默认仍允许其他入站连接'
+        : '未检测到主机入站限制',
+      description: primaryRules.value.length
+        ? '规则可以开机恢复，但 INPUT 默认策略为 ACCEPT，其他端口并未因此关闭。'
+        : 'INPUT 默认策略为 ACCEPT，服务器可能依赖云防火墙控制公网访问。'
+    }
+  }
+  if (primaryTool.value?.active) {
+    return {
+      tone: 'success',
+      icon: markRaw(CircleCheckFilled),
+      title: '防火墙规则正在生效',
+      description: `MShell 将通过 ${primaryToolLabel.value} 管理入站访问。`
+    }
+  }
+  if (primaryRules.value.length) {
+    return {
+      tone: 'info',
+      icon: markRaw(InfoFilled),
+      title: '检测到入站规则',
+      description: '当前工具没有独立服务状态，请确认规则是否已配置开机持久化。'
+    }
+  }
+  return {
+    tone: 'warning',
+    icon: markRaw(WarningFilled),
+    title: '未检测到主机入站限制',
+    description: '服务器可能依赖云防火墙或尚未配置本机防火墙。'
+  }
+})
+
+async function runSSHCommand(command: string, timeout = 60_000) {
+  const result = await window.electronAPI.ssh.executeCommand(props.connectionId, command, timeout)
+  if (!result?.success) throw new Error(result?.error || 'SSH 命令执行失败')
   return String(result.data || '')
 }
 
-const buildDetectCommand = () => `
-sh <<'MSHELL_FIREWALL_DETECT'
-set +e
-echo "__MSHELL_FIREWALL_V1__"
-
-os_id=""
-os_name=""
-if [ -r /etc/os-release ]; then
-  os_id=$(sed -n 's/^ID=//p' /etc/os-release | head -n1 | tr -d '"')
-  os_name=$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | head -n1 | tr -d '"')
-fi
-
-pkg="unknown"
-for candidate in apt-get dnf yum zypper pacman apk; do
-  if command -v "$candidate" >/dev/null 2>&1; then
-    pkg="$candidate"
-    break
-  fi
-done
-
-needs_privilege=no
-can_sudo=no
-SUDO=""
-if [ "$(id -u 2>/dev/null)" != "0" ]; then
-  needs_privilege=yes
-  if command -v sudo >/dev/null 2>&1; then
-    can_sudo=yes
-    SUDO="sudo -n"
-  fi
-fi
-
-meta() { printf 'META|%s|%s\\n' "$1" "$2"; }
-tool() { printf 'TOOL|%s|%s|%s|%s|%s\\n' "$1" "$2" "$3" "$4" "$5"; }
-rule_raw() { printf 'RULE_RAW|%s|%s\\n' "$1" "$2"; }
-
-meta os_id "$os_id"
-meta os_name "$os_name"
-meta package_manager "$pkg"
-meta needs_privilege "$needs_privilege"
-meta can_sudo "$can_sudo"
-
-if command -v ufw >/dev/null 2>&1; then
-  ufw_status=$($SUDO ufw status 2>/dev/null || ufw status 2>/dev/null || true)
-  ufw_version=$(ufw --version 2>/dev/null | head -n1 || true)
-  ufw_active=no
-  echo "$ufw_status" | grep -qi 'Status:[[:space:]]*active' && ufw_active=yes
-  tool ufw yes "$ufw_active" "$(echo "$ufw_status" | head -n1)" "$ufw_version"
-  ($SUDO ufw status numbered 2>/dev/null || ufw status numbered 2>/dev/null || true) | while IFS= read -r line; do
-    [ -n "$line" ] && rule_raw ufw "$line"
-  done
-else
-  tool ufw no no "" ""
-fi
-
-if command -v firewall-cmd >/dev/null 2>&1; then
-  fw_state=$($SUDO firewall-cmd --state 2>/dev/null || firewall-cmd --state 2>/dev/null || true)
-  fw_version=$(firewall-cmd --version 2>/dev/null | head -n1 || true)
-  fw_active=no
-  [ "$fw_state" = "running" ] && fw_active=yes
-  tool firewalld yes "$fw_active" "$fw_state" "$fw_version"
-  ($SUDO firewall-cmd --list-all 2>/dev/null || firewall-cmd --list-all 2>/dev/null || true) | while IFS= read -r line; do
-    [ -n "$line" ] && rule_raw firewalld "$line"
-  done
-else
-  tool firewalld no no "" ""
-fi
-
-if command -v iptables >/dev/null 2>&1; then
-  iptables_rules=$($SUDO iptables -S 2>/dev/null || iptables -S 2>/dev/null || true)
-  iptables_active=no
-  echo "$iptables_rules" | grep -Eq '^-A ' && iptables_active=yes
-  iptables_version=$(iptables --version 2>/dev/null | head -n1 || true)
-  tool iptables yes "$iptables_active" "$([ "$iptables_active" = yes ] && echo rules || echo empty)" "$iptables_version"
-  ($SUDO iptables -L INPUT -n --line-numbers 2>/dev/null || iptables -L INPUT -n --line-numbers 2>/dev/null || true) | while IFS= read -r line; do
-    [ -n "$line" ] && rule_raw iptables "$line"
-  done
-else
-  tool iptables no no "" ""
-fi
-
-if command -v nft >/dev/null 2>&1; then
-  nft_rules=$($SUDO nft list ruleset 2>/dev/null || nft list ruleset 2>/dev/null || true)
-  nft_active=no
-  [ -n "$nft_rules" ] && nft_active=yes
-  nft_version=$(nft --version 2>/dev/null | head -n1 || true)
-  tool nftables yes "$nft_active" "$([ "$nft_active" = yes ] && echo rules || echo empty)" "$nft_version"
-  echo "$nft_rules" | sed -n '1,120p' | while IFS= read -r line; do
-    [ -n "$line" ] && rule_raw nftables "$line"
-  done
-else
-  tool nftables no no "" ""
-fi
-
-echo "__MSHELL_FIREWALL_END__"
-MSHELL_FIREWALL_DETECT
-`
-
-const parseOverview = (output: string): FirewallOverview => {
-  const meta: Record<string, string> = {}
-  const tools = new Map<FirewallToolId, FirewallTool>()
-  const rawRules: Record<FirewallToolId, string[]> = {
-    ufw: [],
-    firewalld: [],
-    iptables: [],
-    nftables: []
-  }
-
-  output.split(/\r?\n/).forEach((line) => {
-    if (line.startsWith('META|')) {
-      const [, key, ...rest] = line.split('|')
-      meta[key] = rest.join('|')
-      return
-    }
-
-    if (line.startsWith('TOOL|')) {
-      const [, id, installed, active, status, ...versionParts] = line.split('|')
-      if (!isFirewallToolId(id)) return
-      tools.set(id, {
-        id,
-        label: toolLabels[id],
-        installed: installed === 'yes',
-        active: active === 'yes',
-        status: status || '',
-        version: versionParts.join('|') || ''
-      })
-      return
-    }
-
-    if (line.startsWith('RULE_RAW|')) {
-      const [, id, ...rest] = line.split('|')
-      if (!isFirewallToolId(id)) return
-      rawRules[id].push(rest.join('|'))
-    }
-  })
-
-  const normalizedTools: FirewallTool[] = (['ufw', 'firewalld', 'iptables', 'nftables'] as FirewallToolId[]).map(
-    (id) =>
-      tools.get(id) || {
-        id,
-        label: toolLabels[id],
-        installed: false,
-        active: false,
-        status: '',
-        version: ''
-      }
-  )
-
-  return {
-    osId: meta.os_id || '',
-    osName: meta.os_name || '',
-    packageManager: meta.package_manager || 'unknown',
-    needsPrivilege: meta.needs_privilege === 'yes',
-    canSudo: meta.can_sudo === 'yes',
-    tools: normalizedTools,
-    rawRules
-  }
-}
-
-const isFirewallToolId = (value: string): value is FirewallToolId =>
-  ['ufw', 'firewalld', 'iptables', 'nftables'].includes(value)
-
-const loadOverview = async () => {
+async function loadOverview() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const output = await runSSHCommand(buildDetectCommand(), 45000)
-    overview.value = parseOverview(output)
-    const firstActive = activeTools.value[0] || installedTools.value[0]
-    if (firstActive) {
-      activeRuleTool.value = firstActive.id
-      if (manageableTools.value.some((tool) => tool.id === firstActive.id)) {
-        ruleForm.value.tool = firstActive.id
-      }
-    }
-  } catch (error: any) {
-    errorMessage.value = error?.message || '防火墙检测失败'
+    overview.value = parseFirewallOverview(
+      await runSSHCommand(buildFirewallDetectCommand(), 45_000)
+    )
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '防火墙检测失败'
   } finally {
     loading.value = false
   }
 }
 
-const normalizeRules = (data: FirewallOverview | null): FirewallRule[] => {
-  if (!data) return []
-  return (Object.entries(data.rawRules) as [FirewallToolId, string[]][]).flatMap(([tool, lines]) =>
-    lines
-      .map((line, index) => normalizeRule(tool, line, index))
-      .filter((rule): rule is FirewallRule => Boolean(rule))
-  )
+function openRuleDialog() {
+  if (!primaryTool.value || !canAddRule.value) return
+  resetRuleDialog()
+  ruleForm.value.sourceMode = overview.value?.sshClientIp ? 'current' : 'custom'
+  ruleDialogVisible.value = true
 }
 
-const normalizeRule = (tool: FirewallToolId, raw: string, index: number): FirewallRule | null => {
-  const line = raw.trim()
-  if (!line || /^Status:/i.test(line) || /^To\s+Action\s+From/i.test(line) || /^--/.test(line)) {
-    return null
-  }
-
-  if (tool === 'ufw') return normalizeUfwRule(line, index)
-  if (tool === 'firewalld') return normalizeFirewalldRule(line)
-  if (tool === 'iptables') return normalizeIptablesRule(line, index)
-  return {
-    key: `${tool}:${index}:${line}`,
-    tool,
-    raw: line,
-    action: 'unknown',
-    actionLabel: '规则',
-    summary: line,
-    deletable: false
+function resetRuleDialog() {
+  ruleStep.value = 'edit'
+  rulePlan.value = null
+  selectedPreset.value = 'custom'
+  formError.value = ''
+  ruleForm.value = {
+    ports: '',
+    protocol: 'tcp',
+    sourceMode: overview.value?.sshClientIp ? 'current' : 'custom',
+    customSources: '',
+    persist: true
   }
 }
 
-const normalizeUfwRule = (line: string, index: number): FirewallRule | null => {
-  const numbered = line.match(/^\[\s*(\d+)\]\s+(.+)$/)
-  const ruleBody = numbered ? numbered[2].trim() : line
-  if (!ruleBody || /^Status:/i.test(ruleBody)) return null
+function applyPortPreset(value: string) {
+  const preset = FIREWALL_PORT_PRESETS.find((item) => item.value === value)
+  if (!preset || preset.value === 'custom') return
+  ruleForm.value.ports = preset.ports
+  ruleForm.value.protocol = preset.protocol
+}
 
-  const actionMatch = ruleBody.match(/\s+(ALLOW|DENY|REJECT)\s+(IN|OUT)?\s*(.*)$/i)
-  const target = actionMatch ? ruleBody.slice(0, actionMatch.index).trim() : ruleBody
-  const actionText = actionMatch?.[1]?.toUpperCase() || 'RULE'
-  const source = actionMatch?.[3]?.trim()
-  const [portPart, protocolPart] = target.split('/')
-
-  return {
-    key: `ufw:${numbered?.[1] || index}:${line}`,
-    tool: 'ufw',
-    raw: line,
-    action: actionText === 'ALLOW' ? 'allow' : actionText === 'DENY' ? 'deny' : actionText === 'REJECT' ? 'reject' : 'unknown',
-    actionLabel: actionText,
-    summary: target,
-    port: portPart || target,
-    protocol: protocolPart,
-    source: source || '',
-    index: numbered ? Number(numbered[1]) : undefined,
-    deletable: Boolean(numbered),
-    deletePayload: numbered ? { index: Number(numbered[1]) } : undefined,
-    persistent: true
+function prepareRuleReview() {
+  formError.value = ''
+  if (!primaryTool.value) return
+  try {
+    rulePlan.value = createFirewallRulePlan({
+      tool: primaryTool.value.id,
+      ports: ruleForm.value.ports,
+      protocol: ruleForm.value.protocol,
+      sourceMode: ruleForm.value.sourceMode,
+      customSources: ruleForm.value.customSources,
+      sshClientIp: overview.value?.sshClientIp || '',
+      persist: ruleForm.value.persist
+    })
+    ruleStep.value = 'review'
+  } catch (error) {
+    formError.value = error instanceof Error ? error.message : '规则内容不正确'
   }
 }
 
-const normalizeFirewalldRule = (line: string): FirewallRule | null => {
-  const trimmed = line.trim()
-  const portLine = trimmed.match(/^ports:\s*(.*)$/i)
-  if (portLine) {
-    const ports = portLine[1].trim()
-    if (!ports) return null
-    return {
-      key: `firewalld:ports:${ports}`,
-      tool: 'firewalld',
-      raw: trimmed,
-      action: 'allow',
-      actionLabel: 'ALLOW',
-      summary: ports,
-      port: ports,
-      deletable: ports.split(/\s+/).length === 1,
-      deletePayload: ports.split(/\s+/).length === 1 ? parseFirewalldPort(ports) : undefined,
-      persistent: true
-    }
-  }
-
-  const servicesLine = trimmed.match(/^services:\s*(.*)$/i)
-  if (servicesLine) {
-    const services = servicesLine[1].trim()
-    if (!services) return null
-    return {
-      key: `firewalld:services:${services}`,
-      tool: 'firewalld',
-      raw: trimmed,
-      action: 'allow',
-      actionLabel: 'SERVICE',
-      summary: services,
-      service: services,
-      deletable: services.split(/\s+/).length === 1,
-      deletePayload: services.split(/\s+/).length === 1 ? { service: services } : undefined,
-      persistent: true
-    }
-  }
-
-  const sourcesLine = trimmed.match(/^sources:\s*(.*)$/i)
-  if (sourcesLine) {
-    const source = sourcesLine[1].trim()
-    if (!source) return null
-    return {
-      key: `firewalld:sources:${source}`,
-      tool: 'firewalld',
-      raw: trimmed,
-      action: 'unknown',
-      actionLabel: 'SOURCE',
-      summary: source,
-      source,
-      deletable: false,
-      persistent: true
-    }
-  }
-
-  return null
-}
-
-const parseFirewalldPort = (value: string) => {
-  const [port, protocol] = value.split('/')
-  return { port, protocol }
-}
-
-const normalizeIptablesRule = (line: string, index: number): FirewallRule | null => {
-  if (/^Chain\s+/i.test(line) || /^num\s+/i.test(line)) return null
-  const parts = line.split(/\s+/)
-  const number = Number(parts[0])
-  if (!Number.isFinite(number)) return null
-
-  const target = parts[1] || ''
-  const protocol = parts[2] && parts[2] !== 'all' ? parts[2] : ''
-  const source = parts[4] && parts[4] !== '0.0.0.0/0' ? parts[4] : ''
-  const destination = parts[5] && parts[5] !== '0.0.0.0/0' ? parts[5] : ''
-  const dptMatch = line.match(/\bdpt:(\S+)/)
-
-  return {
-    key: `iptables:${number}:${index}:${line}`,
-    tool: 'iptables',
-    raw: line,
-    action: target === 'ACCEPT' ? 'allow' : target === 'DROP' ? 'deny' : 'unknown',
-    actionLabel: target || 'RULE',
-    summary: dptMatch?.[1] || line,
-    port: dptMatch?.[1],
-    protocol,
-    source,
-    target: destination,
-    chain: 'INPUT',
-    index: number,
-    deletable: true,
-    deletePayload: { chain: 'INPUT', index: number },
-    persistent: false
-  }
-}
-
-const rulesByTool = (tool: FirewallToolId) =>
-  normalizedRules.value.filter((rule) => rule.tool === tool)
-
-const canEnable = (tool: FirewallToolId) => tool === 'ufw' || tool === 'firewalld' || tool === 'nftables'
-const canDisable = (tool: FirewallToolId) =>
-  tool === 'ufw' || tool === 'firewalld' || tool === 'nftables'
-
-const recommendedInstallTool = computed<'ufw' | 'firewalld'>(() => {
-  const os = overview.value?.osId.toLowerCase() || ''
-  const pkg = overview.value?.packageManager || ''
-  if (/centos|rhel|rocky|almalinux|fedora|opensuse|sles/.test(os) || ['dnf', 'yum', 'zypper'].includes(pkg)) {
-    return 'firewalld'
-  }
-  return 'ufw'
-})
-
-const buildInstallCommand = (target: 'auto' | 'ufw' | 'firewalld') => {
-  const actualTarget = target === 'auto' ? recommendedInstallTool.value : target
-  return `
-sh <<'MSHELL_FIREWALL_INSTALL'
-set -e
-TARGET=${shellQuote(actualTarget)}
-if [ "$(id -u)" = "0" ]; then
-  SUDO=""
-elif command -v sudo >/dev/null 2>&1; then
-  SUDO="sudo"
-else
-  echo "当前用户不是 root，且未检测到 sudo，无法安装防火墙。"
-  exit 1
-fi
-
-install_pkg() {
-  pkg="$1"
-  if command -v apt-get >/dev/null 2>&1; then
-    $SUDO apt-get update
-    DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y "$pkg"
-  elif command -v dnf >/dev/null 2>&1; then
-    $SUDO dnf install -y "$pkg"
-  elif command -v yum >/dev/null 2>&1; then
-    $SUDO yum install -y "$pkg"
-  elif command -v zypper >/dev/null 2>&1; then
-    $SUDO zypper --non-interactive install "$pkg"
-  elif command -v pacman >/dev/null 2>&1; then
-    $SUDO pacman -Sy --noconfirm "$pkg"
-  elif command -v apk >/dev/null 2>&1; then
-    $SUDO apk add "$pkg"
-  else
-    echo "未识别到受支持的包管理器。"
-    exit 1
-  fi
-}
-
-case "$TARGET" in
-  ufw) install_pkg ufw ;;
-  firewalld) install_pkg firewalld ;;
-  *) echo "不支持的防火墙: $TARGET"; exit 1 ;;
-esac
-
-echo "安装完成: $TARGET"
-MSHELL_FIREWALL_INSTALL
-`
-}
-
-const installFirewall = async () => {
+async function allowRule() {
+  if (!rulePlan.value) return
   actionLoading.value = true
   errorMessage.value = ''
   try {
-    lastOutput.value = await runSSHCommand(buildInstallCommand(installTarget.value), 180000)
-    ElMessage.success('防火墙安装命令已完成')
+    lastOutput.value = await runSSHCommand(buildAllowFirewallCommand(rulePlan.value), 60_000)
+    ruleDialogVisible.value = false
+    ElMessage.success('开放规则已添加')
     await loadOverview()
-  } catch (error: any) {
-    errorMessage.value = error?.message || '安装防火墙失败'
+  } catch (error) {
+    formError.value = error instanceof Error ? error.message : '新增规则失败'
   } finally {
     actionLoading.value = false
   }
 }
 
-const buildEnableCommand = (tool: FirewallToolId) => `
-sh <<'MSHELL_FIREWALL_ENABLE'
-set -e
-TOOL=${shellQuote(tool)}
-if [ "$(id -u)" = "0" ]; then
-  SUDO=""
-elif command -v sudo >/dev/null 2>&1; then
-  SUDO="sudo"
-else
-  echo "当前用户不是 root，且未检测到 sudo，无法启用防火墙。"
-  exit 1
-fi
-
-case "$TOOL" in
-  ufw)
-    $SUDO ufw --force enable
-    ;;
-  firewalld)
-    if command -v systemctl >/dev/null 2>&1; then
-      $SUDO systemctl enable --now firewalld
-    fi
-    $SUDO firewall-cmd --state
-    ;;
-  nftables)
-    if command -v systemctl >/dev/null 2>&1; then
-      $SUDO systemctl enable --now nftables
-    else
-      echo "当前系统未检测到 systemctl，请手动确认 nftables 启动方式。"
-    fi
-    ;;
-  *)
-    echo "该防火墙暂不支持一键启用。"
-    exit 1
-    ;;
-esac
-
-echo "已执行启用操作: $TOOL"
-MSHELL_FIREWALL_ENABLE
-`
-
-const enableFirewall = async (tool: FirewallToolId) => {
-  actionLoading.value = true
-  errorMessage.value = ''
-  try {
-    lastOutput.value = await runSSHCommand(buildEnableCommand(tool), 60000)
-    ElMessage.success('启用命令已完成')
-    await loadOverview()
-  } catch (error: any) {
-    errorMessage.value = error?.message || '启用防火墙失败'
-  } finally {
-    actionLoading.value = false
-  }
+function canEnableTool(tool: FirewallTool) {
+  return tool.installed && !tool.active && (tool.id === 'ufw' || tool.id === 'firewalld')
 }
 
-const buildDisableCommand = (tool: FirewallToolId) => `
-sh <<'MSHELL_FIREWALL_DISABLE'
-set -e
-TOOL=${shellQuote(tool)}
-if [ "$(id -u)" = "0" ]; then
-  SUDO=""
-elif command -v sudo >/dev/null 2>&1; then
-  SUDO="sudo"
-else
-  echo "当前用户不是 root，且未检测到 sudo，无法停用防火墙。"
-  exit 1
-fi
+function canInstallTool(tool: FirewallTool) {
+  return !tool.installed && (tool.id === 'ufw' || tool.id === 'firewalld')
+}
 
-case "$TOOL" in
-  ufw)
-    $SUDO ufw disable
-    ;;
-  firewalld)
-    if command -v systemctl >/dev/null 2>&1; then
-      $SUDO systemctl disable --now firewalld
-    else
-      echo "当前系统未检测到 systemctl，无法安全停用 firewalld。"
-      exit 1
-    fi
-    ;;
-  nftables)
-    if command -v systemctl >/dev/null 2>&1; then
-      $SUDO systemctl disable --now nftables
-    else
-      echo "当前系统未检测到 systemctl，无法安全停用 nftables。"
-      exit 1
-    fi
-    ;;
-  *)
-    echo "该防火墙暂不支持一键停用。"
-    exit 1
-    ;;
-esac
+function isRecommendedInstall(tool: FirewallTool) {
+  return shouldRecommendInstall.value && tool.id === recommendedInstallTool.value
+}
 
-echo "已执行停用操作: $TOOL"
-MSHELL_FIREWALL_DISABLE
-`
+function canDisableTool(tool: FirewallTool) {
+  return tool.active && (tool.id === 'ufw' || tool.id === 'firewalld')
+}
 
-const disableFirewall = async (tool: FirewallToolId) => {
+async function enableFirewall(tool: FirewallToolId) {
+  if (!overview.value) return
+  let command: string
+  try {
+    command = buildEnableFirewallCommand(
+      tool,
+      overview.value.sshClientIp,
+      overview.value.sshServerPort
+    )
+  } catch (error) {
+    ElMessage.warning(error instanceof Error ? error.message : '无法安全启用防火墙')
+    return
+  }
   try {
     await ElMessageBox.confirm(
-      `停用 ${toolLabels[tool]} 可能导致 SSH 或其他服务暴露/失去访问控制，确定继续吗？`,
-      '停用防火墙',
-      {
-        type: 'warning',
-        confirmButtonText: '确认停用',
-        cancelButtonText: '取消'
-      }
+      `启用前将先允许 ${overview.value.sshClientIp} 访问当前 SSH 端口 ${overview.value.sshServerPort}，然后启用 ${FIREWALL_TOOL_LABELS[tool]}。`,
+      '保护当前连接并启用',
+      { type: 'warning', confirmButtonText: '确认启用', cancelButtonText: '取消' }
     )
   } catch {
     return
   }
+  await executeAction(command, '防火墙已启用', 60_000)
+}
 
-  actionLoading.value = true
-  errorMessage.value = ''
+async function disableFirewall(tool: FirewallToolId) {
   try {
-    lastOutput.value = await runSSHCommand(buildDisableCommand(tool), 60000)
-    ElMessage.success('停用命令已完成')
-    await loadOverview()
-  } catch (error: any) {
-    errorMessage.value = error?.message || '停用防火墙失败'
-  } finally {
-    actionLoading.value = false
-  }
-}
-
-const parseListInput = (value: string) =>
-  value
-    .split(/[,\s，]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-
-const normalizePorts = (value: string) => {
-  const ports = parseListInput(value)
-  if (ports.length === 0) {
-    throw new Error('请输入至少一个端口')
-  }
-  const invalid = ports.find((port) => !/^(\d{1,5})([-:]\d{1,5})?$/.test(port))
-  if (invalid) throw new Error(`端口格式不正确: ${invalid}`)
-  ports.forEach((port) => {
-    const [start, end] = port.split(/[-:]/).map(Number)
-    if (start < 1 || start > 65535 || (end && (end < 1 || end > 65535 || end < start))) {
-      throw new Error(`端口范围不正确: ${port}`)
-    }
-  })
-  return ports
-}
-
-const normalizeSources = (value: string) => {
-  return parseListInput(value)
-}
-
-const buildAllowCommand = () => {
-  const ports = normalizePorts(ruleForm.value.ports)
-  const sources = normalizeSources(ruleForm.value.sources)
-  const protocols = ruleForm.value.protocol === 'both' ? ['tcp', 'udp'] : [ruleForm.value.protocol]
-  const sourceList = sources.length ? sources.join(' ') : '__MSHELL_ALL__'
-  const tool = ruleForm.value.tool
-
-  return `
-sh <<'MSHELL_FIREWALL_ALLOW'
-set -e
-TOOL=${shellQuote(tool)}
-PORTS=${shellQuote(ports.join(' '))}
-SOURCES=${shellQuote(sourceList)}
-PROTOCOLS=${shellQuote(protocols.join(' '))}
-if [ "$(id -u)" = "0" ]; then
-  SUDO=""
-elif command -v sudo >/dev/null 2>&1; then
-  SUDO="sudo"
-else
-  echo "当前用户不是 root，且未检测到 sudo，无法修改防火墙规则。"
-  exit 1
-fi
-
-for port in $PORTS; do
-  for proto in $PROTOCOLS; do
-    for source in $SOURCES; do
-      if [ "$source" = "__MSHELL_ALL__" ]; then
-        source=""
-      fi
-      case "$TOOL" in
-        ufw)
-          ufw_port=$(echo "$port" | tr '-' ':')
-          if [ -n "$source" ]; then
-            $SUDO ufw allow from "$source" to any port "$ufw_port" proto "$proto"
-          else
-            $SUDO ufw allow "$ufw_port/$proto"
-          fi
-          ;;
-        firewalld)
-          fw_port=$(echo "$port" | tr ':' '-')
-          if [ -n "$source" ]; then
-            family=ipv4
-            echo "$source" | grep -q ':' && family=ipv6
-            $SUDO firewall-cmd --permanent --add-rich-rule="rule family=\\"$family\\" source address=\\"$source\\" port port=\\"$fw_port\\" protocol=\\"$proto\\" accept"
-          else
-            $SUDO firewall-cmd --permanent --add-port="$fw_port/$proto"
-          fi
-          ;;
-        iptables)
-          ipt_port=$(echo "$port" | tr '-' ':')
-          port_match="--dport $ipt_port"
-          if [ -n "$source" ]; then
-            $SUDO iptables -C INPUT -p "$proto" -s "$source" $port_match -j ACCEPT 2>/dev/null || $SUDO iptables -I INPUT -p "$proto" -s "$source" $port_match -j ACCEPT
-          else
-            $SUDO iptables -C INPUT -p "$proto" $port_match -j ACCEPT 2>/dev/null || $SUDO iptables -I INPUT -p "$proto" $port_match -j ACCEPT
-          fi
-          echo "提示: iptables 规则是否永久保存取决于服务器是否安装 iptables-persistent 或系统级保存机制。"
-          ;;
-        *)
-          echo "该工具暂不支持可视化新增规则: $TOOL"
-          exit 1
-          ;;
-      esac
-    done
-  done
-done
-
-if [ "$TOOL" = "firewalld" ]; then
-  $SUDO firewall-cmd --reload
-fi
-
-echo "规则已写入: $TOOL"
-MSHELL_FIREWALL_ALLOW
-`
-}
-
-const allowRule = async () => {
-  actionLoading.value = true
-  errorMessage.value = ''
-  try {
-    lastOutput.value = await runSSHCommand(buildAllowCommand(), 60000)
-    ElMessage.success('防火墙规则已更新')
-    await loadOverview()
-  } catch (error: any) {
-    errorMessage.value = error?.message || '新增规则失败'
-  } finally {
-    actionLoading.value = false
-  }
-}
-
-const buildDeleteCommand = (rule: FirewallRule) => {
-  if (rule.tool === 'ufw' && rule.index) {
-    return `
-sh <<'MSHELL_FIREWALL_DELETE'
-set -e
-if [ "$(id -u)" = "0" ]; then SUDO=""; elif command -v sudo >/dev/null 2>&1; then SUDO="sudo"; else echo "缺少 sudo 权限"; exit 1; fi
-$SUDO ufw --force delete ${Number(rule.index)}
-MSHELL_FIREWALL_DELETE
-`
-  }
-
-  if (rule.tool === 'firewalld') {
-    const payload = rule.deletePayload || {}
-    if (payload.port && payload.protocol) {
-      return `
-sh <<'MSHELL_FIREWALL_DELETE'
-set -e
-if [ "$(id -u)" = "0" ]; then SUDO=""; elif command -v sudo >/dev/null 2>&1; then SUDO="sudo"; else echo "缺少 sudo 权限"; exit 1; fi
-$SUDO firewall-cmd --permanent --remove-port=${shellQuote(`${payload.port}/${payload.protocol}`)}
-$SUDO firewall-cmd --reload
-MSHELL_FIREWALL_DELETE
-`
-    }
-    if (payload.service) {
-      return `
-sh <<'MSHELL_FIREWALL_DELETE'
-set -e
-if [ "$(id -u)" = "0" ]; then SUDO=""; elif command -v sudo >/dev/null 2>&1; then SUDO="sudo"; else echo "缺少 sudo 权限"; exit 1; fi
-$SUDO firewall-cmd --permanent --remove-service=${shellQuote(String(payload.service))}
-$SUDO firewall-cmd --reload
-MSHELL_FIREWALL_DELETE
-`
-    }
-  }
-
-  if (rule.tool === 'iptables' && rule.index && rule.chain) {
-    return `
-sh <<'MSHELL_FIREWALL_DELETE'
-set -e
-if [ "$(id -u)" = "0" ]; then SUDO=""; elif command -v sudo >/dev/null 2>&1; then SUDO="sudo"; else echo "缺少 sudo 权限"; exit 1; fi
-$SUDO iptables -D ${shellQuote(rule.chain)} ${Number(rule.index)}
-echo "提示: iptables 删除是否永久保存取决于服务器是否安装持久化规则保存机制。"
-MSHELL_FIREWALL_DELETE
-`
-  }
-
-  throw new Error('该规则暂不支持可视化删除')
-}
-
-const deleteRule = async (rule: FirewallRule) => {
-  try {
-    await ElMessageBox.confirm(`确定删除这条规则吗？\n${rule.raw}`, '删除防火墙规则', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消'
-    })
+    await ElMessageBox.confirm(
+      `停用 ${FIREWALL_TOOL_LABELS[tool]} 后，服务器端口可能失去访问控制。`,
+      '确认停用防火墙',
+      { type: 'error', confirmButtonText: '停用防火墙', cancelButtonText: '取消' }
+    )
   } catch {
     return
   }
+  try {
+    await executeAction(buildDisableFirewallCommand(tool), '防火墙已停用', 60_000)
+  } catch {
+    /* executeAction reports the error */
+  }
+}
 
+async function installFirewall(tool: FirewallToolId) {
+  if (tool !== 'ufw' && tool !== 'firewalld') return
+  const existing = primaryTool.value?.installed
+    ? `当前已可使用 ${primaryToolLabel.value}；安装后不会自动启用，也不要同时启用多个管理器。`
+    : '安装完成后不会自动启用。'
+  try {
+    await ElMessageBox.confirm(
+      `将使用服务器当前配置的可信软件源安装 ${FIREWALL_TOOL_LABELS[tool]}。${existing}`,
+      '安装防火墙管理工具',
+      { type: 'info', confirmButtonText: '开始安装', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await executeAction(buildInstallFirewallCommand(tool), '防火墙工具已安装', 180_000, (error) => {
+      const failure = classifyFirewallInstallError(error)
+      return `${failure.message}。${failure.guidance}`
+    })
+  } catch {
+    /* executeAction reports the classified error */
+  }
+}
+
+async function deleteRule(rule: FirewallRule) {
+  try {
+    await ElMessageBox.confirm(
+      `将删除 ${formatRulePort(rule)}，来源 ${rule.source || '所有来源'} 的规则。删除后对应服务可能无法访问。`,
+      '确认删除规则',
+      { type: 'warning', confirmButtonText: '删除规则', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await executeAction(buildDeleteFirewallCommand(rule), '规则已删除', 60_000)
+  } catch {
+    /* executeAction reports the error */
+  }
+}
+
+async function executeAction(
+  command: string,
+  success: string,
+  timeout: number,
+  formatError?: (error: unknown) => string
+) {
   actionLoading.value = true
   errorMessage.value = ''
   try {
-    lastOutput.value = await runSSHCommand(buildDeleteCommand(rule), 60000)
-    ElMessage.success('规则已删除')
+    lastOutput.value = await runSSHCommand(command, timeout)
+    ElMessage.success(success)
     await loadOverview()
-  } catch (error: any) {
-    errorMessage.value = error?.message || '删除规则失败'
+  } catch (error) {
+    errorMessage.value = formatError
+      ? formatError(error)
+      : error instanceof Error
+        ? error.message
+        : '防火墙操作失败'
+    activeSection.value = 'details'
+    throw error
   } finally {
     actionLoading.value = false
   }
 }
 
-const appendPresetPorts = (value: string) => {
-  const current = new Set(
-    parseListInput(ruleForm.value.ports)
-      .filter((port) => /^(\d{1,5})([-:]\d{1,5})?$/.test(port))
-      .map((port) => port.replace(':', '-'))
-  )
-  current.add(value)
-  ruleForm.value.ports = Array.from(current).join(',')
+function formatRulePort(rule: FirewallRule) {
+  return rule.port ? `端口 ${rule.port}` : rule.summary
 }
 
+function toolDisplayName(tool: FirewallTool) {
+  return overview.value ? displayFirewallLabel(tool, overview.value) : tool.label
+}
+
+function describeTool(tool: FirewallTool) {
+  if (!tool.installed) return '当前服务器未安装'
+  if (tool.id === 'nftables' && overview.value?.iptablesBackend === 'nf_tables' && !tool.active) {
+    return '作为 iptables 的底层规则后端使用'
+  }
+  if (tool.id === 'iptables' && overview.value) {
+    const policies = Object.entries(overview.value.iptablesPolicies)
+      .filter(([, policy]) => policy)
+      .map(([family, policy]) => `${family === 'ipv4' ? 'IPv4' : 'IPv6'} ${policy}`)
+      .join(' · ')
+    return `${policies || '默认策略未知'} · ${tool.version || '版本未知'}`
+  }
+  if (tool.active) return tool.version || '服务正在运行'
+  return tool.version || '已安装，未检测到运行状态'
+}
+
+function rawRulesFor(tool: FirewallToolId) {
+  const lines = overview.value?.rawRules[tool] || []
+  return lines.length ? lines.join('\n') : '暂无原始规则输出'
+}
+
+watch(() => props.connectionId, loadOverview)
 onMounted(loadOverview)
 </script>
 
@@ -1139,366 +839,525 @@ onMounted(loadOverview)
   min-width: 0;
   background: var(--bg-main);
   color: var(--text-primary);
+  container-type: inline-size;
 }
-
 .firewall-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 56px;
-  padding: 10px 12px;
+  min-height: 58px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-secondary);
-  box-sizing: border-box;
 }
-
-.firewall-header h3 {
+.header-copy {
+  min-width: 0;
+}
+.header-copy h3 {
   margin: 0;
   font-size: var(--text-base);
   font-weight: 650;
-  color: var(--text-primary);
 }
-
-.firewall-header p {
+.header-copy p {
   margin: 3px 0 0;
-  max-width: 260px;
   overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
 }
-
 .header-actions {
   display: flex;
-  align-items: center;
   gap: 6px;
   flex-shrink: 0;
 }
-
 .firewall-content {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  box-sizing: border-box;
+  padding: 14px;
 }
-
-.summary-grid {
+.firewall-content > :deep(.el-alert),
+.firewall-content > .status-band {
+  margin-bottom: 12px;
+}
+.status-band {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.summary-card,
-.tool-card,
-.install-box,
-.rule-editor,
-.rules-section,
-.output-box {
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
 }
-
-.summary-card {
-  min-width: 0;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.summary-card .label,
-.section-head span,
-.tool-main span,
-.rule-meta,
-.output-head {
-  font-size: var(--text-xs);
+.status-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
   color: var(--text-secondary);
+  font-size: 20px;
 }
-
-.summary-card strong {
+.status-band.is-success .status-icon {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--success-color);
+}
+.status-band.is-warning .status-icon {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--warning-color);
+}
+.status-band.is-info .status-icon {
+  background: rgba(var(--primary-color-rgb), 0.12);
+  color: var(--primary-color);
+}
+.status-copy {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-primary);
 }
-
-.summary-card.is-ready {
-  border-color: rgba(34, 197, 94, 0.35);
-  background: rgba(34, 197, 94, 0.08);
+.status-copy > span,
+.status-copy p,
+.status-facts span,
+.section-header span,
+.tool-copy span,
+.dialog-intro,
+.form-field > span {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
 }
-
-.tool-section {
+.status-copy strong {
+  display: block;
+  margin: 2px 0;
+  font-size: var(--text-base);
+}
+.status-copy p {
+  margin: 0;
+  line-height: 1.5;
+}
+.status-facts {
+  display: flex;
+  grid-column: 2;
+  gap: 18px;
+  text-align: left;
+}
+.status-facts span {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
-
-.section-head {
+.status-facts b {
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+.firewall-tabs {
+  min-height: 0;
+}
+.rules-view,
+.details-view {
   display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+}
+.section-header {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
-
-.section-head > div {
+.section-header > div {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 3px;
 }
-
-.section-head strong {
-  color: var(--text-primary);
+.section-header strong {
+  font-size: var(--text-sm);
 }
-
-.tool-list {
+.section-header.compact {
+  margin-bottom: 8px;
+}
+.rule-list {
+  border-top: 1px solid var(--border-color);
+}
+.rule-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.tool-card {
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
+  grid-template-columns: 8px minmax(0, 1fr) 34px;
   gap: 10px;
+  align-items: start;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-color);
 }
-
-.tool-card.active {
-  border-color: rgba(34, 197, 94, 0.35);
+.rule-indicator {
+  width: 7px;
+  height: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
 }
-
-.tool-main {
-  display: flex;
-  gap: 8px;
+.rule-indicator.is-allow {
+  background: var(--success-color);
+}
+.rule-indicator.is-deny,
+.rule-indicator.is-reject {
+  background: var(--error-color);
+}
+.rule-main {
   min-width: 0;
 }
-
-.tool-main > div {
-  min-width: 0;
+.rule-heading {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
 }
-
-.tool-main strong,
-.tool-main span {
+.rule-heading strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.tool-dot {
-  width: 8px;
-  height: 8px;
+.rule-heading > span {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.rule-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.rule-main details {
+  margin-top: 7px;
+}
+.rule-main summary {
+  width: fit-content;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.rule-main code {
+  display: block;
   margin-top: 6px;
+  padding: 8px;
+  overflow-wrap: anywhere;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.empty-rules {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  padding: 48px 20px;
+  text-align: center;
+}
+.empty-rules .el-icon {
+  margin-bottom: 12px;
+  color: var(--text-tertiary);
+  font-size: 30px;
+}
+.empty-rules p {
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.container-ports {
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color);
+}
+.container-port-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.container-port-row > .el-icon {
+  color: var(--text-secondary);
+  font-size: 17px;
+}
+.container-port-row > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.container-port-row span {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--border-color);
+}
+.detail-summary div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px;
+  background: var(--bg-secondary);
+}
+.detail-summary span {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.detail-summary strong {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-section {
+  padding-top: 4px;
+}
+.tool-list {
+  border-top: 1px solid var(--border-color);
+}
+.tool-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 58px;
+  border-bottom: 1px solid var(--border-color);
+}
+.tool-dot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--text-placeholder, #9ca3af);
-  flex-shrink: 0;
+  background: var(--text-disabled);
 }
-
-.tool-card.installed .tool-dot {
-  background: #f59e0b;
+.tool-dot.installed {
+  background: var(--text-tertiary);
 }
-
-.tool-card.active .tool-dot {
-  background: #22c55e;
+.tool-dot.active {
+  background: var(--success-color);
 }
-
+.tool-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.tool-copy strong,
+.tool-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tool-actions {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
 }
-
-.install-box {
-  padding: 12px;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.install-box h4 {
-  margin: 0 0 4px;
-  color: var(--text-primary);
-}
-
-.install-box p {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-
-.install-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.rule-editor,
-.rules-section,
-.output-box {
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.editor-grid {
+.persistence-status {
   display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: 8px;
-}
-
-.editor-field {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.editor-field label {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
-.common-ports {
-  display: flex;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.common-ports span {
-  margin-right: 2px;
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
-.common-ports button {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-main);
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  padding: 4px 7px;
-  cursor: pointer;
-}
-
-.common-ports button:hover {
-  color: var(--primary-color);
-  border-color: rgba(var(--primary-color-rgb), 0.45);
-}
-
-.editor-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.rule-tabs {
-  min-height: 0;
-}
-
-.rule-list {
-  height: 320px;
-}
-
-.rule-row {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 10px 0;
+  gap: 8px;
+  padding: 11px 0;
   border-bottom: 1px solid var(--border-color);
 }
-
-.rule-row:last-child {
-  border-bottom: 0;
+.persistence-status > .el-icon {
+  color: var(--primary-color);
+  font-size: 17px;
 }
-
-.rule-info {
-  min-width: 0;
+.persistence-status > div,
+.persistence-option > span {
   display: flex;
+  min-width: 0;
   flex-direction: column;
-  gap: 5px;
+  gap: 3px;
 }
-
-.rule-title {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.rule-title strong {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-primary);
-}
-
-.rule-title span {
-  font-size: var(--text-xs);
+.persistence-status span,
+.persistence-option small {
   color: var(--text-secondary);
+  font-size: var(--text-xs);
 }
-
-.rule-meta {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.advanced-collapse {
+  border-top: 0;
 }
-
-.rule-info code {
+.collapse-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.raw-group + .raw-group {
+  margin-top: 12px;
+}
+.raw-group strong {
   display: block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-secondary);
-  font-family: var(--font-mono, Consolas, monospace);
-  font-size: var(--text-xs);
+  margin-bottom: 6px;
 }
-
-.output-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.output-box pre {
-  max-height: 160px;
+.raw-group pre,
+.command-output {
+  max-height: 220px;
   margin: 0;
   padding: 10px;
   overflow: auto;
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
   background: var(--bg-main);
-  color: var(--text-primary);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
-
-@media (max-width: 520px) {
-  .summary-grid,
-  .tool-list,
-  .editor-grid {
+.dialog-intro {
+  margin: -4px 0 18px;
+}
+.rule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.form-field label,
+.source-options legend {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.source-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.source-options legend {
+  margin-bottom: 7px;
+}
+.source-options > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+.source-options > label.selected {
+  border-color: var(--primary-color);
+  background: rgba(var(--primary-color-rgb), 0.08);
+}
+.source-options > label.danger.selected {
+  border-color: var(--warning-color);
+  background: rgba(245, 158, 11, 0.08);
+}
+.source-options > label.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.source-options input {
+  margin-top: 4px;
+  accent-color: var(--primary-color);
+}
+.source-options span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.source-options small {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.persistence-option {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 0;
+  border-top: 1px solid var(--border-color);
+  cursor: pointer;
+}
+.review-list {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 14px;
+  border-top: 1px solid var(--border-color);
+}
+.review-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.review-list span {
+  color: var(--text-secondary);
+}
+.review-list strong {
+  max-width: 65%;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.firewall-rule-dialog :deep(.el-alert + .el-alert) {
+  margin-top: 8px;
+}
+:global(.firewall-rule-dialog) {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-xl);
+}
+:global(.firewall-rule-dialog .el-dialog__header),
+:global(.firewall-rule-dialog .el-dialog__body),
+:global(.firewall-rule-dialog .el-dialog__footer) {
+  background: var(--bg-elevated);
+}
+@media (hover: hover) and (pointer: fine) {
+  .source-options > label:hover:not(.disabled) {
+    border-color: var(--border-strong);
+  }
+  .rule-main summary:hover {
+    color: var(--primary-color);
+  }
+}
+@container (max-width: 390px) {
+  .status-facts {
+    grid-column: 1 / -1;
+    padding-left: 50px;
+  }
+  .detail-summary {
     grid-template-columns: 1fr;
   }
-
-  .install-box {
-    flex-direction: column;
+  .tool-row {
+    grid-template-columns: 8px minmax(0, 1fr);
+    padding: 9px 0;
   }
-
-  .install-actions {
-    align-items: stretch;
+  .tool-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .source-options > label {
+    transition: none;
   }
 }
 </style>

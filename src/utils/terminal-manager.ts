@@ -140,6 +140,7 @@ interface TerminalInstance {
   cursorCallback: ((position: { x: number; y: number }) => void) | null
   dataCallback: ((data: string) => void) | null
   outputCallback: ((data: string) => void) | null // SSH 输出回调（用于错误检测等）
+  outputSubscribers: Set<(data: string) => void> // 临时监听器，不覆盖主输出回调
   copyOnSelect: boolean // 选中自动复制
   selectionDisposable?: { dispose: () => void } // 选中事件监听器
   bracketedPasteEnabled: boolean // 远端是否启用了 bracketed paste mode
@@ -322,6 +323,7 @@ class TerminalManager {
       cursorCallback: null,
       dataCallback: null,
       outputCallback: null,
+      outputSubscribers: new Set(),
       copyOnSelect: options.copyOnSelect || false,
       bracketedPasteEnabled: false,
       echoEnabled: true, // 默认回显开启
@@ -429,6 +431,16 @@ class TerminalManager {
           // 只有非空数据才调用回调
           if (strData) {
             instance.outputCallback(strData)
+          }
+        }
+
+        if (strForDetect) {
+          for (const subscriber of [...instance.outputSubscribers]) {
+            try {
+              subscriber(strForDetect)
+            } catch (error) {
+              console.warn('[TerminalManager] Output subscriber failed:', error)
+            }
           }
         }
 
@@ -540,6 +552,13 @@ class TerminalManager {
 
     instance.pendingViewportRefresh = false
     instance.pendingScrollToBottom = false
+  }
+
+  focus(connectionId: string): void {
+    const instance = this.instances.get(connectionId)
+    if (!instance) return
+    this.reveal(connectionId, { scrollToBottom: true })
+    instance.terminal.focus()
   }
 
   writeLocalOutput(connectionId: string, data: string): void {
@@ -852,6 +871,13 @@ class TerminalManager {
       instance.fitAddon.fit()
       this.syncRemoteWindowSize(instance)
     }
+  }
+
+  subscribeOutput(connectionId: string, callback: (data: string) => void): () => void {
+    const instance = this.instances.get(connectionId)
+    if (!instance) return () => undefined
+    instance.outputSubscribers.add(callback)
+    return () => instance.outputSubscribers.delete(callback)
   }
 
   private hasUsableContainerSize(instance: TerminalInstance): boolean {

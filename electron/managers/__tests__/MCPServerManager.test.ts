@@ -138,6 +138,140 @@ describe('MCPServerManager', () => {
     })
   })
 
+  it('discovers database targets before querying and does not expose credentials', async () => {
+    const port = await getAvailablePort()
+    mocks.settings.port = port
+    mocks.getConnection.mockReturnValue({ id: 'db-session', status: 'connected' })
+    mocks.executeCommand.mockResolvedValue(`
+HOST_CLIENT|postgresql
+TARGET|postgresql|postgres|postgres:15|5432/tcp|root|orders|verified:no
+TARGET|postgresql|postgres|postgres:15|5432/tcp|root|analytics|verified:no
+APPLICATION|shop-api|example/shop:latest|3000/tcp
+APPLICATION|worker|example/worker:latest|
+`)
+    await mcpServerManager.applySettings({ ...mocks.settings })
+    const response = await postMcp(port, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'discover_database_targets', arguments: { connectionId: 'db-session' } }
+    })
+    const payload = await readMcpPayload(response)
+    const result = JSON.parse(payload.result.content[0].text)
+    expect(result.requiresSelection).toBe(true)
+    expect(result.targets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ database: 'orders', container: 'postgres', queryReady: true }),
+        expect.objectContaining({ database: 'analytics', container: 'postgres', queryReady: true })
+      ])
+    )
+    expect(result.guidance).toContain('必须让用户确认')
+    expect(JSON.stringify(result)).not.toMatch(/password|secret/i)
+    expect(mocks.executeCommand).toHaveBeenCalledWith(
+      'db-session',
+      expect.stringContaining('__MSHELL_DATABASE_DISCOVERY_V1__'),
+      20_000,
+      256 * 1024
+    )
+    expect(mocks.auditLog).toHaveBeenCalledWith(
+      'mcp-tool-call',
+      expect.objectContaining({
+        resource: 'discover_database_targets',
+        details: expect.objectContaining({
+          targetCount: 3,
+          applicationCount: 2,
+          requiresSelection: true
+        })
+      })
+    )
+  })
+
+  it('queries databases with writes disabled, caps output and never audits SQL or database errors', async () => {
+    const port = await getAvailablePort()
+    mocks.settings.port = port
+    mocks.getConnection.mockReturnValue({ id: 'db-session', status: 'connected' })
+    mocks.executeCommand.mockResolvedValue('id,name\n1,Alice\n')
+    await mcpServerManager.applySettings({ ...mocks.settings })
+    const call = async (query: string, extra = {}) =>
+      readMcpPayload(
+        await postMcp(port, {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: {
+            name: 'query_database',
+            arguments: {
+              connectionId: 'db-session',
+              engine: 'postgresql',
+              database: 'app',
+              query,
+              ...extra
+            }
+          }
+        })
+      )
+
+    const response = await call("SELECT * FROM users WHERE name = 'private-value'", {
+      container: 'postgres-db'
+    })
+    expect(response.result.isError).toBeUndefined()
+    expect(JSON.parse(response.result.content[0].text)).toMatchObject({
+      engine: 'postgresql',
+      format: 'csv',
+      maxRows: 200,
+      output: 'id,name\n1,Alice\n',
+      truncated: false
+    })
+    expect(mocks.executeCommand).toHaveBeenCalledWith(
+      'db-session',
+      expect.stringContaining("'docker' 'exec' '-i' 'postgres-db'"),
+      25_000,
+      256 * 1024,
+      expect.stringContaining('BEGIN READ ONLY;')
+    )
+    expect(mocks.executeCommand.mock.calls[0][1]).not.toContain('private-value')
+
+    const denied = await call('DELETE FROM users')
+    expect(denied.result.isError).toBe(true)
+    expect(mocks.executeCommand).toHaveBeenCalledTimes(1)
+    mocks.settings.allowWriteEnabled = true
+    expect((await call('DELETE FROM users')).result.isError).toBe(true)
+    expect(mocks.executeCommand).toHaveBeenCalledTimes(1)
+
+    mocks.executeCommand.mockResolvedValueOnce('x'.repeat(70 * 1024))
+    const large = JSON.parse((await call('SELECT * FROM logs')).result.content[0].text)
+    expect(large.output).toHaveLength(64 * 1024)
+    expect(large.truncated).toBe(true)
+
+    mocks.executeCommand.mockRejectedValueOnce(
+      new Error('Command failed with code 1: private-value password=secret')
+    )
+    const failed = await call("SELECT 'private-value'")
+    expect(failed.result.isError).toBe(true)
+    expect(JSON.parse(failed.result.content[0].text)).toMatchObject({
+      errorCode: 'QUERY_FAILED',
+      retryable: false
+    })
+    expect(JSON.stringify(failed)).not.toContain('private-value')
+    expect(JSON.stringify(mocks.auditLog.mock.calls)).not.toContain('private-value')
+    expect(JSON.stringify(mocks.auditLog.mock.calls)).not.toContain('password=secret')
+    expect(mocks.auditLog.mock.calls[0][1].details).toMatchObject({
+      querySha256: expect.any(String),
+      queryLength: expect.any(Number)
+    })
+    const failedAudit = mocks.auditLog.mock.calls.find(
+      ([, entry]) =>
+        entry.resource === 'query_database' &&
+        entry.success === false &&
+        entry.details.errorCode === 'QUERY_FAILED'
+    )
+    expect(failedAudit?.[1].details).toMatchObject({ errorCode: 'QUERY_FAILED' })
+
+    mocks.getConnection.mockReturnValue({ status: 'disconnected' })
+    expect((await call('SELECT 1')).result.isError).toBe(true)
+    expect(mocks.executeCommand).toHaveBeenCalledTimes(3)
+  })
+
   it('requires a bearer token and only lists currently connected SSH sessions', async () => {
     const port = await getAvailablePort()
     mocks.settings.port = port
@@ -217,6 +351,8 @@ describe('MCPServerManager', () => {
       'list_remote_files',
       'read_remote_file',
       'execute_readonly_command',
+      'discover_database_targets',
+      'query_database',
       'write_remote_file',
       'execute_command'
     ])
