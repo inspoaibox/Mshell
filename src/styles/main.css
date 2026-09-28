@@ -2141,6 +2141,743 @@ h5, h6 { font-size: var(--text-sm); }
   box-shadow: none !important;
 }
 
+/* 极光外观：更宽的工作区侧栏、浮层式面板和低饱和环境光 */
+:root.app-appearance-aurora,
+:root.app-appearance-aurora body,
+:root.app-appearance-aurora #app {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(139, 140, 255, 0.17), transparent 30%),
+    radial-gradient(circle at 82% 10%, rgba(66, 232, 193, 0.1), transparent 26%),
+    var(--bg-main);
+  color: var(--text-primary);
+}
+
+:root.app-appearance-aurora body {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(139, 140, 255, 0.12), transparent 28%),
+    radial-gradient(circle at 88% 16%, rgba(255, 114, 200, 0.08), transparent 24%),
+    var(--bg-main);
+}
+
+:root.app-appearance-aurora .app-layout {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  isolation: isolate;
+  background: transparent !important;
+}
+
+:root.app-appearance-aurora .app-layout::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(139, 140, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(139, 140, 255, 0.025) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: linear-gradient(180deg, black, transparent 82%);
+}
+
+:root.app-appearance-aurora .sidebar {
+  width: 218px !important;
+  background:
+    linear-gradient(180deg, rgba(139, 140, 255, 0.16), transparent 170px),
+    linear-gradient(160deg, rgba(66, 232, 193, 0.04), transparent 42%),
+    rgba(10, 13, 27, 0.88) !important;
+  border-right: 1px solid var(--glass-border) !important;
+  box-shadow: 14px 0 44px rgba(3, 5, 15, 0.2), inset -1px 0 0 rgba(255, 255, 255, 0.035) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+}
+
+:root.light-theme.app-appearance-aurora .sidebar {
+  background:
+    linear-gradient(180deg, rgba(98, 88, 232, 0.12), transparent 180px),
+    rgba(251, 251, 255, 0.86) !important;
+  box-shadow: 10px 0 32px rgba(54, 63, 125, 0.08) !important;
+}
+
+:root.app-appearance-aurora .sidebar-header {
+  height: 72px !important;
+  padding: 12px 14px !important;
+  justify-content: flex-start !important;
+  gap: 11px !important;
+  border-bottom: 1px solid var(--glass-border) !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+}
+
+:root.app-appearance-aurora .sidebar-brand,
+:root.app-appearance-aurora .nav-section-title,
+:root.app-appearance-aurora .nav-label,
+:root.app-appearance-aurora .about-label {
+  display: block !important;
+}
+
+:root.app-appearance-aurora .sidebar-brand {
+  display: flex !important;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+:root.app-appearance-aurora .brand-name {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+:root.app-appearance-aurora .brand-subtitle {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+:root.app-appearance-aurora .logo-icon {
+  width: 38px !important;
+  height: 38px !important;
+  flex: 0 0 38px;
+  border-radius: 12px !important;
+  background: linear-gradient(145deg, rgba(139, 140, 255, 0.24), rgba(66, 232, 193, 0.12)) !important;
+  border: 1px solid var(--glass-border-hover);
+  box-shadow: 0 8px 24px rgba(139, 140, 255, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+:root.app-appearance-aurora .logo-image {
+  border-radius: 10px !important;
+  filter: saturate(1.08) contrast(1.04);
+}
+
+:root.app-appearance-aurora .logo-icon:hover {
+  transform: translateY(-1px) scale(1.03) !important;
+}
+
+:root.app-appearance-aurora .logo-glow {
+  opacity: 0.35;
+  filter: blur(16px);
+}
+
+:root.app-appearance-aurora .sidebar-nav {
+  gap: 5px !important;
+  padding: 18px 12px 8px !important;
+}
+
+:root.app-appearance-aurora .nav-section-title {
+  padding: 0 10px 8px !important;
+  color: var(--text-tertiary) !important;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+:root.app-appearance-aurora .nav-item,
+:root.app-appearance-aurora .about-button {
+  width: 100% !important;
+  height: 40px !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  padding: 0 11px !important;
+  border: 1px solid transparent !important;
+  border-radius: 11px !important;
+  background: transparent !important;
+  color: var(--text-tertiary) !important;
+}
+
+:root.app-appearance-aurora .nav-item::before {
+  inset: 0;
+  border-radius: 11px;
+  background: linear-gradient(90deg, rgba(139, 140, 255, 0.13), rgba(66, 232, 193, 0.045)) !important;
+}
+
+:root.app-appearance-aurora .nav-item:hover,
+:root.app-appearance-aurora .about-button:hover {
+  color: var(--text-primary) !important;
+  border-color: var(--glass-border) !important;
+  transform: translateX(2px);
+}
+
+:root.app-appearance-aurora .nav-item.is-active {
+  color: var(--text-primary) !important;
+  border-color: rgba(var(--primary-color-rgb), 0.34) !important;
+  background: linear-gradient(100deg, rgba(var(--primary-color-rgb), 0.2), rgba(66, 232, 193, 0.07)) !important;
+  box-shadow: inset 3px 0 0 var(--primary-color), 0 8px 22px rgba(139, 140, 255, 0.12) !important;
+}
+
+:root.app-appearance-aurora .nav-icon,
+:root.app-appearance-aurora .nav-item:hover .nav-icon,
+:root.app-appearance-aurora .nav-item.is-active .nav-icon {
+  flex: 0 0 20px;
+  transform: none !important;
+}
+
+:root.app-appearance-aurora .nav-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root.app-appearance-aurora .nav-indicator {
+  display: none !important;
+}
+
+:root.app-appearance-aurora .sidebar-footer {
+  padding: 12px !important;
+  border-top: 1px solid var(--glass-border) !important;
+}
+
+:root.app-appearance-aurora .about-button {
+  color: var(--text-tertiary) !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+}
+
+:root.app-appearance-aurora .app-main,
+:root.app-appearance-aurora .app-content,
+:root.app-appearance-aurora .content-panel {
+  min-width: 0;
+  min-height: 0;
+  background: transparent !important;
+}
+
+:root.app-appearance-aurora .app-header {
+  height: 68px !important;
+  position: relative;
+  padding: 0 22px !important;
+  background: rgba(8, 10, 20, 0.68) !important;
+  border-bottom: 1px solid var(--glass-border) !important;
+  box-shadow: 0 10px 30px rgba(3, 5, 15, 0.14) !important;
+  backdrop-filter: blur(22px) !important;
+  -webkit-backdrop-filter: blur(22px) !important;
+}
+
+:root.light-theme.app-appearance-aurora .app-header {
+  background: rgba(251, 251, 255, 0.72) !important;
+}
+
+:root.app-appearance-aurora .app-header::before {
+  content: 'MSHELL  /  WORKSPACE';
+  position: absolute;
+  left: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  pointer-events: none;
+}
+
+:root.app-appearance-aurora .app-header::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--primary-color), var(--accent-color) 55%, var(--aurora-pink));
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+:root.app-appearance-aurora .header-actions {
+  gap: 8px !important;
+}
+
+:root.app-appearance-aurora .header-actions .el-button {
+  box-shadow: none !important;
+}
+
+:root.app-appearance-aurora .session-panel-toggle {
+  left: 308px !important;
+  width: 18px !important;
+  height: 54px !important;
+  border: 1px solid var(--glass-border-hover) !important;
+  border-left: none !important;
+  border-radius: 0 10px 10px 0 !important;
+  background: rgba(27, 33, 64, 0.88) !important;
+  box-shadow: 8px 0 20px rgba(3, 5, 15, 0.18);
+}
+
+:root.app-appearance-aurora .session-panel-toggle.collapsed {
+  left: 0 !important;
+  border-left: 1px solid var(--glass-border-hover) !important;
+  border-radius: 0 10px 10px 0 !important;
+}
+
+:root.app-appearance-aurora .sessions-panel {
+  width: 308px !important;
+  min-width: 308px !important;
+  background: linear-gradient(180deg, rgba(139, 140, 255, 0.075), transparent 220px), rgba(14, 17, 32, 0.72) !important;
+  border-right: 1px solid var(--glass-border) !important;
+  box-shadow: 12px 0 40px rgba(3, 5, 15, 0.14) !important;
+  backdrop-filter: blur(22px) !important;
+  -webkit-backdrop-filter: blur(22px) !important;
+}
+
+:root.light-theme.app-appearance-aurora .sessions-panel {
+  background: linear-gradient(180deg, rgba(98, 88, 232, 0.07), transparent 220px), rgba(251, 251, 255, 0.76) !important;
+}
+
+:root.app-appearance-aurora .panel-header,
+:root.app-appearance-aurora .terminal-header,
+:root.app-appearance-aurora .browser-header,
+:root.app-appearance-aurora .session-list-header,
+:root.app-appearance-aurora .premium-tabs .el-tabs__header {
+  background: linear-gradient(90deg, rgba(var(--primary-color-rgb), 0.1), transparent 60%), rgba(14, 17, 32, 0.52) !important;
+  border-bottom: 1px solid var(--glass-border) !important;
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.025) !important;
+}
+
+:root.light-theme.app-appearance-aurora .panel-header,
+:root.light-theme.app-appearance-aurora .terminal-header,
+:root.light-theme.app-appearance-aurora .browser-header,
+:root.light-theme.app-appearance-aurora .session-list-header,
+:root.light-theme.app-appearance-aurora .premium-tabs .el-tabs__header {
+  background: linear-gradient(90deg, rgba(98, 88, 232, 0.09), transparent 60%), rgba(251, 251, 255, 0.7) !important;
+}
+
+:root.app-appearance-aurora .glass,
+:root.app-appearance-aurora .glass-light,
+:root.app-appearance-aurora .glass-panel,
+:root.app-appearance-aurora .settings-panel,
+:root.app-appearance-aurora .sftp-panel,
+:root.app-appearance-aurora .snippet-panel,
+:root.app-appearance-aurora .log-panel,
+:root.app-appearance-aurora .ssh-key-panel,
+:root.app-appearance-aurora .task-scheduler-panel,
+:root.app-appearance-aurora .workflow-panel,
+:root.app-appearance-aurora .port-forward-panel,
+:root.app-appearance-aurora .session-template-panel {
+  background: var(--glass-bg) !important;
+  border-color: var(--glass-border) !important;
+  box-shadow: var(--shadow-md) !important;
+  backdrop-filter: blur(var(--glass-blur)) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) !important;
+}
+
+:root.app-appearance-aurora .terminal-content {
+  background:
+    radial-gradient(circle at 75% 0%, rgba(139, 140, 255, 0.07), transparent 32%),
+    var(--aurora-terminal) !important;
+}
+
+:root.app-appearance-aurora .terminal-header {
+  min-height: 46px !important;
+}
+
+:root.app-appearance-aurora .premium-tabs .el-tabs__item {
+  height: 42px !important;
+  padding: 0 16px !important;
+  border-radius: 10px 10px 0 0 !important;
+  color: var(--text-tertiary) !important;
+}
+
+:root.app-appearance-aurora .premium-tabs .el-tabs__item:hover {
+  color: var(--text-primary) !important;
+  background: rgba(var(--primary-color-rgb), 0.08) !important;
+}
+
+:root.app-appearance-aurora .premium-tabs .el-tabs__item.is-active {
+  color: var(--text-primary) !important;
+  background: rgba(var(--primary-color-rgb), 0.12) !important;
+  box-shadow: inset 0 2px 0 var(--primary-color), inset 0 0 0 1px rgba(var(--primary-color-rgb), 0.1) !important;
+}
+
+:root.app-appearance-aurora .premium-tabs .el-tabs__item::before {
+  display: none !important;
+}
+
+:root.app-appearance-aurora .split-toolbar {
+  background: rgba(14, 17, 32, 0.6) !important;
+  border-bottom: 1px solid var(--glass-border) !important;
+}
+
+:root.app-appearance-aurora .split-terminal-pane {
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 14px !important;
+  background: rgba(14, 17, 32, 0.66) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+:root.app-appearance-aurora .split-terminal-pane.active {
+  border-color: rgba(var(--primary-color-rgb), 0.7) !important;
+  box-shadow: 0 0 0 1px rgba(var(--primary-color-rgb), 0.22), var(--shadow-md) !important;
+}
+
+:root.app-appearance-aurora .split-terminal-pane .pane-header {
+  background: rgba(27, 33, 64, 0.56) !important;
+  border-bottom: 1px solid var(--glass-border) !important;
+}
+
+:root.app-appearance-aurora .session-list-header {
+  min-height: 108px !important;
+  padding: 16px 16px 13px !important;
+}
+
+:root.app-appearance-aurora .session-list-header .header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px !important;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+:root.app-appearance-aurora .session-list-header .header-title::before {
+  content: 'LIVE';
+  display: inline-flex;
+  height: 20px;
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid rgba(66, 232, 193, 0.28);
+  border-radius: 999px;
+  background: rgba(66, 232, 193, 0.1);
+  color: var(--accent-color);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+:root.app-appearance-aurora .session-groups-container {
+  background: transparent !important;
+}
+
+:root.app-appearance-aurora .group-item,
+:root.app-appearance-aurora .session-card,
+:root.app-appearance-aurora .file-browser,
+:root.app-appearance-aurora .shortcut-item,
+:root.app-appearance-aurora .theme-item,
+:root.app-appearance-aurora .snippet-item,
+:root.app-appearance-aurora .stat-card,
+:root.app-appearance-aurora .metric-card,
+:root.app-appearance-aurora .status-card,
+:root.app-appearance-aurora .command-block,
+:root.app-appearance-aurora .command-preview,
+:root.app-appearance-aurora .variables-form,
+:root.app-appearance-aurora .final-command,
+:root.app-appearance-aurora .restore-options {
+  border-color: var(--glass-border) !important;
+  border-radius: 14px !important;
+  background: rgba(20, 25, 42, 0.56) !important;
+  box-shadow: 0 8px 22px rgba(3, 5, 15, 0.1) !important;
+}
+
+:root.light-theme.app-appearance-aurora .group-item,
+:root.light-theme.app-appearance-aurora .session-card,
+:root.light-theme.app-appearance-aurora .file-browser,
+:root.light-theme.app-appearance-aurora .shortcut-item,
+:root.light-theme.app-appearance-aurora .theme-item,
+:root.light-theme.app-appearance-aurora .snippet-item,
+:root.light-theme.app-appearance-aurora .stat-card,
+:root.light-theme.app-appearance-aurora .metric-card,
+:root.light-theme.app-appearance-aurora .status-card,
+:root.light-theme.app-appearance-aurora .command-block,
+:root.light-theme.app-appearance-aurora .command-preview,
+:root.light-theme.app-appearance-aurora .variables-form,
+:root.light-theme.app-appearance-aurora .final-command,
+:root.light-theme.app-appearance-aurora .restore-options {
+  background: rgba(255, 255, 255, 0.7) !important;
+  box-shadow: 0 8px 22px rgba(54, 63, 125, 0.07) !important;
+}
+
+:root.app-appearance-aurora .session-card {
+  margin: 5px 10px !important;
+  padding: 11px 12px !important;
+  transition: transform 180ms ease-out, border-color 180ms ease-out, box-shadow 180ms ease-out, background-color 180ms ease-out;
+}
+
+:root.app-appearance-aurora .session-card:hover {
+  transform: translateY(-1px) !important;
+  border-color: rgba(var(--primary-color-rgb), 0.42) !important;
+  background: linear-gradient(90deg, rgba(var(--primary-color-rgb), 0.13), rgba(66, 232, 193, 0.04)) !important;
+  box-shadow: 0 10px 24px rgba(3, 5, 15, 0.22) !important;
+}
+
+:root.app-appearance-aurora .session-card:active {
+  transform: scale(0.985) !important;
+}
+
+:root.app-appearance-aurora .session-icon {
+  border-radius: 11px !important;
+  background: linear-gradient(145deg, rgba(var(--primary-color-rgb), 0.18), rgba(66, 232, 193, 0.1)) !important;
+  border: 1px solid var(--glass-border) !important;
+}
+
+:root.app-appearance-aurora .el-button {
+  border-radius: 10px !important;
+  transition: transform 160ms ease-out, box-shadow 160ms ease-out, border-color 160ms ease-out, background-color 160ms ease-out !important;
+}
+
+:root.app-appearance-aurora .el-button:active {
+  transform: scale(0.97) !important;
+}
+
+:root.app-appearance-aurora .el-button--primary {
+  background: linear-gradient(135deg, var(--primary-color), var(--accent-color)) !important;
+  border-color: transparent !important;
+  box-shadow: 0 8px 20px rgba(var(--primary-color-rgb), 0.2) !important;
+}
+
+:root.app-appearance-aurora .el-button--primary:hover,
+:root.app-appearance-aurora .el-button--primary:focus {
+  background: linear-gradient(135deg, var(--primary-hover), var(--accent-hover)) !important;
+  box-shadow: 0 10px 26px rgba(var(--primary-color-rgb), 0.32) !important;
+  transform: translateY(-1px) !important;
+}
+
+:root.app-appearance-aurora .el-input__wrapper,
+:root.app-appearance-aurora .el-select__wrapper,
+:root.app-appearance-aurora .el-textarea__inner,
+:root.app-appearance-aurora .el-input-number .el-input__wrapper {
+  border-radius: 10px !important;
+  border: 1px solid var(--glass-border) !important;
+  background: rgba(20, 25, 42, 0.64) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+}
+
+:root.light-theme.app-appearance-aurora .el-input__wrapper,
+:root.light-theme.app-appearance-aurora .el-select__wrapper,
+:root.light-theme.app-appearance-aurora .el-textarea__inner,
+:root.light-theme.app-appearance-aurora .el-input-number .el-input__wrapper {
+  background: rgba(255, 255, 255, 0.78) !important;
+}
+
+:root.app-appearance-aurora .el-input__wrapper.is-focus,
+:root.app-appearance-aurora .el-select__wrapper.is-focused,
+:root.app-appearance-aurora .el-textarea__inner:focus {
+  border-color: rgba(var(--primary-color-rgb), 0.7) !important;
+  box-shadow: 0 0 0 3px rgba(var(--primary-color-rgb), 0.14) !important;
+}
+
+:root.app-appearance-aurora .el-dialog,
+:root.app-appearance-aurora .el-message-box,
+:root.app-appearance-aurora .el-popper,
+:root.app-appearance-aurora .el-select__popper,
+:root.app-appearance-aurora .el-dropdown__popper {
+  border: 1px solid var(--glass-border-hover) !important;
+  border-radius: 16px !important;
+  background: rgba(14, 17, 32, 0.92) !important;
+  box-shadow: var(--shadow-xl) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+}
+
+:root.light-theme.app-appearance-aurora .el-dialog,
+:root.light-theme.app-appearance-aurora .el-message-box,
+:root.light-theme.app-appearance-aurora .el-popper,
+:root.light-theme.app-appearance-aurora .el-select__popper,
+:root.light-theme.app-appearance-aurora .el-dropdown__popper {
+  background: rgba(255, 255, 255, 0.94) !important;
+}
+
+:root.app-appearance-aurora .settings-tabs .el-tabs__header,
+:root.app-appearance-aurora .settings-tabs .el-tabs__content {
+  background: transparent !important;
+}
+
+:root.app-appearance-aurora .settings-section h3 {
+  color: var(--text-primary) !important;
+  letter-spacing: -0.01em;
+}
+
+:root.app-appearance-aurora .status-connected,
+:root.app-appearance-aurora .connected-icon {
+  color: var(--accent-color) !important;
+}
+
+/* 极光微调：让终端工具栏在浅色背景上保持清晰的按钮边界 */
+:root.app-appearance-aurora .terminal-header .header-actions {
+  gap: 6px !important;
+  flex-wrap: nowrap;
+}
+
+:root.app-appearance-aurora .terminal-header .action-btn,
+:root.app-appearance-aurora .terminal-header .header-actions .el-dropdown .el-button {
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  padding: 0 !important;
+  border: 1px solid rgba(var(--primary-color-rgb), 0.28) !important;
+  border-radius: 9px !important;
+  background: linear-gradient(145deg, rgba(var(--primary-color-rgb), 0.2), rgba(66, 232, 193, 0.09)) !important;
+  color: var(--text-primary) !important;
+  box-shadow: 0 3px 10px rgba(3, 5, 15, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+:root.light-theme.app-appearance-aurora .terminal-header .action-btn,
+:root.light-theme.app-appearance-aurora .terminal-header .header-actions .el-dropdown .el-button {
+  border-color: rgba(var(--primary-color-rgb), 0.24) !important;
+  background: linear-gradient(145deg, rgba(98, 88, 232, 0.12), rgba(11, 158, 128, 0.08)) !important;
+  color: #363b68 !important;
+  box-shadow: 0 3px 10px rgba(54, 63, 125, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+}
+
+:root.app-appearance-aurora .terminal-header .action-btn:hover,
+:root.app-appearance-aurora .terminal-header .header-actions .el-dropdown .el-button:hover,
+:root.app-appearance-aurora .terminal-header .action-btn:focus-visible {
+  border-color: var(--primary-color) !important;
+  background: linear-gradient(145deg, rgba(var(--primary-color-rgb), 0.42), rgba(66, 232, 193, 0.2)) !important;
+  color: #ffffff !important;
+  box-shadow: 0 6px 16px rgba(var(--primary-color-rgb), 0.26) !important;
+  transform: translateY(-1px) !important;
+}
+
+:root.app-appearance-aurora .terminal-header .action-btn.is-active {
+  border-color: var(--accent-color) !important;
+  background: linear-gradient(145deg, var(--primary-color), var(--accent-color)) !important;
+  color: #0b1020 !important;
+  box-shadow: 0 0 0 2px rgba(66, 232, 193, 0.16), 0 7px 18px rgba(var(--primary-color-rgb), 0.3) !important;
+}
+
+:root.app-appearance-aurora .terminal-header .action-btn .el-icon,
+:root.app-appearance-aurora .terminal-header .header-actions .el-dropdown .el-icon {
+  color: currentColor !important;
+  filter: drop-shadow(0 1px 2px rgba(3, 5, 15, 0.22));
+}
+
+:root.app-appearance-aurora .terminal-header .copy-host-btn {
+  width: 21px !important;
+  height: 21px !important;
+  min-width: 21px !important;
+  border: 1px solid rgba(var(--primary-color-rgb), 0.22) !important;
+  border-radius: 6px !important;
+  background: rgba(var(--primary-color-rgb), 0.12) !important;
+  color: var(--primary-color) !important;
+}
+
+/* 极光会话列表：给卡片留出呼吸空间，并为较长主机名保留横向宽度 */
+:root.app-appearance-aurora .sessions-panel {
+  width: 336px !important;
+  min-width: 336px !important;
+}
+
+:root.app-appearance-aurora .session-panel-toggle {
+  left: 336px !important;
+}
+
+:root.app-appearance-aurora .session-list-header {
+  min-height: 116px !important;
+  padding: 18px 18px 15px !important;
+}
+
+:root.app-appearance-aurora .session-groups-container {
+  padding: 8px 6px !important;
+}
+
+:root.app-appearance-aurora .session-card {
+  min-height: 62px !important;
+  margin: 7px 10px !important;
+  padding: 11px 14px !important;
+}
+
+:root.app-appearance-aurora .session-icon {
+  width: 30px !important;
+  height: 30px !important;
+  margin-right: 9px !important;
+}
+
+:root.app-appearance-aurora .session-name {
+  font-size: 13px !important;
+  line-height: 1.25;
+}
+
+:root.app-appearance-aurora .session-details {
+  margin-top: 3px;
+  font-size: 11px !important;
+  line-height: 1.25;
+}
+
+/* 极光侧栏可折叠：展开时显示名称，折叠后只保留图标 */
+:root.app-appearance-aurora .sidebar-collapse-toggle {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 8px;
+  background: rgba(var(--primary-color-rgb), 0.08) !important;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: transform 160ms ease-out, border-color 160ms ease-out, background-color 160ms ease-out, color 160ms ease-out;
+}
+
+:root.app-appearance-aurora .sidebar-collapse-toggle:hover {
+  border-color: var(--primary-color) !important;
+  background: rgba(var(--primary-color-rgb), 0.2) !important;
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+:root.app-appearance-aurora .sidebar-collapse-toggle:active {
+  transform: scale(0.96);
+}
+
+:root.app-appearance-aurora .sidebar.is-collapsed {
+  width: 68px !important;
+}
+
+:root.app-appearance-aurora .sidebar.is-collapsed .sidebar-header {
+  height: 72px !important;
+  padding: 10px 6px !important;
+  justify-content: space-between !important;
+  gap: 3px !important;
+}
+
+:root.app-appearance-aurora .sidebar.is-collapsed .logo-icon {
+  width: 30px !important;
+  height: 30px !important;
+  flex-basis: 30px;
+  border-radius: 10px !important;
+}
+
+:root.app-appearance-aurora .sidebar.is-collapsed .sidebar-brand,
+:root.app-appearance-aurora .sidebar.is-collapsed .nav-section-title,
+:root.app-appearance-aurora .sidebar.is-collapsed .nav-label,
+:root.app-appearance-aurora .sidebar.is-collapsed .about-label {
+  display: none !important;
+}
+
+:root.app-appearance-aurora .sidebar.is-collapsed .sidebar-collapse-toggle {
+  flex-basis: 22px;
+  width: 22px;
+  height: 22px;
+  margin-left: 0;
+  border-radius: 7px;
+}
+
+:root.app-appearance-aurora .sidebar.is-collapsed .sidebar-nav {
+  gap: 7px !important;
+  padding: 16px 10px 8px !important;
+}
+
+:root.app-appearance-aurora .sidebar.is-collapsed .nav-item,
+:root.app-appearance-aurora .sidebar.is-collapsed .about-button {
+  width: 46px !important;
+  height: 42px !important;
+  justify-content: center !important;
+  gap: 0 !important;
+  padding: 0 !important;
+}
+
+:root.app-appearance-aurora .sidebar.is-collapsed .sidebar-footer {
+  padding: 10px !important;
+}
+
 /* 动画效果 */
 @keyframes fadeIn {
   from {

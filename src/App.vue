@@ -233,11 +233,7 @@
                     class="premium-tabs"
                     @tab-remove="appStore.removeTab"
                   >
-                    <el-tab-pane
-                      v-for="(tab, index) in appStore.tabs"
-                      :key="tab.id"
-                      :name="tab.id"
-                    >
+                    <el-tab-pane v-for="(tab, index) in appStore.tabs" :key="tab.id" :name="tab.id">
                       <template #label>
                         <DraggableTab
                           :tab-id="tab.id"
@@ -298,7 +294,6 @@
                 </div>
               </div>
             </div>
-
           </div>
 
           <div v-show="appStore.activeView === 'sftp'" class="content-panel">
@@ -356,9 +351,11 @@
           </div>
 
           <div v-show="appStore.activeView === 'settings'" class="content-panel">
-            <SettingsPanel :initial-tab="settingsInitialTab" :tab-request-key="settingsTabRequestKey" />
+            <SettingsPanel
+              :initial-tab="settingsInitialTab"
+              :tab-request-key="settingsTabRequestKey"
+            />
           </div>
-
         </div>
 
         <StatusBar
@@ -368,7 +365,6 @@
           class="app-statusbar"
         />
       </div>
-
     </div>
 
     <div v-if="!lockStatusReady" class="app-boot-screen">
@@ -402,7 +398,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Connection,
   Plus,
@@ -596,10 +592,7 @@ const setAppToolDockVisible = async (visible: boolean) => {
       appMainLockedWidth.value = Math.round(mainWidth)
     }
 
-    const result = await window.electronAPI.app?.setToolDockOpen?.(
-      true,
-      appToolDockWidth.value
-    )
+    const result = await window.electronAPI.app?.setToolDockOpen?.(true, appToolDockWidth.value)
     if (result && !result.success) {
       console.warn('[App] Failed to expand tool dock window:', result.error)
       appMainLockedWidth.value = null
@@ -783,6 +776,31 @@ onMounted(async () => {
   })
   if (unsubSettings) ipcCleanups.push(unsubSettings)
 
+  const unsubMcpApproval = window.electronAPI.mcp?.onApprovalRequest?.(async (request) => {
+    if (isLocked.value) {
+      await window.electronAPI.mcp?.resolveApproval?.(request.approvalId, false)
+      return
+    }
+    let approved = false
+    try {
+      await ElMessageBox.confirm(
+        `${request.summary}\n\nSSH 会话：${request.connectionId}`,
+        request.tool === 'execute_command' ? '确认执行远程命令' : '确认写入远程文件',
+        {
+          confirmButtonText: '允许本次操作',
+          cancelButtonText: '拒绝',
+          type: 'warning',
+          distinguishCancelAndClose: true
+        }
+      )
+      approved = true
+    } catch {
+      approved = false
+    }
+    await window.electronAPI.mcp?.resolveApproval?.(request.approvalId, approved)
+  })
+  if (unsubMcpApproval) ipcCleanups.push(unsubMcpApproval)
+
   // 注册快捷键
   setupKeyboardShortcuts()
 
@@ -806,7 +824,6 @@ onMounted(async () => {
   }
   window.addEventListener('session-locked', handleSessionLocked)
   ipcCleanups.push(() => window.removeEventListener('session-locked', handleSessionLocked))
-
 })
 
 onUnmounted(() => {
@@ -1343,8 +1360,7 @@ body,
   justify-content: center;
   gap: 10px;
   background:
-    radial-gradient(circle at 50% 42%, rgba(24, 201, 149, 0.12), transparent 260px),
-    var(--bg-main);
+    radial-gradient(circle at 50% 42%, rgba(24, 201, 149, 0.12), transparent 260px), var(--bg-main);
   color: var(--text-primary);
 }
 
@@ -1851,9 +1867,9 @@ body,
     height: 96px;
   }
 
-.empty-state h3 {
-  font-size: var(--text-xl);
-}
+  .empty-state h3 {
+    font-size: var(--text-xl);
+  }
 }
 
 :global(:root.app-appearance-terminal .app-layout) {
@@ -2008,8 +2024,7 @@ body,
   position: relative;
   justify-content: space-between;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent),
-    var(--minimal-shell-header);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent), var(--minimal-shell-header);
   border-bottom: 1px solid var(--border-strong);
   box-shadow:
     inset 0 -1px 0 rgba(var(--primary-color-rgb), 0.1),

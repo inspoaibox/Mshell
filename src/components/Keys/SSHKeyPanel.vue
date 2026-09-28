@@ -177,10 +177,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload, Download, Delete, Lock, Unlock, Edit, CopyDocument, ArrowDown } from '@element-plus/icons-vue'
+import { useAppStore } from '@/stores/app'
 
+const appStore = useAppStore()
 const keys = ref<any[]>([])
 const loading = ref(false)
 const showGenerateDialog = ref(false)
@@ -216,8 +218,18 @@ const editForm = ref({
 })
 
 onMounted(() => {
-  loadKeys()
+  void loadKeys()
 })
+
+// App 使用 v-show 保持各个功能面板常驻，切换到 SSH 密钥页面时主动刷新本地密钥快照。
+watch(
+  () => appStore.activeView,
+  (activeView, previousView) => {
+    if (activeView === 'keys' && previousView !== 'keys') {
+      void loadKeys()
+    }
+  }
+)
 
 const loadKeys = async () => {
   loading.value = true

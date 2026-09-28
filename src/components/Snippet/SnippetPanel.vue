@@ -45,7 +45,10 @@
               v-for="snippet in getSnippetsByCategory('')"
               :key="snippet.id"
               class="snippet-item"
-              :class="{ active: selectedSnippet?.id === snippet.id }"
+              :class="{
+                active: selectedSnippet?.id === snippet.id,
+                pinned: Boolean(snippet.pinnedAt)
+              }"
               @click="selectSnippet(snippet)"
             >
               <el-icon class="snippet-icon"><Document /></el-icon>
@@ -53,6 +56,19 @@
               <el-tag v-if="snippet.shortcut" type="success" size="small" class="shortcut-tag">
                 {{ snippet.shortcut }}
               </el-tag>
+              <el-tooltip :content="snippet.pinnedAt ? '取消置顶' : '置顶到当前分组顶部'">
+                <el-button
+                  class="snippet-pin-button"
+                  :class="{ active: Boolean(snippet.pinnedAt) }"
+                  :icon="Top"
+                  text
+                  circle
+                  size="small"
+                  :loading="pinningSnippetId === snippet.id"
+                  :aria-label="snippet.pinnedAt ? '取消置顶' : '置顶到当前分组顶部'"
+                  @click.stop="togglePinned(snippet)"
+                />
+              </el-tooltip>
               <span class="usage-badge">{{ snippet.usageCount }}</span>
             </div>
           </div>
@@ -79,7 +95,10 @@
               v-for="snippet in getSnippetsByCategory(cat)"
               :key="snippet.id"
               class="snippet-item"
-              :class="{ active: selectedSnippet?.id === snippet.id }"
+              :class="{
+                active: selectedSnippet?.id === snippet.id,
+                pinned: Boolean(snippet.pinnedAt)
+              }"
               @click="selectSnippet(snippet)"
             >
               <el-icon class="snippet-icon"><Document /></el-icon>
@@ -87,6 +106,19 @@
               <el-tag v-if="snippet.shortcut" type="success" size="small" class="shortcut-tag">
                 {{ snippet.shortcut }}
               </el-tag>
+              <el-tooltip :content="snippet.pinnedAt ? '取消置顶' : '置顶到当前分组顶部'">
+                <el-button
+                  class="snippet-pin-button"
+                  :class="{ active: Boolean(snippet.pinnedAt) }"
+                  :icon="Top"
+                  text
+                  circle
+                  size="small"
+                  :loading="pinningSnippetId === snippet.id"
+                  :aria-label="snippet.pinnedAt ? '取消置顶' : '置顶到当前分组顶部'"
+                  @click.stop="togglePinned(snippet)"
+                />
+              </el-tooltip>
               <span class="usage-badge">{{ snippet.usageCount }}</span>
             </div>
           </div>
@@ -111,6 +143,9 @@
               <el-tag v-if="selectedSnippet.category" size="small">
                 {{ selectedSnippet.category }}
               </el-tag>
+              <el-tag v-if="selectedSnippet.pinnedAt" type="warning" size="small" effect="plain">
+                已置顶
+              </el-tag>
               <span class="meta-text">使用 {{ selectedSnippet.usageCount }} 次</span>
               <span class="meta-text">创建于 {{ formatDate(selectedSnippet.createdAt) }}</span>
             </div>
@@ -123,11 +158,19 @@
             >
               使用
             </el-button>
-            <el-button 
+            <el-button
               :icon="Edit"
               @click="editSnippet(selectedSnippet)"
             >
               编辑
+            </el-button>
+            <el-button
+              :type="selectedSnippet.pinnedAt ? 'warning' : 'default'"
+              :icon="Top"
+              :loading="pinningSnippetId === selectedSnippet.id"
+              @click="togglePinned(selectedSnippet)"
+            >
+              {{ selectedSnippet.pinnedAt ? '取消置顶' : '置顶' }}
             </el-button>
             <el-button 
               type="danger" 
@@ -371,9 +414,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { 
-  Plus, Search, Edit, Delete, DocumentCopy, Document, Folder, Files, CaretRight
+import {
+  Plus, Search, Edit, Delete, DocumentCopy, Document, Folder, Files, CaretRight, Top
 } from '@element-plus/icons-vue'
+import { sortSnippetsPinnedFirst } from '@/utils/snippet-order'
 
 interface Snippet {
   id: string
@@ -384,6 +428,7 @@ interface Snippet {
   tags: string[]
   variables: string[]
   shortcut?: string
+  pinnedAt?: string
   usageCount: number
   createdAt: string
   updatedAt: string
@@ -399,6 +444,7 @@ const editingSnippet = ref<Snippet | null>(null)
 const usingSnippet = ref<Snippet | null>(null)
 const variableValues = ref<Record<string, string>>({})
 const saving = ref(false)
+const pinningSnippetId = ref<string | null>(null)
 const formRef = ref()
 
 const form = ref({
@@ -423,11 +469,11 @@ const loadSnippets = async () => {
   try {
     const result = await window.electronAPI.snippet.getAll()
     if (result.success) {
+      const selectedId = selectedSnippet.value?.id
       snippets.value = result.data || []
-      // 如果有片段且没有选中，自动选中第一个
-      if (snippets.value.length > 0 && !selectedSnippet.value) {
-        selectedSnippet.value = snippets.value[0]
-      }
+      selectedSnippet.value = selectedId
+        ? snippets.value.find((snippet) => snippet.id === selectedId) || null
+        : sortSnippetsPinnedFirst(snippets.value)[0] || null
     } else {
       ElMessage.error(`加载失败: ${result.error}`)
     }
@@ -461,27 +507,15 @@ const toggleCategory = (category: string) => {
 }
 
 const getSnippetsByCategory = (category: string) => {
-  if (category === '') {
-    // "全部" 分类显示所有片段
-    return snippets.value.filter(snippet => {
-      if (!searchQuery.value) return true
-      return snippet.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-        snippet.command.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-        snippet.description?.toLowerCase().includes(searchQuery.value.toLowerCase())
-    })
-  }
-  
-  return snippets.value.filter(snippet => {
-    const matchesCategory = snippet.category === category
-    if (!searchQuery.value) return matchesCategory
-    
-    const matchesSearch = 
-      snippet.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      snippet.command.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      snippet.description?.toLowerCase().includes(searchQuery.value.toLowerCase())
-    
-    return matchesCategory && matchesSearch
+  const query = searchQuery.value.trim().toLowerCase()
+  const filtered = snippets.value.filter(snippet => {
+    if (category && snippet.category !== category) return false
+    if (!query) return true
+    return snippet.name.toLowerCase().includes(query) ||
+      snippet.command.toLowerCase().includes(query) ||
+      snippet.description?.toLowerCase().includes(query)
   })
+  return sortSnippetsPinnedFirst(filtered)
 }
 
 const snippetVariables = computed(() => {
@@ -504,6 +538,25 @@ const getCategoryCount = (category: string) => {
 
 const selectSnippet = (snippet: Snippet) => {
   selectedSnippet.value = snippet
+}
+
+const togglePinned = async (snippet: Snippet) => {
+  if (pinningSnippetId.value) return
+  pinningSnippetId.value = snippet.id
+  const shouldPin = !snippet.pinnedAt
+  try {
+    const result = await window.electronAPI.snippet.setPinned(snippet.id, shouldPin)
+    if (!result.success) {
+      ElMessage.error(`${shouldPin ? '置顶' : '取消置顶'}失败: ${result.error}`)
+      return
+    }
+    await loadSnippets()
+    ElMessage.success(shouldPin ? '已置顶到当前分组顶部' : '已取消置顶')
+  } catch (error: any) {
+    ElMessage.error(`${shouldPin ? '置顶' : '取消置顶'}失败: ${error.message}`)
+  } finally {
+    pinningSnippetId.value = null
+  }
 }
 
 const formatDate = (dateStr: string) => {
@@ -782,6 +835,10 @@ const resetForm = () => {
   box-shadow: var(--shadow-sm);
 }
 
+.snippet-item.pinned {
+  border-color: color-mix(in srgb, var(--warning-color) 35%, transparent);
+}
+
 .snippet-icon {
   color: var(--primary-color);
   font-size: var(--text-sm);
@@ -804,6 +861,28 @@ const resetForm = () => {
   padding: 2px 6px;
   height: 20px;
   line-height: 16px;
+}
+
+.snippet-pin-button {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  opacity: 0.45;
+  transition:
+    opacity var(--transition-fast),
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.snippet-item:hover .snippet-pin-button,
+.snippet-pin-button:focus-visible,
+.snippet-pin-button.active,
+.snippet-pin-button.is-loading {
+  opacity: 1;
+}
+
+.snippet-pin-button.active {
+  color: var(--warning-color);
+  background: color-mix(in srgb, var(--warning-color) 12%, transparent);
 }
 
 .usage-badge {

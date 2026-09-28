@@ -66,6 +66,7 @@ export function registerSnippetHandlers() {
           tags: [...snippet.tags],
           variables: [...snippet.variables],
           shortcut: snippet.shortcut,
+          pinnedAt: snippet.pinnedAt,
           usageCount: Number(snippet.usageCount),
           createdAt: String(snippet.createdAt),
           updatedAt: String(snippet.updatedAt)
@@ -94,6 +95,9 @@ export function registerSnippetHandlers() {
       if (Array.isArray(data.tags)) updateData.tags = data.tags.map((t: any) => String(t))
       if (Array.isArray(data.variables)) updateData.variables = data.variables.map((v: any) => String(v))
       if (data.shortcut !== undefined) updateData.shortcut = data.shortcut ? String(data.shortcut) : undefined
+      if (Object.prototype.hasOwnProperty.call(data, 'pinnedAt')) {
+        updateData.pinnedAt = data.pinnedAt ? String(data.pinnedAt) : undefined
+      }
 
       await snippetManager.update(id, updateData)
       return { success: true }
@@ -116,6 +120,16 @@ export function registerSnippetHandlers() {
   ipcMain.handle('snippet:incrementUsage', async (_event, id: string) => {
     try {
       await snippetManager.incrementUsage(id)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 设置或取消分组内置顶
+  ipcMain.handle('snippet:setPinned', async (_event, id: string, pinned: boolean) => {
+    try {
+      await snippetManager.setPinned(id, pinned === true)
       return { success: true }
     } catch (error: any) {
       return { success: false, error: error.message }
@@ -267,7 +281,10 @@ export function registerSnippetHandlers() {
             category: snippet.category || '',
             tags: snippet.tags || [],
             variables: snippet.variables || [],
-            shortcut: snippet.shortcut
+            shortcut: snippet.shortcut,
+            ...(Object.prototype.hasOwnProperty.call(snippet, 'pinnedAt')
+              ? { pinnedAt: snippet.pinnedAt }
+              : {})
           })
           updated++
         } else {
@@ -279,7 +296,8 @@ export function registerSnippetHandlers() {
             category: snippet.category || '',
             tags: snippet.tags || [],
             variables: snippet.variables || [],
-            shortcut: snippet.shortcut
+            shortcut: snippet.shortcut,
+            pinnedAt: snippet.pinnedAt
           })
           imported++
         }

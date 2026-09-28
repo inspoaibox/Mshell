@@ -645,6 +645,7 @@ import {
   buildTerminalExecutePayload,
   buildTerminalInsertPayload
 } from '@/utils/terminal-command-execution'
+import { sortSnippetsPinnedFirst } from '@/utils/snippet-order'
 import {
   createSSHConnectOptions,
   runWithHostKeyConfirmation
@@ -675,6 +676,7 @@ interface CommandSnippet {
   }[]
   tags: string[]
   category?: string
+  pinnedAt?: string
   usageCount: number
 }
 
@@ -1141,11 +1143,13 @@ const currentFont = computed(
 
 const getActiveAppShellGeneralSettings = (savedSettings: any) => {
   const root = document.documentElement
-  const appearance = root.classList.contains('app-appearance-minimal')
-    ? 'minimal'
-    : root.classList.contains('app-appearance-terminal')
-      ? 'terminal'
-      : 'modern'
+  const appearance = root.classList.contains('app-appearance-aurora')
+    ? 'aurora'
+    : root.classList.contains('app-appearance-minimal')
+      ? 'minimal'
+      : root.classList.contains('app-appearance-terminal')
+        ? 'terminal'
+        : 'modern'
 
   return {
     ...(savedSettings?.general || {}),
@@ -1205,7 +1209,7 @@ const filteredSnippets = computed(() => {
     )
   }
 
-  return result
+  return sortSnippetsPinnedFirst(result)
 })
 
 const categories = computed(() => {

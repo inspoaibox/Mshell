@@ -6,7 +6,7 @@ export interface AppSettings {
   general: {
     language: 'zh-CN' | 'en-US'
     theme: 'light' | 'dark' | 'auto'
-    appearance: 'modern' | 'terminal' | 'minimal'
+    appearance: 'modern' | 'terminal' | 'minimal' | 'aurora'
     startWithSystem: boolean
     minimizeToTray: boolean
     closeToTray: boolean

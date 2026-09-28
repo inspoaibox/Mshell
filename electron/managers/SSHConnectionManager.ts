@@ -65,9 +65,7 @@ export class HostKeyChallengeError extends Error {
 
   constructor(details: HostKeyChallengeDetails) {
     super(
-      details.status === 'changed'
-        ? 'SSH host key changed'
-        : 'SSH host key confirmation required'
+      details.status === 'changed' ? 'SSH host key changed' : 'SSH host key confirmation required'
     )
     this.name = 'HostKeyChallengeError'
     this.details = details
@@ -354,7 +352,9 @@ export class SSHConnectionManager extends EventEmitter {
           id,
           connection,
           connection.manualDisconnect ? connection.manualDisconnectReason || 'manual' : 'client',
-          connection.lastError ? `SSH client closed after error: ${connection.lastError}` : 'SSH client closed',
+          connection.lastError
+            ? `SSH client closed after error: ${connection.lastError}`
+            : 'SSH client closed',
           willReconnect
         )
 
@@ -389,7 +389,12 @@ export class SSHConnectionManager extends EventEmitter {
           }
 
           if (
-            knownHostsManager.isTrustedHostKey(options.host, options.port, key, options.trustedHostKey)
+            knownHostsManager.isTrustedHostKey(
+              options.host,
+              options.port,
+              key,
+              options.trustedHostKey
+            )
           ) {
             knownHostsManager.addHost(
               options.host,
@@ -531,7 +536,6 @@ export class SSHConnectionManager extends EventEmitter {
       let outputBytes = 0
       let settled = false
       let timeoutHandle: NodeJS.Timeout | undefined
-
       connection.client.exec(command, (err, stream) => {
         if (err) {
           reject(err)

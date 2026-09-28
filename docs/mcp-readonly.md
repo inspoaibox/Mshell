@@ -1,6 +1,6 @@
 # MShell 本机 Agent / MCP 安全接入
 
-MShell 可以向本机运行的 Codex、Claude 等支持 MCP 的 Agent 提供当前 SSH 会话、远程文件和命令能力。读取和查询默认可用；写文件或执行修改命令由“设置 - Agent 接入 - 允许写入与修改”独立控制。该开关默认关闭，服务只监听 `127.0.0.1`，不会暴露给局域网或公网。
+MShell 可以向本机运行的 Codex、Claude 等支持 MCP 的 Agent 提供当前 SSH 会话、远程文件和命令能力。“设置 - Agent 接入”提供查询、确认、执行三档权限；默认使用“查询”。服务只监听 `127.0.0.1`，不会暴露给局域网或公网。
 
 ## 启用方式
 
@@ -130,34 +130,38 @@ PowerShell 环境变量只对当前窗口及其子进程有效。若 Codex 是�
 
 ## 数据库查询
 
-`query_database` 不需要开启“允许写入与修改”。它通过已连接的 SSH 会话查询数据库，可读取账号有权限访问的业务表、日志表、系统目录和表结构，不维护业务表白名单。
+`query_database` 在查询、确认、执行三种权限下都保持只读。它通过已连接的 SSH 会话查询数据库，可读取账号有权限访问的业务表、日志表、系统目录和表结构，不维护业务表白名单。
 
-当用户没有明确给出数据库类型、容器或主机、数据库名和数据库用户时，Agent 必须先调用 `discover_database_targets`。该工具只读取数据库客户端、容器名称和镜像、应用容器、发布端口、非秘密数据库用户名，以及能够安全枚举的数据库名称；不会返回密码或完整容器环境变量。
+当用户没有明确给出数据库类型、容器或主机、数据库名和数据库用户时，Agent 必须先调用 `discover_database_targets`。该工具只读取数据库客户端、容器名称和镜像、应用容器、发布端口、非秘密数据库用户名，以及能够安全枚举的数据库名称；不会返回密码或完整容器环境变量。宿主机上的 PostgreSQL、MySQL 和 MariaDB 会使用当前 SSH 账号已经配置好的非交互认证尝试枚举，SQLite 会在常用应用目录中限量查找并验证数据库文件。
 
-发现结果包含 `targets`、`applications` 和 `requiresSelection`。同一服务器存在多个数据库、站点或应用时，Agent 必须把候选项交给用户确认业务目标，再把选中目标的 `engine`、`container`、`database` 和 `username` 原样用于 `query_database`。不能根据活动连接、名称相似、列表顺序、默认数据库或端口自行判断目标。发现工具只能提供候选关系，不能证明某个网站必然使用某个数据库。
+发现结果包含 `targets`、`applications` 和 `requiresSelection`。同一服务器存在多个数据库、站点或应用时，Agent 必须把候选项交给用户确认业务目标，再把选中目标的 `engine`、`container`、`host`、`port`、`database`、`username` 和 `systemUser` 原样用于 `query_database`。不能根据活动连接、名称相似、列表顺序、默认数据库或端口自行判断目标。发现工具只能提供候选关系，不能证明某个网站必然使用某个数据库。
 
-支持 `engine=mysql`、`mariadb`、`postgresql`、`sqlite`，以及通过可选的 `container` 参数在 Docker 容器内运行客户端。其他数据库引擎尚未接入，不能用此工具执行任意数据库 Shell。
+支持 `engine=mysql`、`mariadb`、`postgresql`、`sqlite`、`mongodb`、`redis`、`sqlserver`、`oracle`，以及通过可选的 `container` 参数在 Docker 容器内运行客户端。工具不会执行任意数据库 Shell；MongoDB 和 Redis 使用结构化 JSON 请求，SQL 数据库使用受校验的单条只读 SQL。
 
 前提：
 
-- 远程 Linux 主机或目标容器内安装对应的 `mysql`、`mariadb`、`psql` 或 `sqlite3` 客户端，以及 GNU `timeout`。容器模式在容器内部执行超时控制。
-- MySQL 需要 5.7.8+，MariaDB 需要 10.1+，psql 需要支持 `--csv`，SQLite CLI 需要支持 `-safe` 和 `-readonly`。复杂 SQL 还需要相应数据库版本支持。
+- 远程 Linux 主机或目标容器内安装对应的 `mysql`、`mariadb`、`psql`、`sqlite3`、`mongosh`、`redis-cli`、`sqlcmd` 或 `sqlplus` 客户端，以及 GNU `timeout`。容器模式在容器内部执行超时控制。
+- MySQL 需要 5.7.8+，MariaDB 需要 10.1+，psql 需要支持 `--csv`，SQLite CLI 需要支持 `-safe` 和 `-readonly`，Redis CLI 需要支持 `--json`，Oracle 需要支持 `SET MARKUP CSV` 和 `FETCH FIRST`。复杂查询还需要相应数据库版本支持。
 - 使用数据库只读账号，在远程提前配置 `.my.cnf`、`.pgpass` 或 peer/socket 认证。容器模式的认证配置也必须在容器中可用；不要把密码放进工具参数、SQL 或连接 URL。
+- MongoDB 使用 `mongosh` 已有的无交互认证；官方 Docker 镜像可使用容器内的 `MONGO_INITDB_ROOT_USERNAME` 和 `MONGO_INITDB_ROOT_PASSWORD`。Redis 使用 `REDISCLI_AUTH`，Docker 模式也识别常见的 `REDIS_PASSWORD`。SQL Server 使用 `SQLCMDPASSWORD` 或已配置的集成认证，官方容器识别 `MSSQL_SA_PASSWORD`。Oracle 使用安全外部密码存储、wallet、操作系统认证或容器内的 SYSDBA 认证。凭据只在远程客户端内部使用，不会出现在发现结果和 MCP 审计中。
+- 宿主机认证成功时，发现结果会提供可直接查询的 `host`、`port`、`database` 和 `username`。认证失败时仍会返回 `requires-configuration`，表示只确认客户端存在，尚不能枚举数据库；切换 Agent 操作权限不会改变数据库认证结果。
+- SSH 会话使用 root 且 PostgreSQL 配置了本机 peer 认证时，发现器可以采用实际 PostgreSQL 服务进程的非 root 系统账号，并在目标中返回 `systemUser`。查询工具只用该账号启动数据库客户端，SQL 校验、只读事务、行数和超时限制仍然生效。
 - PostgreSQL 容器的 `username` 和 `database` 必须与容器初始化时的账号和数据库一致，不要默认使用 `postgres/postgres`。容器内通过本地 socket 已能认证时不需要 `.pgpass`；从宿主机通过 TCP 连接且服务端要求密码时才需要非交互凭据。
-- 服务端只读事务、SQL 校验不能代替数据库最小权限配置。自定义类型、视图、外部表和函数扩展的行为由数据库服务器控制，不应使用超级用户作为查询账号。
+- 服务端只读事务、SQL 校验不能代替数据库最小权限配置。生产环境优先配置专用只读账号；root SSH 会话采用 PostgreSQL 系统账号的 peer 认证时读取范围较大，自定义类型、视图、外部表和函数扩展的行为仍由数据库服务器控制。
 
 参数：
 
-| 参数 | 含义 |
-| --- | --- |
-| `connectionId` | 已确认的 SSH 会话 ID |
-| `engine` | `mysql`、`mariadb`、`postgresql`、`sqlite` |
-| `database` | 数据库名称；SQLite 使用远程绝对文件路径，不接受 URI |
-| `query` | 单条 SQL，最多 20000 个字符 |
-| `host`、`port`、`username` | 可选连接参数，SQLite 不使用这些参数 |
-| `container` | 可选 Docker 容器名或 ID |
-| `maxRows` | SELECT 返回行数上限，默认 200，最大 2000 |
-| `timeoutMs` | 默认 20000，最大 120000 毫秒 |
+| 参数                       | 含义                                                              |
+| -------------------------- | ----------------------------------------------------------------- |
+| `connectionId`             | 已确认的 SSH 会话 ID                                              |
+| `engine`                   | 八种已支持的数据库引擎                                            |
+| `database`                 | 数据库名称；Redis 使用数字库编号，SQLite 使用绝对文件路径         |
+| `query`                    | 单条只读 SQL，或 MongoDB/Redis JSON 请求；最多 20000 个字符       |
+| `host`、`port`、`username` | 可选连接参数，SQLite 不使用这些参数                               |
+| `systemUser`               | 可选宿主机系统账号；只能使用发现结果提供的值，与 `container` 互斥 |
+| `container`                | 可选 Docker 容器名或 ID                                           |
+| `maxRows`                  | SELECT 返回行数上限，默认 200，最大 2000                          |
+| `timeoutMs`                | 默认 20000，最大 120000 毫秒                                      |
 
 示例：
 
@@ -168,13 +172,39 @@ PowerShell 环境变量只对当前窗口及其子进程有效。若 Codex 是�
 4. 查询使用稳定的 ORDER BY 和 LIMIT/OFFSET，不读取无关数据库。
 ```
 
-支持单条 `SELECT`、查询型 `WITH`、关联、聚合、子查询及常用只读函数。MySQL/MariaDB 还支持可解析的 `SHOW TABLES`、`SHOW COLUMNS`、`SHOW CREATE TABLE`、`DESCRIBE`。也可查询 `information_schema`、PostgreSQL 系统目录和 `sqlite_master` 了解表结构。SQL 方言仍受解析器支持范围限制。
+MongoDB 查询示例：
 
-查询入口始终拒绝多条 SQL、修改语句、写锁、`SELECT INTO`、文件输出、客户端转义命令及未确认为只读的函数。即使写入开关已打开，`query_database` 仍是只读；需要修改时使用受开关控制的 `execute_command`。
+```json
+{
+  "operation": "find",
+  "collection": "logs",
+  "filter": { "level": "error" },
+  "projection": { "message": 1, "createdAt": 1 },
+  "sort": { "createdAt": -1 },
+  "limit": 100
+}
+```
 
-返回 `output`、`format`（MySQL/MariaDB 为 TSV，其他为 CSV）、`maxRows`、`outputBytes` 和 `truncated`。SELECT 在数据库侧限制行数；元数据查询的 `maxRows` 为 null，受字节上限控制。`truncated` 仅表示输出超过 64 KiB 被截断，不表示已读完所有数据库记录。继续查询请提供稳定的 `ORDER BY` 和 `LIMIT/OFFSET`；关联查询建议明确列名并为重复列起别名。底层捕获超过 256 KiB 时中止查询。
+MongoDB 支持 `find`、`aggregate`、`count`、`distinct` 和 `listCollections`。`aggregate` 使用 `pipeline` 数组，`distinct` 使用 `field`；拒绝 `$out`、`$merge`、`$where`、`$function` 和 `$accumulator`。返回结果为 Extended JSON，并强制应用 `maxRows` 和 `maxTimeMS`。
 
-SQL 通过 SSH 标准输入传递，不放入进程命令行。审计只记录 SQL 哈希、长度、引擎和结果大小，不记录 SQL 原文或查询数据。数据库客户端原始错误可能含 SQL 和敏感信息，因此不会直接返回或写入审计。
+Redis 查询示例：
+
+```json
+{
+  "command": "HGETALL",
+  "args": ["customer:123"]
+}
+```
+
+Redis 只接受内置只读命令白名单，例如 `GET`、`MGET`、`HGETALL`、`LRANGE`、`SCAN`、`ZRANGE`、`XRANGE`、`INFO` 和 `DBSIZE`；拒绝 `SET`、`DEL`、`EVAL`、`CONFIG`、`FLUSHALL` 等写入、脚本和管理操作。命令及参数通过标准输入发送，不进入远程进程命令行。
+
+MySQL、MariaDB、PostgreSQL、SQLite 和 SQL Server 支持单条 `SELECT`、查询型 `WITH`、关联、聚合、子查询及常用只读函数。MySQL/MariaDB 还支持可解析的 `SHOW TABLES`、`SHOW COLUMNS`、`SHOW CREATE TABLE`、`DESCRIBE`。Oracle 支持经过保守词法校验和函数白名单检查的单条 `SELECT` 或 `WITH`。也可查询 `information_schema`、各数据库系统目录和 `sqlite_master` 了解表结构。
+
+查询入口始终拒绝多条 SQL、修改语句、写锁、`SELECT INTO`、文件输出、客户端转义命令及未确认为只读的函数。即使处于“执行”，`query_database` 仍是只读；需要修改时使用受权限模式控制的 `execute_command`。
+
+返回 `output`、`format`、`maxRows`、`outputBytes` 和 `truncated`。MySQL、MariaDB 和 SQL Server 返回 TSV，PostgreSQL、SQLite 和 Oracle 返回 CSV，MongoDB 和 Redis 返回 JSON。关系型数据库在数据库侧限制行数；元数据查询的 `maxRows` 为 null，受字节上限控制。`truncated` 仅表示输出超过 64 KiB 被截断，不表示已读完所有记录。继续查询请使用稳定分页；关联查询建议明确列名并为重复列起别名。底层捕获超过 256 KiB 时中止查询。
+
+查询内容通过 SSH 标准输入传递，不放入进程命令行。审计只记录查询哈希、长度、引擎和结果大小，不记录查询原文或查询数据。数据库客户端原始错误可能含查询内容和敏感信息，因此不会直接返回或写入审计。
 
 查询失败会返回 `errorCode`、中文 `message`、`guidance` 和 `retryable`，用于区分数据库用户不存在、数据库不存在、认证失败、客户端缺失、容器不可用、连接失败、查询超时、权限不足等情况。返回内容和审计均不包含原始数据库错误、SQL 原文或凭据。
 
@@ -189,13 +219,13 @@ SQL 通过 SSH 标准输入传递，不放入进程命令行。审计只记录 S
 | `write_remote_file` | 通过 SFTP 创建或完整覆盖一个 UTF-8 文本文件。   |
 | `execute_command`   | 执行可能修改服务器的 SSH 命令，并返回命令输出。 |
 
-两个工具都受 MShell 本机设置中的“允许写入与修改”开关控制。关闭时，服务端会拒绝操作并记录失败审计；开启后，Agent 无需为每次调用重复提供写入参数，可以连续完成当前任务。
+两个工具都受 MShell 本机的三档权限控制：查询模式直接拒绝；确认模式把具体操作发送到 MShell 界面并等待一次批准；执行模式直接运行，适合已经明确授权的连续任务。
 
 写文件示例：
 
 ```text
 使用 connectionId="这里填写已确认的 ID"。
-“允许写入与修改”已经开启。
+Agent 权限为“确认”或“执行”。
 调用 write_remote_file，filePath 使用 /etc/example.conf，写入我要求的完整内容。
 ```
 
@@ -203,7 +233,7 @@ SQL 通过 SSH 标准输入传递，不放入进程命令行。审计只记录 S
 
 ```text
 使用 connectionId="这里填写已确认的 ID"。
-“允许写入与修改”已经开启。
+Agent 权限为“确认”或“执行”。
 调用 execute_command 执行 systemctl restart nginx。
 读取返回的 output 并告诉我执行结果，不要执行其他命令。
 ```
@@ -215,8 +245,8 @@ SQL 通过 SSH 标准输入传递，不放入进程命令行。审计只记录 S
 - 修改命令返回给 Agent 的输出最多 `64 KiB`，底层捕获上限为 `2 MiB`。
 - 修改命令不经过查询白名单，可以执行删除、覆盖、安装、重启等高风险操作。
 - 超时或客户端断开不能保证远程进程已经回滚；执行前必须准备备份和恢复路径。
-- 写入开关会保存在本机，重启 MShell 后仍保持上次状态；任务完成后建议关闭。
-- 写入开关不是第二个密码或人工审批机制。开启期间，任何持有 MCP Token 的客户端都可以调用写入工具。
+- 权限模式会保存在本机，重启 MShell 后仍保持上次状态；任务完成后建议切回“查询”。
+- “确认”由 MShell 对每次写工具调用弹窗审批；“执行”不是第二个密码，任何持有 MCP Token 的客户端都可以直接调用写入工具。
 
 ## 服务端点
 
@@ -226,22 +256,22 @@ SQL 通过 SSH 标准输入传递，不放入进程命令行。审计只记录 S
 
 ## 可用工具
 
-| 工具                        | 作用                                       |
-| --------------------------- | ------------------------------------------ |
-| `list_ssh_sessions`         | 仅列出当前确实处于已连接状态的 SSH 会话。  |
-| `get_ssh_connection_status` | 读取一个已连接 SSH 会话的安全状态信息。    |
-| `list_remote_files`         | 通过该会话的 SFTP 列出一个远程目录。       |
-| `read_remote_file`          | 通过 SFTP 读取一个 UTF-8 文本文件。        |
-| `execute_readonly_command`  | 执行单条白名单查询命令并返回命令和输出。   |
-| `discover_database_targets` | 发现数据库与应用候选目标，要求多目标确认。 |
+| 工具                        | 作用                                               |
+| --------------------------- | -------------------------------------------------- |
+| `list_ssh_sessions`         | 仅列出当前确实处于已连接状态的 SSH 会话。          |
+| `get_ssh_connection_status` | 读取一个已连接 SSH 会话的安全状态信息。            |
+| `list_remote_files`         | 通过该会话的 SFTP 列出一个远程目录。               |
+| `read_remote_file`          | 通过 SFTP 读取一个 UTF-8 文本文件。                |
+| `execute_readonly_command`  | 执行单条白名单查询命令并返回命令和输出。           |
+| `discover_database_targets` | 发现数据库与应用候选目标，要求多目标确认。         |
 | `query_database`            | 查询数据库数据、表结构及日志表，支持 Docker 容器。 |
-| `write_remote_file`         | 开启写入开关后创建或完整覆盖远程文本文件。 |
-| `execute_command`           | 开启写入开关后执行可能修改服务器的命令。   |
+| `write_remote_file`         | 确认模式批准后或执行模式下写入远程文本文件。       |
+| `execute_command`           | 确认模式批准后或执行模式下执行修改命令。           |
 
 ## 约束与安全边界
 
 - Agent 只能使用 MShell 当前已连接的 SSH 会话；断开或重连期间的会话不会被列出或读取。
-- 默认只提供读取和白名单查询；写文件或执行修改命令必须先开启本机写入开关。
+- 默认“查询”只提供读取和白名单查询；写文件或执行修改命令需要“确认”或“执行”。
 - 不返回密码、私钥、代理凭据或 Electron IPC 接口。
 - 单次目录列表最多返回 `2000` 项；单个远程文件最多读取 `1 MiB`。
 - 每次 Agent 工具调用都会写入 MShell 的审计日志。
@@ -251,6 +281,6 @@ SQL 通过 SSH 标准输入传递，不放入进程命令行。审计只记录 S
 - MCP 令牌不是 SSH 密码，也不是同步加密密码；三者必须分别保管。
 - 读取配置文件、日志和代码仍可能暴露业务数据。只允许 Agent 读取完成当前任务所需的最小路径。
 - 查询命令的输出也可能包含进程参数、环境、日志、IP、容器配置或其他敏感信息，使用前必须确认查询范围。
-- 写入开关不是额外身份认证。MCP Token 泄露时，应视为远程服务器写入能力同时泄露并立即轮换 Token。
+- 权限模式不是额外身份认证。“执行”期间 MCP Token 泄露时，应视为远程服务器写入能力同时泄露并立即轮换 Token。
 
-该能力适合让 Agent 做状态检查、阅读配置、分析日志，以及在写入开关开启后连续完成修改任务。高风险变更仍应准备备份和回滚方式，任务完成后应关闭写入开关。
+该能力适合让 Agent 做状态检查、阅读配置和分析日志；日常修改使用“确认”，明确授权的连续任务临时使用“执行”。高风险变更仍应准备备份和回滚方式，任务完成后应切回“查询”。

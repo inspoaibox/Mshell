@@ -13,6 +13,7 @@ export interface Snippet {
   tags: string[]
   variables: string[]  // 只存储变量名数组
   shortcut?: string    // 快捷命令，如 "/d"
+  pinnedAt?: string    // 置顶时间；存在时在所属分组内优先显示
   usageCount: number
   createdAt: string    // ISO 字符串
   updatedAt: string    // ISO 字符串
@@ -37,6 +38,7 @@ export class SnippetManager extends BaseManager<Snippet> {
     tags?: string[]
     variables?: string[]
     shortcut?: string
+    pinnedAt?: string
     id?: string // 备份恢复时可传入原始 ID
   }): Promise<Snippet> {
     const now = new Date().toISOString()
@@ -58,6 +60,7 @@ export class SnippetManager extends BaseManager<Snippet> {
       tags: Array.isArray(data.tags) ? data.tags : [],
       variables: Array.isArray(data.variables) ? data.variables : [],
       shortcut: data.shortcut,
+      pinnedAt: this.normalizePinnedAt(data.pinnedAt),
       usageCount: 0,
       createdAt: now,
       updatedAt: now
@@ -83,14 +86,28 @@ export class SnippetManager extends BaseManager<Snippet> {
       }
     }
 
-    const updates = {
+    const updates: Partial<Snippet> = {
       ...data,
       id: snippet.id,
       createdAt: snippet.createdAt,
       updatedAt: new Date().toISOString()
     }
 
+    if (Object.prototype.hasOwnProperty.call(data, 'pinnedAt')) {
+      updates.pinnedAt = this.normalizePinnedAt(data.pinnedAt)
+    }
+
     await super.update(id, updates)
+  }
+
+  /**
+   * 设置或取消分组内置顶
+   */
+  async setPinned(id: string, pinned: boolean): Promise<void> {
+    if (!this.get(id)) {
+      throw new Error('片段不存在')
+    }
+    await this.update(id, { pinnedAt: pinned ? new Date().toISOString() : undefined })
   }
 
   /**
@@ -216,6 +233,12 @@ export class SnippetManager extends BaseManager<Snippet> {
       { name: 'TIMESTAMP', description: '当前时间戳（毫秒）' },
       { name: 'HOME', description: '用户主目录' }
     ]
+  }
+
+  private normalizePinnedAt(value: unknown): string | undefined {
+    if (typeof value !== 'string' || !value.trim()) return undefined
+    const timestamp = Date.parse(value)
+    return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined
   }
 }
 

@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual, randomBytes, webcrypto } from 'node:crypto'
+import { createHash, timingSafeEqual, randomBytes, randomUUID, webcrypto } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { app, BrowserWindow } from 'electron'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -7,7 +7,11 @@ import * as z from 'zod/v4'
 import { auditLogManager, AuditAction } from './AuditLogManager'
 import { sshConnectionManager, type SSHConnection } from './SSHConnectionManager'
 import { sftpManager } from './SFTPManager'
-import { appSettingsManager, type AgentMcpSettings } from '../utils/app-settings'
+import {
+  appSettingsManager,
+  type AgentMcpPermissionMode,
+  type AgentMcpSettings
+} from '../utils/app-settings'
 import { logger } from '../utils/logger'
 import {
   buildMcpDatabaseDiscoveryCommand,
@@ -39,6 +43,7 @@ const MAX_LIST_ENTRIES = 2000
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024
 const DEFAULT_QUERY_TIMEOUT_MS = 10_000
 const MAX_QUERY_TIMEOUT_MS = 20_000
+const DATABASE_DISCOVERY_TIMEOUT_MS = 45_000
 const MAX_QUERY_OUTPUT_BYTES = 64 * 1024
 const MAX_QUERY_CAPTURE_BYTES = 256 * 1024
 const MAX_WRITE_FILE_BYTES = 1024 * 1024
@@ -46,6 +51,7 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 20_000
 const MAX_COMMAND_TIMEOUT_MS = 120_000
 const MAX_COMMAND_LENGTH = 8000
 const MAX_COMMAND_CAPTURE_BYTES = 2 * 1024 * 1024
+const MCP_APPROVAL_TIMEOUT_MS = 2 * 60 * 1000
 
 class MCPRequestError extends Error {
   constructor(
@@ -64,12 +70,27 @@ type ActiveRequest = {
 
 export interface McpServerStatus {
   enabled: boolean
+  permissionMode: AgentMcpPermissionMode
   allowWriteEnabled: boolean
   running: boolean
   host: '127.0.0.1'
   port: number
   endpoint: string
   token: string
+}
+
+export interface McpApprovalRequest {
+  approvalId: string
+  tool: 'write_remote_file' | 'execute_command'
+  connectionId: string
+  summary: string
+  requestedAt: string
+  expiresAt: string
+}
+
+interface PendingApproval {
+  resolve: (approved: boolean) => void
+  timeout: NodeJS.Timeout
 }
 
 export interface McpOperationResult {
@@ -81,6 +102,8 @@ class MCPServerManager {
   private httpServer: Server | null = null
   private activeRuntimeConfig: AgentMcpSettings | null = null
   private activeRequests = new Set<ActiveRequest>()
+  private pendingApprovals = new Map<string, PendingApproval>()
+  private approvalQueue: Promise<void> = Promise.resolve()
 
   async initialize(): Promise<McpOperationResult> {
     const settings = appSettingsManager.getSettings().agentMcp
@@ -95,6 +118,7 @@ class MCPServerManager {
     const settings = appSettingsManager.getSettings().agentMcp
     return {
       enabled: settings.enabled,
+      permissionMode: settings.permissionMode,
       allowWriteEnabled: settings.allowWriteEnabled,
       running: this.httpServer !== null,
       host: settings.host,
@@ -138,12 +162,38 @@ class MCPServerManager {
   }
 
   async setWriteEnabled(allowWriteEnabled: boolean): Promise<McpOperationResult> {
+    return this.setPermissionMode(allowWriteEnabled ? 'execute' : 'query')
+  }
+
+  async setPermissionMode(permissionMode: AgentMcpPermissionMode): Promise<McpOperationResult> {
+    if (!['query', 'confirm', 'execute'].includes(permissionMode)) {
+      return { success: false, error: 'Agent 权限模式无效' }
+    }
     const current = appSettingsManager.getSettings().agentMcp
     await appSettingsManager.updateSettings({
-      agentMcp: { ...current, allowWriteEnabled }
+      agentMcp: {
+        ...current,
+        permissionMode,
+        allowWriteEnabled: permissionMode === 'execute'
+      }
+    })
+    this.rejectPendingApprovals()
+    auditLogManager.log(AuditAction.SETTINGS_UPDATE, {
+      resource: 'agent-mcp-permission',
+      details: { permissionMode },
+      success: true
     })
     this.broadcastSettingsChanged()
     return { success: true }
+  }
+
+  resolveApproval(approvalId: string, approved: boolean): boolean {
+    const pending = this.pendingApprovals.get(approvalId)
+    if (!pending) return false
+    clearTimeout(pending.timeout)
+    this.pendingApprovals.delete(approvalId)
+    pending.resolve(approved)
+    return true
   }
 
   async regenerateToken(): Promise<McpOperationResult> {
@@ -166,6 +216,7 @@ class MCPServerManager {
   }
 
   async stop(): Promise<void> {
+    this.rejectPendingApprovals()
     const activeRequests = Array.from(this.activeRequests)
     this.activeRequests.clear()
 
@@ -384,11 +435,10 @@ class MCPServerManager {
       {
         instructions:
           'MShell exposes read-only tools for SSH sessions currently connected in the desktop application, ' +
-          'including system/log commands and database discovery/query tools for read-only MySQL, MariaDB, PostgreSQL and SQLite access. ' +
-          'Call discover_database_targets before query_database unless the user already supplied the exact engine, container or host, database and username. ' +
+          'including system/log commands and database discovery/query tools for read-only MySQL, MariaDB, PostgreSQL, SQLite, MongoDB, Redis, SQL Server and Oracle access. ' +
+          'Call discover_database_targets before query_database unless the user already supplied the exact engine, container or host, database, username and systemUser. ' +
           'If discovery returns multiple candidates, ask the user to select the target; never infer it from an active connection, a similar name or list order. ' +
-          'Write-capable tools are available only while the user enables ' +
-          'write access in MShell settings. Call list_ssh_sessions first and use a returned connectionId. Never use a ' +
+          'Write-capable tools follow the MShell Agent permission mode: query denies them, confirm waits for in-app approval, and execute runs them directly. Call list_ssh_sessions first and use a returned connectionId. Never use a ' +
           'write-capable tool unless the user explicitly requests the change.'
       }
     )
@@ -588,7 +638,7 @@ class MCPServerManager {
         title: 'Discover database targets through SSH',
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
         description:
-          'Discover database clients, recognized database containers, safely enumerable database names, and application containers without returning passwords or secret environment variables. ' +
+          'Discover database clients, recognized host and container targets, safely enumerable database names, and application containers without returning passwords or secret environment variables. ' +
           'Call this before query_database unless the user already provided the exact target. ' +
           'When requiresSelection is true or more than one relevant target exists, present the candidates and ask the user which site/program/database to use. ' +
           'Do not select a database from current activity, naming similarity, defaults, or list order.',
@@ -602,7 +652,7 @@ class MCPServerManager {
           const output = await sshConnectionManager.executeCommand(
             connectionId,
             buildMcpDatabaseDiscoveryCommand(),
-            MAX_QUERY_TIMEOUT_MS,
+            DATABASE_DISCOVERY_TIMEOUT_MS,
             MAX_QUERY_CAPTURE_BYTES
           )
           const discovery = parseMcpDatabaseDiscovery(output)
@@ -634,24 +684,36 @@ class MCPServerManager {
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
         description:
           'Run one read-only SELECT/WITH query, or MySQL/MariaDB SHOW/DESCRIBE, on any accessible business or log table. ' +
-          'Unless the user supplied the exact target, call discover_database_targets first and use its exact engine, container, database and username. ' +
+          'Unless the user supplied the exact target, call discover_database_targets first and use its exact engine, container, host, port, database, username and systemUser. ' +
           'If multiple databases or applications are found, ask the user to choose; never guess from active sessions or names. ' +
-          'No write switch is needed. Supports MySQL 5.7.8+, MariaDB 10.1+, PostgreSQL and SQLite, including Docker containers. ' +
+          'Database queries are available in query, confirm and execute modes. Supports MySQL 5.7.8+, MariaDB 10.1+, PostgreSQL, SQLite, MongoDB, Redis, SQL Server and Oracle, including Docker containers. ' +
+          'MongoDB query is a JSON object with operation=find|aggregate|count|distinct|listCollections plus collection/filter/projection/sort/pipeline/field/skip/limit as applicable. ' +
+          'Redis query is a JSON object with command and args; only the built-in read-only command allowlist is accepted. SQL engines use one read-only SQL statement. ' +
           'Requires the database CLI and GNU timeout on the remote host or inside the container. ' +
           'Use a database read-only account with credentials already configured remotely (.my.cnf, .pgpass or peer authentication); never pass passwords. ' +
           'For PostgreSQL containers, use the database and username chosen when the container was initialized; do not assume postgres/postgres. ' +
           'database is a database name, or an absolute remote SQLite path. Only known read-only functions are accepted. ' +
           'SELECT results are capped at maxRows; use ORDER BY with LIMIT/OFFSET for further pages. ' +
           'Use information_schema, PostgreSQL catalogs or sqlite_master for schema discovery. ' +
-          'Writes must use execute_command with the write switch enabled.',
+          'Database writes are never accepted by query_database; an explicitly requested database modification must use execute_command and is controlled by confirm or execute mode.',
         inputSchema: {
           connectionId: z.string().min(1).max(200),
-          engine: z.enum(['mysql', 'mariadb', 'postgresql', 'sqlite']),
+          engine: z.enum([
+            'mysql',
+            'mariadb',
+            'postgresql',
+            'sqlite',
+            'mongodb',
+            'redis',
+            'sqlserver',
+            'oracle'
+          ]),
           database: z.string().min(1).max(4096),
           query: z.string().min(1).max(20_000),
           host: z.string().min(1).max(255).optional(),
           port: z.number().int().min(1).max(65535).optional(),
           username: z.string().min(1).max(128).optional(),
+          systemUser: z.string().min(1).max(128).optional(),
           container: z.string().min(1).max(200).optional(),
           maxRows: z.number().int().min(1).max(2000).optional(),
           timeoutMs: z.number().int().min(1000).max(120_000).optional()
@@ -711,8 +773,7 @@ class MCPServerManager {
       {
         title: 'Write a remote UTF-8 text file',
         description:
-          'Create or overwrite one remote UTF-8 text file through SFTP. This changes the server and is available only ' +
-          'while write access is enabled in MShell settings.',
+          'Create or overwrite one remote UTF-8 text file through SFTP. Query mode denies it, confirm mode waits for MShell approval, and execute mode runs it directly.',
         inputSchema: {
           connectionId: z.string().min(1).max(200),
           filePath: z.string().min(1).max(4096),
@@ -721,19 +782,26 @@ class MCPServerManager {
       },
       async ({ connectionId, filePath, content }) => {
         try {
-          this.requireWriteEnabled()
-          this.requireConnectedConnection(connectionId)
           const bytes = Buffer.byteLength(content, 'utf8')
           if (bytes > MAX_WRITE_FILE_BYTES) {
             throw new Error(`写入内容超过上限 ${MAX_WRITE_FILE_BYTES} 字节`)
           }
+          this.requireConnectedConnection(connectionId)
+          const permissionMode = await this.requireWriteAccess('write_remote_file', {
+            connectionId,
+            filePath,
+            bytes,
+            contentPreview: content.slice(0, 1200),
+            contentTruncated: content.length > 1200,
+            contentSha256: createHash('sha256').update(content).digest('hex')
+          })
 
           await this.ensureSftp(connectionId)
           await sftpManager.writeFile(connectionId, filePath, content)
           const result = { connectionId, filePath, bytes, written: true }
           this.auditToolCall(
             'write_remote_file',
-            { connectionId, filePath, bytes, writeEnabled: true },
+            { connectionId, filePath, bytes, permissionMode },
             true
           )
           return this.toToolResult(result)
@@ -752,8 +820,7 @@ class MCPServerManager {
       {
         title: 'Execute an explicitly authorized SSH command',
         description:
-          'Execute a command that may modify the remote server and return its output. This is available only while ' +
-          'write access is enabled in MShell settings.',
+          'Execute a command that may modify the remote server and return its output. Query mode denies it, confirm mode waits for MShell approval, and execute mode runs it directly.',
         inputSchema: {
           connectionId: z.string().min(1).max(200),
           command: z.string().min(1).max(MAX_COMMAND_LENGTH),
@@ -762,10 +829,14 @@ class MCPServerManager {
       },
       async ({ connectionId, command, timeoutMs }) => {
         try {
-          this.requireWriteEnabled()
-          this.requireConnectedConnection(connectionId)
           const normalizedCommand = command.trim()
           if (!normalizedCommand) throw new Error('执行命令不能为空')
+          this.requireConnectedConnection(connectionId)
+          const permissionMode = await this.requireWriteAccess('execute_command', {
+            connectionId,
+            command: normalizedCommand,
+            timeoutMs: timeoutMs || DEFAULT_COMMAND_TIMEOUT_MS
+          })
 
           const output = await sshConnectionManager.executeCommand(
             connectionId,
@@ -793,7 +864,7 @@ class MCPServerManager {
               ...this.getCommandAuditDetails(normalizedCommand),
               outputBytes: outputBuffer.length,
               truncated,
-              writeEnabled: true
+              permissionMode
             },
             true
           )
@@ -816,9 +887,84 @@ class MCPServerManager {
     return server
   }
 
-  private requireWriteEnabled(): void {
-    if (appSettingsManager.getSettings().agentMcp.allowWriteEnabled !== true) {
-      throw new Error('MCP 写入与修改能力未开启，请先在设置的 Agent 接入页面启用')
+  private async requireWriteAccess(
+    tool: McpApprovalRequest['tool'],
+    details: Record<string, unknown>
+  ): Promise<AgentMcpPermissionMode> {
+    const permissionMode = appSettingsManager.getSettings().agentMcp.permissionMode
+    if (permissionMode === 'query') {
+      throw new Error('Agent 当前为“查询”模式，写入和修改操作已被服务端拒绝')
+    }
+    if (permissionMode === 'execute') return permissionMode
+
+    const approved = await this.enqueueApproval(tool, details)
+    if (!approved) throw new Error('Agent 写操作未获得 MShell 用户批准')
+    return permissionMode
+  }
+
+  private enqueueApproval(
+    tool: McpApprovalRequest['tool'],
+    details: Record<string, unknown>
+  ): Promise<boolean> {
+    const pending = this.approvalQueue.then(() => this.dispatchApproval(tool, details))
+    this.approvalQueue = pending.then(
+      () => undefined,
+      () => undefined
+    )
+    return pending
+  }
+
+  private dispatchApproval(
+    tool: McpApprovalRequest['tool'],
+    details: Record<string, unknown>
+  ): Promise<boolean> {
+    const currentMode = appSettingsManager.getSettings().agentMcp.permissionMode
+    if (currentMode === 'query') return Promise.resolve(false)
+    if (currentMode === 'execute') return Promise.resolve(true)
+
+    const window =
+      BrowserWindow.getFocusedWindow() ||
+      BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed())
+    if (!window || window.isDestroyed()) return Promise.resolve(false)
+
+    const approvalId = randomUUID()
+    const requestedAt = new Date()
+    const request: McpApprovalRequest = {
+      approvalId,
+      tool,
+      connectionId: String(details.connectionId || ''),
+      summary:
+        tool === 'execute_command'
+          ? `执行远程命令：\n${String(details.command || '')}`
+          : [
+              `写入远程文件：${String(details.filePath || '')}`,
+              `内容大小：${Number(details.bytes) || 0} 字节`,
+              `SHA-256：${String(details.contentSha256 || '')}`,
+              `内容预览${details.contentTruncated ? '（已截断）' : ''}：`,
+              String(details.contentPreview || '')
+            ].join('\n'),
+      requestedAt: requestedAt.toISOString(),
+      expiresAt: new Date(requestedAt.getTime() + MCP_APPROVAL_TIMEOUT_MS).toISOString()
+    }
+
+    return new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => {
+        this.pendingApprovals.delete(approvalId)
+        resolve(false)
+      }, MCP_APPROVAL_TIMEOUT_MS)
+      this.pendingApprovals.set(approvalId, { resolve, timeout })
+      window.webContents.send('mcp:approval-request', request)
+      if (window.isMinimized()) window.restore()
+      window.show()
+      window.focus()
+    })
+  }
+
+  private rejectPendingApprovals(): void {
+    for (const [approvalId, pending] of this.pendingApprovals) {
+      clearTimeout(pending.timeout)
+      this.pendingApprovals.delete(approvalId)
+      pending.resolve(false)
     }
   }
 

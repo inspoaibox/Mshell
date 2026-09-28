@@ -197,6 +197,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     start: () => ipcRenderer.invoke('mcp:start'),
     stop: () => ipcRenderer.invoke('mcp:stop'),
     setWriteEnabled: (enabled: boolean) => ipcRenderer.invoke('mcp:setWriteEnabled', enabled),
+    setPermissionMode: (mode: 'query' | 'confirm' | 'execute') =>
+      ipcRenderer.invoke('mcp:setPermissionMode', mode),
+    resolveApproval: (approvalId: string, approved: boolean) =>
+      ipcRenderer.invoke('mcp:resolveApproval', approvalId, approved),
+    onApprovalRequest: (callback: (request: any) => void) => {
+      const listener = (_event: any, request: any) => callback(request)
+      ipcRenderer.on('mcp:approval-request', listener)
+      return () => ipcRenderer.removeListener('mcp:approval-request', listener)
+    },
     regenerateToken: () => ipcRenderer.invoke('mcp:regenerateToken')
   },
 
@@ -205,7 +214,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     get: (filter?: any) => ipcRenderer.invoke('log:getLogs', filter),
     clear: () => ipcRenderer.invoke('log:clearLogs'),
     enableSession: (sessionId: string) => ipcRenderer.invoke('log:enableSessionLogging', sessionId),
-    disableSession: (sessionId: string) => ipcRenderer.invoke('log:disableSessionLogging', sessionId)
+    disableSession: (sessionId: string) =>
+      ipcRenderer.invoke('log:disableSessionLogging', sessionId)
   },
 
   // Known hosts operations
@@ -258,7 +268,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   docker: {
     getOverview: (connectionId: string) => ipcRenderer.invoke('docker:getOverview', connectionId),
     install: (connectionId: string) => ipcRenderer.invoke('docker:install', connectionId),
-    cleanupUnused: (connectionId: string) => ipcRenderer.invoke('docker:cleanupUnused', connectionId),
+    cleanupUnused: (connectionId: string) =>
+      ipcRenderer.invoke('docker:cleanupUnused', connectionId),
     containerAction: (connectionId: string, action: string, containerId: string, options?: any) =>
       ipcRenderer.invoke('docker:containerAction', connectionId, action, containerId, options),
     containerBatchAction: (
@@ -266,7 +277,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       action: string,
       containerIds: string[],
       options?: any
-    ) => ipcRenderer.invoke('docker:containerBatchAction', connectionId, action, containerIds, options)
+    ) =>
+      ipcRenderer.invoke('docker:containerBatchAction', connectionId, action, containerIds, options)
   },
 
   // Port forward operations
@@ -317,6 +329,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (id: string, updates: any) => ipcRenderer.invoke('snippet:update', id, updates),
     delete: (id: string) => ipcRenderer.invoke('snippet:delete', id),
     incrementUsage: (id: string) => ipcRenderer.invoke('snippet:incrementUsage', id),
+    setPinned: (id: string, pinned: boolean) => ipcRenderer.invoke('snippet:setPinned', id, pinned),
     getByCategory: (category: string) => ipcRenderer.invoke('snippet:getByCategory', category),
     getByTag: (tag: string) => ipcRenderer.invoke('snippet:getByTag', tag),
     search: (query: string) => ipcRenderer.invoke('snippet:search', query),
@@ -817,7 +830,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getByTag: (tag: string) => ipcRenderer.invoke('lazyScript:getByTag', tag),
     search: (query: string) => ipcRenderer.invoke('lazyScript:search', query),
     getAllCategories: () => ipcRenderer.invoke('lazyScript:getAllCategories'),
-    extractVariables: (content: string) => ipcRenderer.invoke('lazyScript:extractVariables', content),
+    extractVariables: (content: string) =>
+      ipcRenderer.invoke('lazyScript:extractVariables', content),
     render: (content: string, values: Record<string, string>) =>
       ipcRenderer.invoke('lazyScript:render', content, values),
     export: (filePath: string) => ipcRenderer.invoke('lazyScript:export', filePath),
@@ -905,6 +919,9 @@ export interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>
     getDownloadsPath: () => Promise<string>
-    setToolDockOpen: (open: boolean, width?: number) => Promise<{ success: boolean; error?: string }>
+    setToolDockOpen: (
+      open: boolean,
+      width?: number
+    ) => Promise<{ success: boolean; error?: string }>
   }
 }

@@ -1095,7 +1095,7 @@
               <template #title>让 Codex、Claude 等 Agent 操作当前已连接的 SSH 会话</template>
               <template #default>
                 默认能力以只读为主：会话列表、连接状态、远程目录、远程文本文件和受限查询命令。
-                只有开启“允许写入与修改”后，Agent 才能写文件或执行修改命令；不暴露密码、私钥或
+                “查询”只允许读取；“确认”在写入前弹窗审批；“执行”允许连续修改。始终不暴露密码、私钥或
                 Electron IPC。
               </template>
             </el-alert>
@@ -1112,31 +1112,41 @@
                 </span>
               </el-form-item>
 
-              <el-form-item label="允许写入与修改">
-                <el-switch
-                  v-model="settings.agentMcp.allowWriteEnabled"
-                  :loading="mcpWriteLoading"
-                  @change="handleMcpWriteToggle"
-                />
-                <span class="form-hint">
-                  {{
-                    settings.agentMcp.allowWriteEnabled
-                      ? '已开启，Agent 可以写文件和执行任意修改命令'
-                      : '默认关闭，所有写入和修改操作由服务端拒绝'
-                  }}
-                </span>
+              <el-form-item label="操作权限">
+                <div class="mcp-permission-field">
+                  <el-radio-group
+                    v-model="settings.agentMcp.permissionMode"
+                    :disabled="mcpPermissionLoading"
+                    @change="handleMcpPermissionModeChange"
+                  >
+                    <el-radio-button label="query">查询</el-radio-button>
+                    <el-radio-button label="confirm">确认</el-radio-button>
+                    <el-radio-button label="execute">执行</el-radio-button>
+                  </el-radio-group>
+                  <span class="form-hint">{{ mcpPermissionDescription }}</span>
+                </div>
               </el-form-item>
 
               <el-alert
-                v-if="settings.agentMcp.allowWriteEnabled"
-                type="warning"
+                v-if="settings.agentMcp.permissionMode !== 'query'"
+                :type="settings.agentMcp.permissionMode === 'execute' ? 'warning' : 'info'"
                 :closable="false"
                 show-icon
                 class="mcp-write-notice"
               >
-                <template #title>写入能力已开启</template>
+                <template #title>
+                  {{
+                    settings.agentMcp.permissionMode === 'execute'
+                      ? '执行模式已开启'
+                      : '确认模式已开启'
+                  }}
+                </template>
                 <template #default>
-                  持有当前 MCP Token 的 Agent 可以覆盖远程文件并执行修改命令。完成操作后建议关闭。
+                  {{
+                    settings.agentMcp.permissionMode === 'execute'
+                      ? '持有当前 MCP Token 的 Agent 可以直接写文件并执行修改命令。完成操作后建议切回“查询”。'
+                      : 'Agent 的查询直接执行；写文件和修改命令会暂停，并由 MShell 弹窗逐次确认。'
+                  }}
                 </template>
               </el-alert>
 
@@ -1182,7 +1192,7 @@
                 <li>只能操作 MShell 当前已经连接的 SSH 会话。</li>
                 <li>远程文件读取限制为单文件 1 MiB，目录最多返回 2000 项。</li>
                 <li>查询命令限制为单条白名单命令，禁止管道、重定向和修改类操作。</li>
-                <li>“允许写入与修改”关闭时，写文件和修改命令会被服务端拒绝。</li>
+                <li>“查询”拒绝写操作；“确认”逐次审批；“执行”允许连续写入与修改。</li>
                 <li>每次 Agent 工具调用都会写入现有审计日志。</li>
               </ul>
             </div>
@@ -1241,8 +1251,8 @@
         <el-alert type="warning" :closable="false" show-icon>
           <template #title>写文件和修改命令属于高风险能力</template>
           <template #default>
-            只有开启“允许写入与修改”后才能使用写入工具。开关不是第二个密码，持有 MCP Token
-            的客户端在开启期间可以修改服务器。
+            “查询”拒绝写入，“确认”逐次显示具体操作并等待批准，“执行”允许持有 MCP Token
+            的客户端连续修改服务器。
           </template>
         </el-alert>
 
@@ -1337,54 +1347,54 @@ codex mcp list</code></pre>
                       <tr>
                         <th>工具</th>
                         <th>作用</th>
-                        <th>写入开关</th>
+                        <th>权限要求</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr>
                         <td><code>list_ssh_sessions</code></td>
                         <td>列出已连接会话</td>
-                        <td>不需要</td>
+                        <td>全部模式</td>
                       </tr>
                       <tr>
                         <td><code>get_ssh_connection_status</code></td>
                         <td>读取连接状态</td>
-                        <td>不需要</td>
+                        <td>全部模式</td>
                       </tr>
                       <tr>
                         <td><code>list_remote_files</code></td>
                         <td>列出远程目录</td>
-                        <td>不需要</td>
+                        <td>全部模式</td>
                       </tr>
                       <tr>
                         <td><code>read_remote_file</code></td>
                         <td>读取 UTF-8 文本</td>
-                        <td>不需要</td>
+                        <td>全部模式</td>
                       </tr>
                       <tr>
                         <td><code>execute_readonly_command</code></td>
                         <td>执行白名单查询命令</td>
-                        <td>不需要</td>
+                        <td>全部模式</td>
                       </tr>
                       <tr>
                         <td><code>discover_database_targets</code></td>
                         <td>发现数据库和应用候选目标</td>
-                        <td>不需要</td>
+                        <td>全部模式</td>
                       </tr>
                       <tr>
                         <td><code>query_database</code></td>
                         <td>查询数据库数据、表结构和日志记录</td>
-                        <td>不需要</td>
+                        <td>全部模式</td>
                       </tr>
                       <tr>
                         <td><code>write_remote_file</code></td>
                         <td>创建或完整覆盖文本文件</td>
-                        <td>必须开启</td>
+                        <td>确认或执行</td>
                       </tr>
                       <tr>
                         <td><code>execute_command</code></td>
                         <td>执行可能修改服务器的命令</td>
-                        <td>必须开启</td>
+                        <td>确认或执行</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1397,11 +1407,11 @@ codex mcp list</code></pre>
                   <li>
                     调用 <code>list_ssh_sessions</code>，让用户确认目标 <code>connectionId</code>。
                   </li>
-                  <li>需要修改时，在设置中开启“允许写入与修改”。</li>
-                  <li>Agent 可以连续执行本次任务所需的文件写入和修改命令。</li>
-                  <li>重要配置建议先读取旧内容或备份，但不要求每次重复确认。</li>
+                  <li>日常操作使用“确认”，每个写入工具调用都由 MShell 弹窗批准。</li>
+                  <li>明确授权的连续任务可以临时切换为“执行”。</li>
+                  <li>重要配置建议先读取旧内容或备份。</li>
                   <li>写入完成后重新读取文件或执行查询，验证实际结果。</li>
-                  <li>任务完成后关闭“允许写入与修改”。</li>
+                  <li>任务完成后切回“查询”。</li>
                 </ol>
               </section>
 
@@ -1415,14 +1425,20 @@ codex mcp list</code></pre>
                 <h4>数据库查询</h4>
                 <pre><code>先调用 discover_database_targets(connectionId)。
 如果返回多个数据库或应用容器，列出候选并让我确认目标。
-确认后，把目标中的 engine、container、database、username 原样传给 query_database。
+确认后，把目标中的 engine、container、host、port、database、username、systemUser 原样传给 query_database。
 不要根据活动连接、名称或列表顺序猜测数据库。</code></pre>
                 <p>
-                  支持 MySQL、MariaDB、PostgreSQL 和 SQLite；SQLite 的 database
-                  使用远程绝对文件路径。 服务器或容器内需有对应数据库客户端及 GNU
-                  timeout，并提前配置只读账号认证。 查询无需开启写入，默认最多 200 行，可用
-                  LIMIT/OFFSET 分页；写入仍需开启开关并使用 execute_command。发现结果只是候选，
-                  多站点或多数据库服务器必须由用户确认真实业务目标。
+                  支持 MySQL、MariaDB、PostgreSQL、SQLite、MongoDB、Redis、SQL Server 和
+                  Oracle；SQLite 的 database 使用远程绝对文件路径。MongoDB 使用包含
+                  operation、collection、filter 等字段的 JSON 请求；Redis 使用包含 command 和 args
+                  的 JSON 请求，并只允许只读命令。发现器会尝试使用当前 SSH
+                  账号已配置的非交互认证枚举宿主机数据库，并限量查找常用应用目录中的 SQLite
+                  文件。服务器或容器内需有对应数据库客户端及 GNU
+                  timeout，并提前配置只读账号认证。数据库查询在三种模式下始终只读，默认最多 200
+                  行，可用 LIMIT/OFFSET 分页；修改仍需使用 execute_command。发现结果只是候选，
+                  多站点或多数据库服务器必须由用户确认真实业务目标。切换为“确认”或“执行”不会绕过
+                  数据库认证；认证失败时，需要在远程主机或容器中配置数据库客户端可用的非交互只读认证，
+                  MCP 不接收明文数据库密码。
                 </p>
               </section>
             </div>
@@ -1431,21 +1447,23 @@ codex mcp list</code></pre>
           <el-tab-pane label="写入规则" name="write">
             <div class="mcp-guide-content">
               <section>
-                <h4>写入开关</h4>
+                <h4>三档权限</h4>
                 <ul>
                   <li>
-                    开关关闭时，<code>write_remote_file</code> 和
-                    <code>execute_command</code> 会被服务端拒绝。
+                    查询：<code>write_remote_file</code> 和 <code>execute_command</code> 被拒绝。
                   </li>
-                  <li>开关开启后，写入工具不再要求每次传入额外参数。</li>
+                  <li>确认：查询直接执行；每个写入工具调用会暂停，用户批准后继续。</li>
+                  <li>执行：查询和写入直接执行，适合已经明确授权的连续任务。</li>
+                  <li>确认弹窗被拒绝、关闭或等待超过 2 分钟，本次写入会取消。</li>
+                  <li>数据库查询在三档权限下都保持只读，不提供数据库写入工具。</li>
                   <li>设置会保存在本机，重启 MShell 后仍保持上次状态。</li>
-                  <li>完成写入后建议关闭，减少 Token 泄露后的影响范围。</li>
+                  <li>完成写入后建议切回“查询”，减少 Token 泄露后的影响范围。</li>
                 </ul>
               </section>
 
               <section>
                 <h4>写文件</h4>
-                <pre><code>开启“允许写入与修改”后，调用 write_remote_file：
+                <pre><code>切换为“确认”或“执行”后，调用 write_remote_file：
 filePath=/etc/example.conf
 content=&lt;完整文件内容&gt;</code></pre>
                 <ul>
@@ -1457,7 +1475,7 @@ content=&lt;完整文件内容&gt;</code></pre>
 
               <section>
                 <h4>修改命令</h4>
-                <pre><code>开启“允许写入与修改”后，调用 execute_command：
+                <pre><code>切换为“确认”或“执行”后，调用 execute_command：
 command=systemctl restart nginx
 读取返回的 output，并且不要执行其他命令。</code></pre>
                 <ul>
@@ -1496,11 +1514,17 @@ command=systemctl restart nginx
                       </tr>
                       <tr>
                         <td>写入被拒绝</td>
-                        <td>在“Agent 接入”中开启“允许写入与修改”，无需额外调用参数。</td>
+                        <td>将权限切换为“确认”并批准操作，或切换为“执行”。</td>
                       </tr>
                       <tr>
                         <td>查询命令被拒绝</td>
                         <td>查询工具不支持管道、重定向、脚本和修改类命令。</td>
+                      </tr>
+                      <tr>
+                        <td>数据库认证失败</td>
+                        <td>
+                          在远程主机或容器中配置非交互只读认证后重新发现目标；切换为“确认”或“执行”不能代替数据库凭据。
+                        </td>
                       </tr>
                       <tr>
                         <td>命令超时</td>
@@ -1850,7 +1874,8 @@ const currentTheme = ref('dark')
 const appearanceOptions = [
   { label: '现代', value: 'modern' },
   { label: '简洁', value: 'terminal' },
-  { label: '复古', value: 'minimal' }
+  { label: '复古', value: 'minimal' },
+  { label: '极光', value: 'aurora' }
 ]
 
 const settings = ref({
@@ -1860,7 +1885,7 @@ const settings = ref({
     closeToTray: false,
     language: 'zh-CN',
     theme: 'dark' as 'light' | 'dark' | 'auto',
-    appearance: 'modern' as 'modern' | 'terminal' | 'minimal',
+    appearance: 'modern' as 'modern' | 'terminal' | 'minimal' | 'aurora',
     enableAuditLog: true,
     enableSystemLog: true
   },
@@ -1910,6 +1935,7 @@ const settings = ref({
   },
   agentMcp: {
     enabled: false,
+    permissionMode: 'query' as 'query' | 'confirm' | 'execute',
     allowWriteEnabled: false,
     host: '127.0.0.1' as const,
     port: 47821,
@@ -1991,6 +2017,7 @@ const appVersion = ref('0.2.20')
 
 const mcpStatus = ref({
   enabled: false,
+  permissionMode: 'query' as 'query' | 'confirm' | 'execute',
   allowWriteEnabled: false,
   running: false,
   host: '127.0.0.1' as const,
@@ -1999,13 +2026,23 @@ const mcpStatus = ref({
   token: ''
 })
 const mcpLoading = ref(false)
-const mcpWriteLoading = ref(false)
+const mcpPermissionLoading = ref(false)
 const mcpTokenVisible = ref(false)
 const maskedMcpToken = computed(() => {
   const token = settings.value.agentMcp.token
   if (!token) return '未生成'
   if (token.length <= 8) return '*'.repeat(token.length)
   return `${token.slice(0, 4)}${'*'.repeat(Math.max(4, token.length - 8))}${token.slice(-4)}`
+})
+const mcpPermissionDescription = computed(() => {
+  switch (settings.value.agentMcp.permissionMode) {
+    case 'confirm':
+      return '查询直接执行，写入和修改必须在 MShell 中逐次批准'
+    case 'execute':
+      return '允许 Agent 直接写入和修改，适合明确授权的连续任务'
+    default:
+      return '只允许查询，所有写入和修改由服务端拒绝'
+  }
 })
 
 // 更新相关状态
@@ -2222,6 +2259,7 @@ const loadMcpStatus = async () => {
     settings.value.agentMcp = {
       ...settings.value.agentMcp,
       enabled: result.data.enabled,
+      permissionMode: result.data.permissionMode,
       allowWriteEnabled: result.data.allowWriteEnabled,
       host: result.data.host,
       port: result.data.port,
@@ -2257,24 +2295,26 @@ const handleMcpToggle = async (enabled: boolean | string | number) => {
   }
 }
 
-const handleMcpWriteToggle = async (enabled: boolean | string | number) => {
-  const nextEnabled = Boolean(enabled)
-  mcpWriteLoading.value = true
+const handleMcpPermissionModeChange = async (mode: string | number | boolean) => {
+  const previousMode = mcpStatus.value.permissionMode
+  const nextMode = String(mode) as 'query' | 'confirm' | 'execute'
+  mcpPermissionLoading.value = true
   try {
-    const result = await window.electronAPI.mcp.setWriteEnabled(nextEnabled)
+    const result = await window.electronAPI.mcp.setPermissionMode(nextMode)
     if (!result.success) {
-      settings.value.agentMcp.allowWriteEnabled = !nextEnabled
-      ElMessage.error(result.error || 'MCP 写入权限更新失败')
+      settings.value.agentMcp.permissionMode = previousMode
+      ElMessage.error(result.error || 'Agent 权限模式更新失败')
       return
     }
     await loadMcpStatus()
-    ElMessage.success(nextEnabled ? 'MCP 写入与修改能力已开启' : 'MCP 写入与修改能力已关闭')
+    const labels = { query: '查询', confirm: '确认', execute: '执行' }
+    ElMessage.success(`Agent 权限已切换为“${labels[nextMode]}”`)
   } catch (error) {
-    settings.value.agentMcp.allowWriteEnabled = !nextEnabled
-    console.error('Failed to update MCP write access:', error)
-    ElMessage.error('MCP 写入权限更新失败')
+    settings.value.agentMcp.permissionMode = previousMode
+    console.error('Failed to update MCP permission mode:', error)
+    ElMessage.error('Agent 权限模式更新失败')
   } finally {
-    mcpWriteLoading.value = false
+    mcpPermissionLoading.value = false
   }
 }
 
@@ -4168,6 +4208,13 @@ const testShortcuts = () => {
   align-items: center;
   gap: var(--spacing-sm);
   width: min(760px, 100%);
+}
+
+.mcp-permission-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
 }
 
 .mcp-inline-field .el-input {

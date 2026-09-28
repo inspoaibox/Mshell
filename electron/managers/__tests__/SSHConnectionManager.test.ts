@@ -425,7 +425,9 @@ describe('SSHConnectionManager', () => {
     it('sends database SQL through stdin after attaching channel listeners', async () => {
       const handlers: Record<string, Function> = {}
       const stream = {
-        on: vi.fn((event: string, handler: Function) => { handlers[event] = handler }),
+        on: vi.fn((event: string, handler: Function) => {
+          handlers[event] = handler
+        }),
         stderr: { on: vi.fn() },
         close: vi.fn(),
         end: vi.fn((stdin: string) => {
@@ -434,9 +436,25 @@ describe('SSHConnectionManager', () => {
           handlers.close(0)
         })
       }
-      const client = { exec: vi.fn((_command: string, callback: Function) => callback(null, stream)), end: vi.fn() }
-      ;(manager as any).connections.set('db-query', { id: 'db-query', status: 'connected', client, lastActivity: new Date() })
-      await expect(manager.executeCommand('db-query', 'psql -X -w', 1000, 1024, 'BEGIN READ ONLY;\nSELECT 1;\nROLLBACK;\n')).resolves.toBe('1\n')
+      const client = {
+        exec: vi.fn((_command: string, callback: Function) => callback(null, stream)),
+        end: vi.fn()
+      }
+      ;(manager as any).connections.set('db-query', {
+        id: 'db-query',
+        status: 'connected',
+        client,
+        lastActivity: new Date()
+      })
+      await expect(
+        manager.executeCommand(
+          'db-query',
+          'psql -X -w',
+          1000,
+          1024,
+          'BEGIN READ ONLY;\nSELECT 1;\nROLLBACK;\n'
+        )
+      ).resolves.toBe('1\n')
       expect(client.exec).toHaveBeenCalledWith('psql -X -w', expect.any(Function))
       expect(stream.end).toHaveBeenCalledOnce()
     })

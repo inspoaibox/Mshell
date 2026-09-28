@@ -216,7 +216,7 @@ GitHub/GitLab Token 只用于访问远程同步服务，不等于同步数据加
 
 ## 10. 本机 Agent / MCP 安全接入
 
-本节是完整使用流程。当前 MCP 实现提供会话读取、文件读取、受限查询命令，以及由“设置 - Agent 接入 - 允许写入与修改”控制的文件写入和修改命令能力。详细工具说明也见 [mcp-readonly.md](mcp-readonly.md)。
+本节是完整使用流程。当前 MCP 实现提供会话读取、文件读取、受限查询命令，以及由“设置 - Agent 接入 - 查询/确认/执行”控制的文件写入和修改命令能力。详细工具说明也见 [mcp-readonly.md](mcp-readonly.md)。
 
 ### 10.1 功能和边界
 
@@ -228,28 +228,27 @@ MCP 服务默认关闭，启动后只监听：
 
     Authorization: Bearer <MCP 令牌>
 
-可用工具只有七个：
+可用工具如下：
 
-| 工具                      | 作用                                               |
-| ------------------------- | -------------------------------------------------- |
-| list_ssh_sessions         | 列出当前状态为 connected 的 SSH 会话。             |
-| get_ssh_connection_status | 读取一个已连接会话的主机、端口、用户名和活动时间。 |
-| list_remote_files         | 通过已连接会话的 SFTP 列出远程目录。               |
-| read_remote_file          | 通过 SFTP 读取 UTF-8 文本文件。                    |
-| execute_readonly_command  | 执行单条白名单查询命令，并返回命令和标准输出。     |
-| query_database            | 通过只读模式查询 MySQL/MariaDB、PostgreSQL、SQLite，可在 Docker 容器内执行。 |
-| write_remote_file         | 开启写入开关后创建或完整覆盖远程 UTF-8 文本文件。  |
-| execute_command           | 开启写入开关后执行可能修改服务器的命令并返回输出。 |
+| 工具                      | 作用                                                       |
+| ------------------------- | ---------------------------------------------------------- |
+| list_ssh_sessions         | 列出当前状态为 connected 的 SSH 会话。                     |
+| get_ssh_connection_status | 读取一个已连接会话的主机、端口、用户名和活动时间。         |
+| list_remote_files         | 通过已连接会话的 SFTP 列出远程目录。                       |
+| read_remote_file          | 通过 SFTP 读取 UTF-8 文本文件。                            |
+| execute_readonly_command  | 执行单条白名单查询命令，并返回命令和标准输出。             |
+| discover_database_targets | 发现宿主机与 Docker 中可安全查询的数据库目标。             |
+| query_database            | 通过只读模式查询八种已支持数据库，可在 Docker 容器内执行。 |
+| write_remote_file         | 确认模式批准后或执行模式下写入远程 UTF-8 文本文件。        |
+| execute_command           | 确认模式批准后或执行模式下执行修改命令并返回输出。         |
 
 MCP 不提供：
 
-- 写入开关关闭时的文件写入或修改命令。
+- 查询模式下的文件写入或修改命令。
 - 直接控制现有交互式终端输入流。
 - 独立暴露 SSH 密码、私钥、passphrase、代理凭据和 Electron IPC。
 
-写入开关开启后，`execute_command` 可以执行任意远程 Shell 命令，包括删除文件、安装软件、修改权限、重启服务和调整防火墙。该开关是本机能力控制，不是额外密码或人工审批机制；开启期间，任何持有 MCP Token 的客户端都可以调用写入工具。
-
-- SSH 密码、私钥、passphrase、代理凭据和 Electron IPC。
+确认模式下，`write_remote_file` 和 `execute_command` 会等待 MShell 用户逐次批准。执行模式下，`execute_command` 可以直接执行任意远程 Shell 命令，包括删除文件、安装软件、修改权限、重启服务和调整防火墙。权限模式是本机能力控制，不是额外身份认证；执行模式期间，任何持有 MCP Token 的客户端都可以调用写入工具。
 
 必须把使用该 MCP 的本机 Agent 当作可信本地程序管理。读取工具可能暴露配置、日志和代码；写入工具可能直接改变服务器状态。MCP Token 泄露时，应同时按远程读取和写入权限泄露处理。
 
@@ -348,10 +347,10 @@ STDIO 和流式 HTTP 是两种不同的 MCP 传输方式。STDIO 由 Codex 启�
 5. 需要读取目录时调用 list_remote_files，传入明确路径。
 6. 需要阅读文本时调用 read_remote_file，传入明确文件路径。
 7. 需要查询系统状态时调用 execute_readonly_command，传入一条白名单查询命令。
-8. 需要修改时，在“Agent 接入”中开启“允许写入与修改”。
+8. 需要修改时，在“Agent 接入”中选择“确认”；明确授权的连续任务可临时选择“执行”。
 9. Agent 可调用 write_remote_file 或 execute_command 连续完成本次任务，不需要逐次传入写入参数。
 10. 重要配置建议先读取旧内容或备份，完成后重新读取或查询验证结果。
-11. 任务结束后关闭“允许写入与修改”，并检查输出中是否包含不应离开本机的业务数据。
+11. 任务结束后切回“查询”，并检查输出中是否包含不应离开本机的业务数据。
 
 推荐先发送以下请求，让 Agent 只列出会话，不执行任何操作：
 
@@ -378,13 +377,13 @@ STDIO 和流式 HTTP 是两种不同的 MCP 传输方式。STDIO 由 Codex 启�
 写文件示例：
 
     使用 connectionId="这里填写已确认的 ID"。
-    “允许写入与修改”已经开启。
+    Agent 权限为“确认”或“执行”。
     调用 write_remote_file，把完整新内容写入 /etc/example.conf。
 
 修改命令示例：
 
     使用 connectionId="这里填写已确认的 ID"。
-    “允许写入与修改”已经开启。
+    Agent 权限为“确认”或“执行”。
     调用 execute_command 执行 systemctl restart nginx。
     读取返回的 output 并告诉我执行结果，不要执行其他命令。
 
@@ -396,8 +395,8 @@ Agent 应遵循以下顺序：
 2. 用户确认目标 connectionId
 3. get_ssh_connection_status（需要确认状态时）
 4. list_remote_files、read_remote_file 或 execute_readonly_command
-5. 用户开启“允许写入与修改”后，才调用 write_remote_file 或 execute_command
-6. 当前任务完成后关闭写入开关
+5. 用户选择“确认”并逐次批准，或选择“执行”后，才调用 write_remote_file 或 execute_command
+6. 当前任务完成后切回“查询”
 
 约束：
 
@@ -409,8 +408,8 @@ Agent 应遵循以下顺序：
 - 查询命令采用程序和操作白名单，不支持管道、重定向、命令串、Shell 展开、脚本解释器、sudo 和修改类操作。
 - write_remote_file 每次最多写入 1 MiB UTF-8 文本；已存在的目标文件会被完整覆盖。
 - execute_command 最长 8000 个字符，默认超时 20 秒，最大 120 秒，底层输出捕获上限为 2 MiB。
-- 写入开关关闭后，服务端立即拒绝 write_remote_file 和 execute_command；查询与读取工具不受影响。
-- 写入开关会保存在本机，重启后仍保持上次状态；开启期间任何持有 MCP Token 的客户端都可以调用写入工具。
+- 切换为“查询”后，服务端立即拒绝 write_remote_file 和 execute_command；查询与读取工具不受影响。
+- 权限模式会保存在本机，重启后仍保持上次状态；“执行”期间任何持有 MCP Token 的客户端都可以调用写入工具。
 - 修改命令超时或 MCP 客户端断开时，不能保证远程进程已经停止或自动回滚。
 - Agent 只能读取当前已连接会话；断开或重连期间调用会返回不可用错误。
 - SSH 自动重连成功后，MShell 会按新的 SSH 客户端重建 SFTP 通道，Agent 需要重新确认会话状态。

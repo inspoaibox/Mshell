@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => {
   const settings = {
     enabled: true,
+    permissionMode: 'query' as 'query' | 'confirm' | 'execute',
     allowWriteEnabled: false,
     host: '127.0.0.1' as const,
     port: 47821,
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => {
     settings,
     auditLog: vi.fn(),
     updateSettings: vi.fn().mockResolvedValue(undefined),
+    getFocusedWindow: vi.fn(),
     getAllConnections: vi.fn(),
     getConnection: vi.fn(),
     executeCommand: vi.fn(),
@@ -25,7 +27,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('electron', () => ({
   app: { getVersion: () => '0.2.16' },
-  BrowserWindow: { getAllWindows: () => [] }
+  BrowserWindow: { getAllWindows: () => [], getFocusedWindow: mocks.getFocusedWindow }
 }))
 
 vi.mock('../AuditLogManager', () => ({
@@ -105,6 +107,7 @@ async function readMcpPayload(response: Response): Promise<any> {
 describe('MCPServerManager', () => {
   afterEach(async () => {
     await mcpServerManager.stop()
+    mocks.settings.permissionMode = 'query'
     mocks.settings.allowWriteEnabled = false
     vi.clearAllMocks()
   })
@@ -134,8 +137,100 @@ describe('MCPServerManager', () => {
   it('persists the server-side write access switch', async () => {
     await expect(mcpServerManager.setWriteEnabled(true)).resolves.toEqual({ success: true })
     expect(mocks.updateSettings).toHaveBeenCalledWith({
-      agentMcp: expect.objectContaining({ allowWriteEnabled: true })
+      agentMcp: expect.objectContaining({ permissionMode: 'execute', allowWriteEnabled: true })
     })
+  })
+
+  it('persists query, confirm and execute permission modes', async () => {
+    for (const permissionMode of ['query', 'confirm', 'execute'] as const) {
+      await expect(mcpServerManager.setPermissionMode(permissionMode)).resolves.toEqual({
+        success: true
+      })
+      expect(mocks.updateSettings).toHaveBeenLastCalledWith({
+        agentMcp: expect.objectContaining({
+          permissionMode,
+          allowWriteEnabled: permissionMode === 'execute'
+        })
+      })
+    }
+  })
+
+  it('waits for an in-app approval in confirm mode before executing a write tool', async () => {
+    const port = await getAvailablePort()
+    mocks.settings.port = port
+    mocks.settings.permissionMode = 'confirm'
+    mocks.getConnection.mockReturnValue({ id: 'connected-session', status: 'connected' })
+    mocks.executeCommand.mockResolvedValue('approved\n')
+    const window = {
+      isDestroyed: vi.fn(() => false),
+      isMinimized: vi.fn(() => false),
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+      webContents: { send: vi.fn() }
+    }
+    mocks.getFocusedWindow.mockReturnValue(window)
+    await mcpServerManager.applySettings({ ...mocks.settings })
+
+    const responsePromise = postMcp(port, {
+      jsonrpc: '2.0',
+      id: 20,
+      method: 'tools/call',
+      params: {
+        name: 'execute_command',
+        arguments: { connectionId: 'connected-session', command: 'systemctl restart nginx' }
+      }
+    })
+    await vi.waitFor(() => expect(window.webContents.send).toHaveBeenCalledOnce())
+    expect(mocks.executeCommand).not.toHaveBeenCalled()
+    const [eventName, approval] = window.webContents.send.mock.calls[0]
+    expect(eventName).toBe('mcp:approval-request')
+    expect(approval).toMatchObject({
+      tool: 'execute_command',
+      connectionId: 'connected-session'
+    })
+    expect(approval.summary).toContain('systemctl restart nginx')
+    expect(mcpServerManager.resolveApproval(approval.approvalId, true)).toBe(true)
+
+    const payload = await readMcpPayload(await responsePromise)
+    expect(payload.result.isError).toBeUndefined()
+    expect(mocks.executeCommand).toHaveBeenCalledWith(
+      'connected-session',
+      'systemctl restart nginx',
+      20_000,
+      2 * 1024 * 1024
+    )
+
+    const deniedResponsePromise = postMcp(port, {
+      jsonrpc: '2.0',
+      id: 21,
+      method: 'tools/call',
+      params: {
+        name: 'execute_command',
+        arguments: { connectionId: 'connected-session', command: 'systemctl restart sshd' }
+      }
+    })
+    await vi.waitFor(() => expect(window.webContents.send).toHaveBeenCalledTimes(2))
+    const deniedApproval = window.webContents.send.mock.calls[1][1]
+    expect(mcpServerManager.resolveApproval(deniedApproval.approvalId, false)).toBe(true)
+    const deniedPayload = await readMcpPayload(await deniedResponsePromise)
+    expect(deniedPayload.result.isError).toBe(true)
+    expect(mocks.executeCommand).toHaveBeenCalledTimes(1)
+
+    const modeSwitchResponsePromise = postMcp(port, {
+      jsonrpc: '2.0',
+      id: 22,
+      method: 'tools/call',
+      params: {
+        name: 'execute_command',
+        arguments: { connectionId: 'connected-session', command: 'systemctl restart docker' }
+      }
+    })
+    await vi.waitFor(() => expect(window.webContents.send).toHaveBeenCalledTimes(3))
+    await expect(mcpServerManager.setPermissionMode('query')).resolves.toEqual({ success: true })
+    const modeSwitchPayload = await readMcpPayload(await modeSwitchResponsePromise)
+    expect(modeSwitchPayload.result.isError).toBe(true)
+    expect(mocks.executeCommand).toHaveBeenCalledTimes(1)
   })
 
   it('discovers database targets before querying and does not expose credentials', async () => {
@@ -170,7 +265,7 @@ APPLICATION|worker|example/worker:latest|
     expect(mocks.executeCommand).toHaveBeenCalledWith(
       'db-session',
       expect.stringContaining('__MSHELL_DATABASE_DISCOVERY_V1__'),
-      20_000,
+      45_000,
       256 * 1024
     )
     expect(mocks.auditLog).toHaveBeenCalledWith(
@@ -235,6 +330,7 @@ APPLICATION|worker|example/worker:latest|
     expect(denied.result.isError).toBe(true)
     expect(mocks.executeCommand).toHaveBeenCalledTimes(1)
     mocks.settings.allowWriteEnabled = true
+    mocks.settings.permissionMode = 'execute'
     expect((await call('DELETE FROM users')).result.isError).toBe(true)
     expect(mocks.executeCommand).toHaveBeenCalledTimes(1)
 
@@ -270,6 +366,42 @@ APPLICATION|worker|example/worker:latest|
     mocks.getConnection.mockReturnValue({ status: 'disconnected' })
     expect((await call('SELECT 1')).result.isError).toBe(true)
     expect(mocks.executeCommand).toHaveBeenCalledTimes(3)
+  })
+
+  it('accepts structured Redis queries through the MCP schema', async () => {
+    const port = await getAvailablePort()
+    mocks.settings.port = port
+    mocks.getConnection.mockReturnValue({ id: 'db-session', status: 'connected' })
+    mocks.executeCommand.mockResolvedValue('["value"]\n')
+    await mcpServerManager.applySettings({ ...mocks.settings })
+    const response = await postMcp(port, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'query_database',
+        arguments: {
+          connectionId: 'db-session',
+          engine: 'redis',
+          database: '0',
+          query: JSON.stringify({ command: 'MGET', args: ['a', 'b'] })
+        }
+      }
+    })
+    const payload = await readMcpPayload(response)
+    expect(payload.result.isError).toBeUndefined()
+    expect(JSON.parse(payload.result.content[0].text)).toMatchObject({
+      engine: 'redis',
+      database: '0',
+      format: 'json'
+    })
+    expect(mocks.executeCommand).toHaveBeenCalledWith(
+      'db-session',
+      expect.stringContaining("'redis-cli' '--json'"),
+      25_000,
+      256 * 1024,
+      '"MGET" "a" "b"\n'
+    )
   })
 
   it('requires a bearer token and only lists currently connected SSH sessions', async () => {
@@ -444,6 +576,7 @@ APPLICATION|worker|example/worker:latest|
     expect(mocks.writeFile).not.toHaveBeenCalled()
 
     mocks.settings.allowWriteEnabled = true
+    mocks.settings.permissionMode = 'execute'
     mocks.hasSFTP.mockReturnValue(true)
     mocks.writeFile.mockResolvedValue(undefined)
     const writeResponse = await postMcp(port, {
@@ -469,6 +602,7 @@ APPLICATION|worker|example/worker:latest|
     expect(mocks.writeFile).toHaveBeenCalledWith('connected-session', '/tmp/mshell.txt', 'hello\n')
 
     mocks.settings.allowWriteEnabled = false
+    mocks.settings.permissionMode = 'query'
     const deniedCommandResponse = await postMcp(port, {
       jsonrpc: '2.0',
       id: 9,
@@ -487,6 +621,7 @@ APPLICATION|worker|example/worker:latest|
     expect(mocks.executeCommand).toHaveBeenCalledTimes(2)
 
     mocks.settings.allowWriteEnabled = true
+    mocks.settings.permissionMode = 'execute'
     mocks.executeCommand.mockResolvedValueOnce('updated\n')
     const commandResponse = await postMcp(port, {
       jsonrpc: '2.0',
@@ -522,7 +657,7 @@ APPLICATION|worker|example/worker:latest|
       expect.objectContaining({
         commandSha256: expect.any(String),
         commandLength: 'touch /tmp/mshell-command'.length,
-        writeEnabled: true
+        permissionMode: 'execute'
       })
     )
     expect(commandAudit?.[1].details).not.toHaveProperty('command')

@@ -1,11 +1,12 @@
 export type AppColorTheme = 'light' | 'dark' | 'auto'
-export type AppAppearance = 'modern' | 'terminal' | 'minimal'
+export type AppAppearance = 'modern' | 'terminal' | 'minimal' | 'aurora'
 
 const COLOR_THEME_CLASSES = ['dark', 'light-theme']
 const APPEARANCE_CLASSES = [
   'app-appearance-modern',
   'app-appearance-terminal',
-  'app-appearance-minimal'
+  'app-appearance-minimal',
+  'app-appearance-aurora'
 ]
 
 export function resolveColorTheme(theme: AppColorTheme): 'light' | 'dark' {
@@ -32,6 +33,7 @@ export function applyColorTheme(theme: AppColorTheme): 'light' | 'dark' {
 }
 
 export function normalizeAppearance(appearance?: string): AppAppearance {
+  if (appearance === 'aurora') return 'aurora'
   if (appearance === 'minimal') return 'minimal'
   return appearance === 'terminal' ? 'terminal' : 'modern'
 }

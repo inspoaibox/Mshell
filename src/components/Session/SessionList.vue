@@ -359,7 +359,9 @@ const searchQuery = ref('')
 const activeGroups = ref<string[]>(['ungrouped'])
 const MODERN_SESSION_ITEM_HEIGHT = 58
 const TERMINAL_SESSION_ITEM_HEIGHT = 44
+const AURORA_SESSION_ITEM_HEIGHT = 76
 const isTerminalAppearance = ref(false)
+const isAuroraAppearance = ref(false)
 const showGroupDialog = ref(false)
 const showRenameDialog = ref(false)
 const showMoveDialog = ref(false)
@@ -409,7 +411,11 @@ const getGroupSessions = (groupId: string) => {
 }
 
 const sessionItemHeight = computed(() =>
-  isTerminalAppearance.value ? TERMINAL_SESSION_ITEM_HEIGHT : MODERN_SESSION_ITEM_HEIGHT
+  isAuroraAppearance.value
+    ? AURORA_SESSION_ITEM_HEIGHT
+    : isTerminalAppearance.value
+      ? TERMINAL_SESSION_ITEM_HEIGHT
+      : MODERN_SESSION_ITEM_HEIGHT
 )
 
 const getSessionItemsStyle = (count: number) => ({
@@ -421,6 +427,7 @@ const updateAppearanceMode = () => {
   isTerminalAppearance.value =
     root.classList.contains('app-appearance-terminal') ||
     root.classList.contains('app-appearance-minimal')
+  isAuroraAppearance.value = root.classList.contains('app-appearance-aurora')
 }
 
 let appearanceObserver: MutationObserver | null = null

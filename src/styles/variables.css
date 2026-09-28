@@ -446,3 +446,124 @@
   --border-medium: #9e8d70;
   --border-strong: #7f6e53;
 }
+
+/* 极光外观：深色玻璃面板、靛青/薄荷渐变和柔和的环境光，偏现代 SaaS 工作台 */
+:root.app-appearance-aurora {
+  --primary-color: #8b8cff;
+  --primary-color-rgb: 139, 140, 255;
+  --primary-hover: #a7a8ff;
+  --primary-light: #c5c6ff;
+  --accent-color: #42e8c1;
+  --accent-hover: #6cf3d2;
+  --aurora-pink: #ff72c8;
+  --aurora-blue: #57c7ff;
+  --aurora-surface: #101326;
+  --aurora-surface-strong: #171c37;
+  --aurora-terminal: #080b16;
+  --aurora-line: rgba(139, 140, 255, 0.18);
+
+  --bg-main: #080a14;
+  --bg-primary: var(--bg-main);
+  --bg-secondary: #0e1120;
+  --bg-tertiary: #14192a;
+  --bg-elevated: #1b2140;
+  --bg-hover: #22294a;
+
+  --glass-bg: rgba(14, 17, 32, 0.84);
+  --glass-bg-light: rgba(27, 33, 64, 0.62);
+  --glass-border: rgba(165, 170, 255, 0.14);
+  --glass-border-hover: rgba(165, 170, 255, 0.28);
+  --glass-blur: 22px;
+
+  --text-primary: #f5f6ff;
+  --text-secondary: #adb5d8;
+  --text-tertiary: #737d9f;
+  --text-disabled: #4b5578;
+  --text-inverse: #0c1022;
+
+  --border-color: #222a45;
+  --border-light: rgba(165, 170, 255, 0.09);
+  --border-medium: rgba(165, 170, 255, 0.18);
+  --border-strong: rgba(165, 170, 255, 0.3);
+
+  --shadow-sm: 0 2px 8px rgba(3, 5, 15, 0.24);
+  --shadow-md: 0 10px 26px rgba(3, 5, 15, 0.3);
+  --shadow-lg: 0 18px 46px rgba(3, 5, 15, 0.42);
+  --shadow-xl: 0 28px 72px rgba(3, 5, 15, 0.54);
+  --shadow-glow: 0 0 28px rgba(139, 140, 255, 0.24);
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  --el-bg-color: var(--bg-main);
+  --el-bg-color-overlay: var(--bg-elevated);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-secondary);
+  --el-border-color: var(--border-color);
+  --el-border-color-light: var(--border-light);
+  --el-border-color-lighter: var(--border-light);
+  --el-fill-color-blank: var(--bg-secondary);
+  --el-fill-color: var(--bg-tertiary);
+  --el-border-radius-base: var(--radius-md);
+  --el-border-radius-small: var(--radius-sm);
+}
+
+:root.light-theme.app-appearance-aurora {
+  --primary-color: #6258e8;
+  --primary-color-rgb: 98, 88, 232;
+  --primary-hover: #5046d5;
+  --primary-light: #8b84ff;
+  --accent-color: #0b9e80;
+  --accent-hover: #07846b;
+  --aurora-pink: #d64c9f;
+  --aurora-blue: #1687c4;
+  --aurora-surface: #f8f9ff;
+  --aurora-surface-strong: #eef0ff;
+  --aurora-terminal: #101328;
+  --aurora-line: rgba(98, 88, 232, 0.16);
+
+  --bg-main: #f3f5ff;
+  --bg-primary: var(--bg-main);
+  --bg-secondary: #fbfbff;
+  --bg-tertiary: #eef0fa;
+  --bg-elevated: #ffffff;
+  --bg-hover: #e4e7f7;
+
+  --glass-bg: rgba(251, 251, 255, 0.86);
+  --glass-bg-light: rgba(238, 240, 255, 0.72);
+  --glass-border: rgba(62, 69, 143, 0.12);
+  --glass-border-hover: rgba(62, 69, 143, 0.24);
+  --glass-blur: 18px;
+
+  --text-primary: #171a36;
+  --text-secondary: #545b7d;
+  --text-tertiary: #78809e;
+  --text-disabled: #b4b9cd;
+  --text-inverse: #ffffff;
+
+  --border-color: #dfe3f3;
+  --border-light: rgba(62, 69, 143, 0.08);
+  --border-medium: rgba(62, 69, 143, 0.15);
+  --border-strong: rgba(62, 69, 143, 0.24);
+
+  --shadow-sm: 0 2px 8px rgba(54, 63, 125, 0.08);
+  --shadow-md: 0 10px 24px rgba(54, 63, 125, 0.12);
+  --shadow-lg: 0 18px 42px rgba(54, 63, 125, 0.16);
+  --shadow-xl: 0 26px 62px rgba(54, 63, 125, 0.2);
+  --shadow-glow: 0 0 28px rgba(98, 88, 232, 0.18);
+
+  --el-bg-color: var(--bg-main);
+  --el-bg-color-overlay: var(--bg-elevated);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-secondary);
+  --el-border-color: var(--border-color);
+  --el-border-color-light: var(--border-light);
+  --el-border-color-lighter: var(--border-light);
+  --el-fill-color-blank: var(--bg-secondary);
+  --el-fill-color: var(--bg-tertiary);
+  --el-border-radius-base: var(--radius-md);
+  --el-border-radius-small: var(--radius-sm);
+}

@@ -1,5 +1,5 @@
 <template>
-  <div class="sidebar">
+  <div class="sidebar" :class="{ 'is-collapsed': isCollapsed }">
     <!-- Logo区域 -->
     <div class="sidebar-header">
       <div class="logo-wrapper">
@@ -12,6 +12,18 @@
         <span class="brand-name">MShell</span>
         <span class="brand-subtitle">SSH Console</span>
       </div>
+      <button
+        class="sidebar-collapse-toggle"
+        type="button"
+        :aria-label="isCollapsed ? '展开菜单' : '隐藏菜单名称'"
+        :title="isCollapsed ? '展开菜单' : '隐藏菜单名称'"
+        @click="isCollapsed = !isCollapsed"
+      >
+        <el-icon :size="15">
+          <ArrowRight v-if="isCollapsed" />
+          <ArrowLeft v-else />
+        </el-icon>
+      </button>
     </div>
     
     <!-- 主导航 -->
@@ -99,12 +111,15 @@ import {
   Files,
   Timer,
   MagicStick,
-  InfoFilled
+  InfoFilled,
+  ArrowLeft,
+  ArrowRight
 } from '@element-plus/icons-vue'
 import logoImg from '@/assets/logo.png'
 
 const activeMenu = ref('sessions')
 const appVersion = ref('v0.2.9')
+const isCollapsed = ref(false)
 
 onMounted(async () => {
   if (window.electronAPI.app && window.electronAPI.app.getVersion) {
@@ -354,6 +369,10 @@ const handleAboutClick = () => {
   justify-content: center;
   border-top: 1px solid var(--border-light);
   flex-shrink: 0;
+}
+
+.sidebar-collapse-toggle {
+  display: none;
 }
 
 .about-button {

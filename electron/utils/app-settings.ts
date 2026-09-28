@@ -21,8 +21,12 @@ export interface TerminalShortcutConfig {
   description: string
 }
 
+export type AgentMcpPermissionMode = 'query' | 'confirm' | 'execute'
+
 export interface AgentMcpSettings {
   enabled: boolean
+  permissionMode: AgentMcpPermissionMode
+  /** @deprecated Compatibility mirror for older settings and clients. */
   allowWriteEnabled: boolean
   host: '127.0.0.1'
   port: number
@@ -33,7 +37,7 @@ export interface AppSettings {
   general: {
     language: 'zh-CN' | 'en-US'
     theme: 'light' | 'dark' | 'auto'
-    appearance: 'modern' | 'terminal' | 'minimal'
+    appearance: 'modern' | 'terminal' | 'minimal' | 'aurora'
     startWithSystem: boolean
     minimizeToTray: boolean
     closeToTray: boolean
@@ -156,6 +160,7 @@ class AppSettingsManager {
       },
       agentMcp: {
         enabled: false,
+        permissionMode: 'query',
         allowWriteEnabled: false,
         host: '127.0.0.1',
         port: 47821,
@@ -186,17 +191,28 @@ class AppSettingsManager {
     return this.getSystemDownloadsPath()
   }
 
-  private normalizeAgentMcpSettings(
-    value?: Partial<AgentMcpSettings> | null
-  ): AgentMcpSettings {
+  private normalizeAgentMcpSettings(value?: Partial<AgentMcpSettings> | null): AgentMcpSettings {
     const port =
-      typeof value?.port === 'number' && Number.isInteger(value.port) && value.port >= 1024 && value.port <= 65535
+      typeof value?.port === 'number' &&
+      Number.isInteger(value.port) &&
+      value.port >= 1024 &&
+      value.port <= 65535
         ? value.port
         : 47821
 
+    const permissionMode: AgentMcpPermissionMode =
+      value?.permissionMode === 'query' ||
+      value?.permissionMode === 'confirm' ||
+      value?.permissionMode === 'execute'
+        ? value.permissionMode
+        : value?.allowWriteEnabled === true
+          ? 'execute'
+          : 'query'
+
     return {
       enabled: value?.enabled === true,
-      allowWriteEnabled: value?.allowWriteEnabled === true,
+      permissionMode,
+      allowWriteEnabled: permissionMode === 'execute',
       host: '127.0.0.1',
       port,
       token:
@@ -227,10 +243,7 @@ class AppSettingsManager {
           ssh: { ...this.settings.ssh, ...loaded.ssh },
           security: { ...this.settings.security, ...loaded.security },
           updates: { ...this.settings.updates, ...loaded.updates },
-          agentMcp: this.normalizeAgentMcpSettings({
-            ...this.settings.agentMcp,
-            ...(loaded.agentMcp || {})
-          }),
+          agentMcp: this.normalizeAgentMcpSettings(loaded.agentMcp),
           shortcuts: loaded.shortcuts ?? this.settings.shortcuts,
           terminalShortcuts: loaded.terminalShortcuts ?? this.settings.terminalShortcuts
         }

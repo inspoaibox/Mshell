@@ -12,6 +12,12 @@ describe('MCP database queries', () => {
   it('discovers multiple database and application targets without exposing environment dumps', () => {
     const discovery = parseMcpDatabaseDiscovery(`
 HOST_CLIENT|postgresql
+HOST_CLIENT|mysql
+HOST_CLIENT|sqlite
+HOST_TARGET|postgresql|127.0.0.1|5432|report_reader|postgres|verified:yes|postgres
+HOST_TARGET|postgresql|127.0.0.1|5432|report_reader|reports|verified:no|postgres
+HOST_TARGET|mysql|||app_reader|customers|verified:no
+HOST_TARGET|sqlite||||/srv/app/data.sqlite|verified:no
 TARGET|postgresql|postgres|postgres:15|5432/tcp|root|postgres|verified:yes
 TARGET|postgresql|postgres|postgres:15|5432/tcp|root|orders|verified:no
 TARGET|postgresql|postgres|postgres:15|5432/tcp|root|analytics|verified:no
@@ -22,6 +28,26 @@ APPLICATION|worker|example/worker:latest|
     expect(discovery.hostClients).toContain('postgresql')
     expect(discovery.targets).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          targetId: 'host:postgresql:127.0.0.1:5432:report_reader:reports',
+          host: '127.0.0.1',
+          port: 5432,
+          database: 'reports',
+          username: 'report_reader',
+          systemUser: 'postgres',
+          queryReady: true
+        }),
+        expect.objectContaining({
+          targetId: 'host:mysql:default:default:app_reader:customers',
+          database: 'customers',
+          username: 'app_reader',
+          queryReady: true
+        }),
+        expect.objectContaining({
+          targetId: 'host:sqlite:default:default:default:/srv/app/data.sqlite',
+          database: '/srv/app/data.sqlite',
+          queryReady: true
+        }),
         expect.objectContaining({
           targetId: 'container:postgres:postgresql:orders',
           database: 'orders',
@@ -45,9 +71,73 @@ APPLICATION|worker|example/worker:latest|
     ])
     expect(discovery.guidance).toContain('用户确认')
     const command = buildMcpDatabaseDiscoveryCommand()
+    expect(command).toContain('HOST_TARGET')
+    expect(command).toContain('pg_catalog.pg_database')
+    expect(command).toContain('INFORMATION_SCHEMA.SCHEMATA')
+    expect(command).toContain("'PRAGMA schema_version;'")
     expect(command).toContain("docker ps --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Ports}}'")
     expect(command).not.toContain('docker inspect')
     expect(command).not.toContain('printenv')
+    expect(command).not.toContain('PGPASSWORD')
+  })
+
+  it('retains an explicit unconfigured target when host authentication is unavailable', () => {
+    const discovery = parseMcpDatabaseDiscovery('HOST_CLIENT|mariadb')
+    expect(discovery.targets).toEqual([
+      expect.objectContaining({
+        targetId: 'host:mariadb:unspecified',
+        authStatus: 'requires-configuration',
+        queryReady: false
+      })
+    ])
+  })
+
+  it('selects one non-system host database discovered through peer authentication', () => {
+    const discovery = parseMcpDatabaseDiscovery(`
+HOST_CLIENT|postgresql
+HOST_TARGET|postgresql|||postgres|app|verified:no|postgres
+HOST_TARGET|postgresql|||postgres|postgres|verified:yes|postgres
+`)
+    expect(discovery.requiresSelection).toBe(false)
+    expect(discovery.targets).toHaveLength(2)
+    expect(discovery.targets[0]).toEqual(
+      expect.objectContaining({
+        database: 'app',
+        username: 'postgres',
+        systemUser: 'postgres',
+        queryReady: true,
+        systemDatabase: false
+      })
+    )
+  })
+
+  it('parses host and container targets for every extended database engine', () => {
+    const discovery = parseMcpDatabaseDiscovery(`
+HOST_CLIENT|mongodb
+HOST_CLIENT|redis
+HOST_CLIENT|sqlserver
+HOST_CLIENT|oracle
+HOST_TARGET|mongodb|||reader|app|verified:no|
+HOST_TARGET|redis||||0|verified:no|
+HOST_TARGET|sqlserver|||reader|orders|verified:no|
+HOST_TARGET|oracle|||REPORTER|ORCL|verified:no|
+TARGET|mongodb|mongo-1|mongo:8|27017/tcp|reader|app|verified:no
+TARGET|redis|redis-1|redis:8|6379/tcp||0|verified:no
+TARGET|sqlserver|mssql-1|mssql/server:2025|1433/tcp|sa|orders|verified:no
+TARGET|oracle|oracle-1|oracle/database:23|1521/tcp|SYS|ORCL|verified:no
+`)
+    expect(discovery.targets).toHaveLength(8)
+    expect(discovery.targets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ engine: 'mongodb', database: 'app', queryReady: true }),
+        expect.objectContaining({ engine: 'redis', database: '0', queryReady: true }),
+        expect.objectContaining({ engine: 'sqlserver', database: 'orders', queryReady: true }),
+        expect.objectContaining({ engine: 'oracle', database: 'ORCL', queryReady: true })
+      ])
+    )
+    expect(discovery.targets).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ authStatus: 'requires-configuration' })])
+    )
   })
   it.each<McpDatabaseEngine>(['mysql', 'mariadb', 'postgresql', 'sqlite'])(
     'allows joins, aggregates, subqueries and pagination for %s',
@@ -179,6 +269,19 @@ APPLICATION|worker|example/worker:latest|
     }
   })
 
+  it('can use a discovered host system account while retaining query protections', () => {
+    const plan = buildMcpDatabaseQuery({
+      engine: 'postgresql',
+      database: 'app',
+      username: 'postgres',
+      systemUser: 'postgres',
+      query: 'SELECT COUNT(*) FROM logs'
+    })
+    expect(plan.command).toContain("'runuser' '-u' 'postgres' '--' 'timeout'")
+    expect(plan.stdin).toContain('BEGIN READ ONLY;')
+    expect(plan.stdin).toContain('ROLLBACK;')
+  })
+
   it('uses SQLite safe and read-only mode without startup scripts', () => {
     const plan = buildMcpDatabaseQuery({
       engine: 'sqlite',
@@ -194,13 +297,16 @@ APPLICATION|worker|example/worker:latest|
     expect(plan.stdin).toContain('PRAGMA query_only=ON;')
   })
 
-  it.each([
+  it.each<Partial<Parameters<typeof buildMcpDatabaseQuery>[0]>>([
     { database: 'postgresql://user:password@host/db' },
     { database: 'app;touch /tmp/payload' },
     { host: 'host;touch /tmp/payload' },
     { username: 'user\ncommand' },
     { container: '--privileged' },
     { container: 'app;id' },
+    { systemUser: 'postgres;id' },
+    { systemUser: 'postgres', container: 'database' },
+    { systemUser: 'mysql', engine: 'mysql' },
     { maxRows: 0 },
     { maxRows: 2001 },
     { timeoutMs: 500_000 },
@@ -256,6 +362,10 @@ APPLICATION|worker|example/worker:latest|
       'CLIENT_MISSING'
     ],
     ['/bin/sh: timeout: not found', 'sqlite', false, 'TIMEOUT_MISSING'],
+    ['/bin/sh: mongosh: not found', 'mongodb', false, 'CLIENT_MISSING'],
+    ['NOAUTH Authentication required', 'redis', false, 'AUTHENTICATION_FAILED'],
+    ["Login failed for user 'reader'", 'sqlserver', false, 'AUTHENTICATION_FAILED'],
+    ['ORA-01017: invalid username/password', 'oracle', false, 'AUTHENTICATION_FAILED'],
     [
       'Error response from daemon: No such container: database',
       'mysql',
@@ -294,5 +404,15 @@ APPLICATION|worker|example/worker:latest|
     expect(failure.errorCode).toBe('USER_NOT_FOUND')
     expect(failure.guidance).toContain('不要默认填写 postgres')
     expect(JSON.stringify(failure)).not.toContain('password=secret')
+  })
+
+  it('classifies an unavailable discovered system account without exposing the raw error', () => {
+    const failure = classifyMcpDatabaseError(
+      new Error('runuser: user postgres does not exist secret-detail'),
+      { engine: 'postgresql', systemUser: 'postgres' }
+    )
+    expect(failure.errorCode).toBe('PERMISSION_DENIED')
+    expect(failure.message).toContain('系统账号')
+    expect(JSON.stringify(failure)).not.toContain('secret-detail')
   })
 })

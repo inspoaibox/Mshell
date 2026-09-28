@@ -158,9 +158,7 @@ export interface ElectronAPI {
     ) => Promise<ApiResult<string>>
   }
   portForward: {
-    getAll: (
-      sessionId: string
-    ) => Promise<{ success: boolean; forwards?: any[]; error?: string }>
+    getAll: (sessionId: string) => Promise<{ success: boolean; forwards?: any[]; error?: string }>
     add: (
       sessionId: string,
       connectionId: string,
@@ -238,9 +236,7 @@ export interface ElectronAPI {
     getFavorites: () => Promise<ApiResult<any[]>>
     toggleFavorite: (id: string) => Promise<ApiResult>
     getMostUsed: (limit?: number) => Promise<ApiResult<any[]>>
-    getRecentUnique: (
-      limit: number
-    ) => Promise<ApiResult<string[]>>
+    getRecentUnique: (limit: number) => Promise<ApiResult<string[]>>
     getToday: () => Promise<ApiResult<any[]>>
     getByTimeRange: (startDate: string, endDate: string) => Promise<ApiResult<any[]>>
     export: (filePath: string) => Promise<ApiResult>
@@ -274,11 +270,7 @@ export interface ElectronAPI {
     resize: (id: string, cols: number, rows: number) => Promise<void>
     getConnection: (id: string) => Promise<any>
     getAllConnections: () => Promise<any[]>
-    setReconnectConfig: (
-      id: string,
-      maxAttempts: number,
-      interval: number
-    ) => Promise<ApiResult>
+    setReconnectConfig: (id: string, maxAttempts: number, interval: number) => Promise<ApiResult>
     testProxy: (proxyConfig: any) => Promise<ApiResult<any>>
     testProxyJump: (proxyJumpConfig: any, underlyingProxy?: any) => Promise<ApiResult<any>>
     // 事件监听器返回取消订阅函数
@@ -363,9 +355,7 @@ export interface ElectronAPI {
     getAllTransferRecords: () => Promise<{ success: boolean; data?: any[]; error?: string }>
     deleteTransferRecord: (taskId: string) => Promise<{ success: boolean; error?: string }>
     cleanupCompletedRecords: () => Promise<{ success: boolean; error?: string }>
-    onStarted: (
-      callback: (taskId: string, record: any) => void
-    ) => () => void
+    onStarted: (callback: (taskId: string, record: any) => void) => () => void
     uploadFiles: (
       connectionId: string,
       files: UploadTransferRequest[]
@@ -446,7 +436,10 @@ export interface ElectronAPI {
       sourcePaths: string[],
       archivePath: string
     ) => Promise<{ success: boolean; error?: string }>
-    extract: (archivePath: string, targetDir: string) => Promise<{ success: boolean; error?: string }>
+    extract: (
+      archivePath: string,
+      targetDir: string
+    ) => Promise<{ success: boolean; error?: string }>
   }
   settings: {
     get: () => Promise<any>
@@ -459,6 +452,7 @@ export interface ElectronAPI {
       success: boolean
       data?: {
         enabled: boolean
+        permissionMode: 'query' | 'confirm' | 'execute'
         allowWriteEnabled: boolean
         running: boolean
         host: '127.0.0.1'
@@ -472,6 +466,7 @@ export interface ElectronAPI {
       success: boolean
       data?: {
         enabled: boolean
+        permissionMode: 'query' | 'confirm' | 'execute'
         allowWriteEnabled: boolean
         running: boolean
         host: '127.0.0.1'
@@ -484,6 +479,21 @@ export interface ElectronAPI {
     start: () => Promise<{ success: boolean; error?: string }>
     stop: () => Promise<{ success: boolean; error?: string }>
     setWriteEnabled: (enabled: boolean) => Promise<{ success: boolean; error?: string }>
+    setPermissionMode: (
+      mode: 'query' | 'confirm' | 'execute'
+    ) => Promise<{ success: boolean; error?: string }>
+    resolveApproval: (
+      approvalId: string,
+      approved: boolean
+    ) => Promise<{ success: boolean; error?: string }>
+    onApprovalRequest: (callback: (request: {
+      approvalId: string
+      tool: 'write_remote_file' | 'execute_command'
+      connectionId: string
+      summary: string
+      requestedAt: string
+      expiresAt: string
+    }) => void) => () => void
     regenerateToken: () => Promise<{ success: boolean; error?: string }>
   }
   terminalBackground: {
@@ -514,6 +524,7 @@ export interface ElectronAPI {
     update: (id: string, data: any) => Promise<{ success: boolean; error?: string }>
     delete: (id: string) => Promise<{ success: boolean; error?: string }>
     incrementUsage: (id: string) => Promise<{ success: boolean; error?: string }>
+    setPinned: (id: string, pinned: boolean) => Promise<{ success: boolean; error?: string }>
     search: (query: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
     searchByShortcut: (
       prefix: string
@@ -545,7 +556,10 @@ export interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>
     getDownloadsPath: () => Promise<string>
-    setToolDockOpen?: (open: boolean, width?: number) => Promise<{ success: boolean; error?: string }>
+    setToolDockOpen?: (
+      open: boolean,
+      width?: number
+    ) => Promise<{ success: boolean; error?: string }>
   }
   logs: {
     get: (filter?: any) => Promise<any[]>
@@ -604,7 +618,11 @@ export interface ElectronAPI {
     }>
     importBatch: (
       files: string[]
-    ) => Promise<{ success: boolean; data?: Array<{ success: boolean; name: string; error?: string }>; error?: string }>
+    ) => Promise<{
+      success: boolean
+      data?: Array<{ success: boolean; name: string; error?: string }>
+      error?: string
+    }>
     selectExportPath: (
       defaultName: string
     ) => Promise<{ success: boolean; data?: string; canceled?: boolean; error?: string }>
@@ -810,7 +828,10 @@ export interface ElectronAPI {
     search: (query: string) => Promise<ApiResult<any[]>>
     getAllCategories: () => Promise<ApiResult<string[]>>
     extractVariables: (content: string) => Promise<ApiResult<string[]>>
-    render: (content: string, values: Record<string, string | string[]>) => Promise<ApiResult<string>>
+    render: (
+      content: string,
+      values: Record<string, string | string[]>
+    ) => Promise<ApiResult<string>>
     export: (filePath: string) => Promise<ApiResult<any>>
     import: (filePath: string) => Promise<ApiResult<any>>
   }
