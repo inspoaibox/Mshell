@@ -621,8 +621,32 @@ export class SyncManager {
         return null
       }
 
+      let content: string
+      if (file.truncated) {
+        if (typeof file.raw_url !== 'string' || !file.raw_url) {
+          throw new Error('GitHub Gist 同步文件内容被截断，且未提供完整文件地址')
+        }
+
+        // GitHub only embeds part of a large Gist file in the API response.
+        // raw_url is supplied for retrieving the complete file.
+        const rawResponse = await axios.get(file.raw_url, {
+          headers: {
+            Accept: 'text/plain'
+          },
+          responseType: 'text'
+        })
+        if (typeof rawResponse.data !== 'string') {
+          throw new Error('GitHub Gist 完整文件响应格式不正确')
+        }
+        content = rawResponse.data
+      } else if (typeof file.content === 'string') {
+        content = file.content
+      } else {
+        throw new Error('GitHub Gist 同步文件内容缺失')
+      }
+
       return {
-        content: file.content,
+        content,
         updatedAt: response.data.updated_at
       }
     } catch (error: any) {
