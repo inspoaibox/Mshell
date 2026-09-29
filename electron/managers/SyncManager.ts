@@ -59,6 +59,9 @@ interface SyncData {
   data: string // 加密后的 JSON 字符串或明文
 }
 
+const GITHUB_GIST_RAW_TIMEOUT_MS = 5 * 60 * 1000
+const GITHUB_GIST_RAW_MAX_BYTES = 32 * 1024 * 1024
+
 /**
  * 同步结果
  */
@@ -631,9 +634,15 @@ export class SyncManager {
         // raw_url is supplied for retrieving the complete file.
         const rawResponse = await axios.get(file.raw_url, {
           headers: {
-            Accept: 'text/plain'
+            Accept: 'text/plain',
+            // Large Gists can take a long time to transfer. Avoid the gzip
+            // decompression stream that can be aborted by proxies or CDNs.
+            'Accept-Encoding': 'identity'
           },
-          responseType: 'text'
+          responseType: 'text',
+          timeout: GITHUB_GIST_RAW_TIMEOUT_MS,
+          maxContentLength: GITHUB_GIST_RAW_MAX_BYTES,
+          maxBodyLength: GITHUB_GIST_RAW_MAX_BYTES
         })
         if (typeof rawResponse.data !== 'string') {
           throw new Error('GitHub Gist 完整文件响应格式不正确')
@@ -655,6 +664,21 @@ export class SyncManager {
       }
       throw error
     }
+  }
+
+  private isInterruptedRemoteDownload(error: any): boolean {
+    const message = String(error?.message || '').toLowerCase()
+    const code = String(error?.code || '').toUpperCase()
+
+    return (
+      message === 'aborted' ||
+      message.includes('socket hang up') ||
+      message.includes('premature close') ||
+      code === 'ECONNRESET' ||
+      code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+      code === 'ECONNABORTED' ||
+      code === 'ETIMEDOUT'
+    )
   }
 
   // ==================== GitLab Snippet 同步 ====================
@@ -1226,6 +1250,13 @@ export class SyncManager {
         return { success: false, message: '解密失败，密码可能不正确' }
       }
 
+      if (this.isInterruptedRemoteDownload(error)) {
+        return {
+          success: false,
+          message: 'GitHub 大文件下载连接中断，请检查网络后重试'
+        }
+      }
+
       return {
         success: false,
         message: error.message || '下载失败'
@@ -1320,6 +1351,12 @@ export class SyncManager {
       return { success: true, action: 'no-change', message: '数据已是最新，无需同步' }
     } catch (error: any) {
       logger.logError('system', 'Sync failed', error)
+      if (this.isInterruptedRemoteDownload(error)) {
+        return {
+          success: false,
+          message: 'GitHub 大文件下载连接中断，请检查网络后重试'
+        }
+      }
       return {
         success: false,
         message: error.message || '同步失败'

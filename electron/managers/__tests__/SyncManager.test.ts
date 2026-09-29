@@ -97,9 +97,13 @@ describe('SyncManager GitHub Gist downloads', () => {
     })
     expect(mocks.axiosGet).toHaveBeenNthCalledWith(2, rawUrl, {
       headers: {
-        Accept: 'text/plain'
+        Accept: 'text/plain',
+        'Accept-Encoding': 'identity'
       },
-      responseType: 'text'
+      responseType: 'text',
+      timeout: 5 * 60 * 1000,
+      maxContentLength: 32 * 1024 * 1024,
+      maxBodyLength: 32 * 1024 * 1024
     })
   })
 
@@ -119,5 +123,13 @@ describe('SyncManager GitHub Gist downloads', () => {
     await expect(getGist(new SyncManager())).rejects.toThrow(
       'GitHub Gist 同步文件内容被截断，且未提供完整文件地址'
     )
+  })
+
+  it('recognizes interrupted raw downloads', () => {
+    const manager = new SyncManager() as any
+
+    expect(manager.isInterruptedRemoteDownload(new Error('aborted'))).toBe(true)
+    expect(manager.isInterruptedRemoteDownload({ code: 'ECONNRESET' })).toBe(true)
+    expect(manager.isInterruptedRemoteDownload(new Error('invalid JSON'))).toBe(false)
   })
 })
