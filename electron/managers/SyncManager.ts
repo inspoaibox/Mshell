@@ -61,6 +61,7 @@ interface SyncData {
 
 const GITHUB_GIST_RAW_TIMEOUT_MS = 5 * 60 * 1000
 const GITHUB_GIST_RAW_MAX_BYTES = 32 * 1024 * 1024
+const GITHUB_GIST_RAW_CHUNK_BYTES = 1024 * 1024
 
 /**
  * 同步结果
@@ -631,23 +632,9 @@ export class SyncManager {
         }
 
         // GitHub only embeds part of a large Gist file in the API response.
-        // raw_url is supplied for retrieving the complete file.
-        const rawResponse = await axios.get(file.raw_url, {
-          headers: {
-            Accept: 'text/plain',
-            // Large Gists can take a long time to transfer. Avoid the gzip
-            // decompression stream that can be aborted by proxies or CDNs.
-            'Accept-Encoding': 'identity'
-          },
-          responseType: 'text',
-          timeout: GITHUB_GIST_RAW_TIMEOUT_MS,
-          maxContentLength: GITHUB_GIST_RAW_MAX_BYTES,
-          maxBodyLength: GITHUB_GIST_RAW_MAX_BYTES
-        })
-        if (typeof rawResponse.data !== 'string') {
-          throw new Error('GitHub Gist 完整文件响应格式不正确')
-        }
-        content = rawResponse.data
+        // Read the raw file in bounded ranges so a slow connection does not
+        // have to keep one compressed stream open for the entire payload.
+        content = await this.downloadRawGistContent(file.raw_url)
       } else if (typeof file.content === 'string') {
         content = file.content
       } else {
@@ -664,6 +651,103 @@ export class SyncManager {
       }
       throw error
     }
+  }
+
+  private async downloadRawGistContent(rawUrl: string): Promise<string> {
+    const firstResponse = await this.requestRawGistRange(
+      rawUrl,
+      0,
+      GITHUB_GIST_RAW_CHUNK_BYTES - 1
+    )
+    const firstBuffer = this.toBuffer(firstResponse.data)
+    const firstRange = this.parseContentRange(firstResponse.headers?.['content-range'])
+
+    // Small files or endpoints that do not honor Range can still be consumed
+    // as one response.
+    if (firstResponse.status !== 206 || !firstRange) {
+      if (firstBuffer.length > GITHUB_GIST_RAW_MAX_BYTES) {
+        throw new Error('GitHub Gist 同步文件超过 32 MB，无法下载')
+      }
+      return firstBuffer.toString('utf8')
+    }
+
+    if (
+      firstRange.start !== 0 ||
+      firstRange.end < firstRange.start ||
+      firstRange.total <= firstRange.end ||
+      firstRange.total > GITHUB_GIST_RAW_MAX_BYTES ||
+      firstBuffer.length !== firstRange.end - firstRange.start + 1
+    ) {
+      throw new Error('GitHub Gist 分段响应范围不正确')
+    }
+
+    const chunks = [firstBuffer]
+    let nextStart = firstRange.end + 1
+    while (nextStart < firstRange.total) {
+      const nextEnd = Math.min(nextStart + GITHUB_GIST_RAW_CHUNK_BYTES - 1, firstRange.total - 1)
+      const response = await this.requestRawGistRange(rawUrl, nextStart, nextEnd)
+      const range = this.parseContentRange(response.headers?.['content-range'])
+      const chunk = this.toBuffer(response.data)
+
+      if (
+        response.status !== 206 ||
+        !range ||
+        range.start !== nextStart ||
+        range.end !== nextEnd ||
+        chunk.length !== nextEnd - nextStart + 1
+      ) {
+        throw new Error('GitHub Gist 分段响应范围不正确')
+      }
+
+      chunks.push(chunk)
+      nextStart = nextEnd + 1
+    }
+
+    return Buffer.concat(chunks).toString('utf8')
+  }
+
+  private async requestRawGistRange(rawUrl: string, start: number, end: number): Promise<any> {
+    return axios.get(rawUrl, {
+      headers: {
+        Accept: 'text/plain',
+        // Avoid the gzip decompression stream that can be aborted by proxies.
+        'Accept-Encoding': 'identity',
+        Range: `bytes=${start}-${end}`
+      },
+      responseType: 'arraybuffer',
+      timeout: GITHUB_GIST_RAW_TIMEOUT_MS,
+      maxContentLength: GITHUB_GIST_RAW_MAX_BYTES,
+      maxBodyLength: GITHUB_GIST_RAW_MAX_BYTES
+    })
+  }
+
+  private parseContentRange(value: unknown): { start: number; end: number; total: number } | undefined {
+    const match = String(value || '').match(/^bytes (\d+)-(\d+)\/(\d+)$/)
+    if (!match) {
+      return undefined
+    }
+
+    return {
+      start: Number(match[1]),
+      end: Number(match[2]),
+      total: Number(match[3])
+    }
+  }
+
+  private toBuffer(data: unknown): Buffer {
+    if (Buffer.isBuffer(data)) {
+      return data
+    }
+    if (typeof data === 'string') {
+      return Buffer.from(data, 'utf8')
+    }
+    if (data instanceof ArrayBuffer) {
+      return Buffer.from(data)
+    }
+    if (ArrayBuffer.isView(data)) {
+      return Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+    }
+    throw new Error('GitHub Gist 完整文件响应格式不正确')
   }
 
   private isInterruptedRemoteDownload(error: any): boolean {

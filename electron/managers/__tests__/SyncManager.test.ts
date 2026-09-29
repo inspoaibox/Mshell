@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { Buffer } from 'node:buffer'
 
 const mocks = vi.hoisted(() => ({
   axiosGet: vi.fn()
@@ -98,13 +99,44 @@ describe('SyncManager GitHub Gist downloads', () => {
     expect(mocks.axiosGet).toHaveBeenNthCalledWith(2, rawUrl, {
       headers: {
         Accept: 'text/plain',
-        'Accept-Encoding': 'identity'
+        'Accept-Encoding': 'identity',
+        Range: 'bytes=0-1048575'
       },
-      responseType: 'text',
+      responseType: 'arraybuffer',
       timeout: 5 * 60 * 1000,
       maxContentLength: 32 * 1024 * 1024,
       maxBodyLength: 32 * 1024 * 1024
     })
+  })
+
+  it('assembles a large Raw Gist response from byte ranges', async () => {
+    const rawUrl = 'https://gist.githubusercontent.com/user/gist/raw/hash/mshell-sync.json'
+    const firstChunk = Buffer.alloc(1024 * 1024, 97)
+    const lastChunk = Buffer.from('end')
+    mocks.axiosGet
+      .mockResolvedValueOnce({
+        status: 206,
+        headers: { 'content-range': 'bytes 0-1048575/1048579' },
+        data: firstChunk
+      })
+      .mockResolvedValueOnce({
+        status: 206,
+        headers: { 'content-range': 'bytes 1048576-1048578/1048579' },
+        data: lastChunk
+      })
+
+    const result = await (new SyncManager() as any).downloadRawGistContent(rawUrl)
+
+    expect(result).toHaveLength(1048579)
+    expect(result.endsWith('end')).toBe(true)
+    expect(mocks.axiosGet).toHaveBeenCalledTimes(2)
+    expect(mocks.axiosGet).toHaveBeenLastCalledWith(
+      rawUrl,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Range: 'bytes=1048576-1048578' }),
+        responseType: 'arraybuffer'
+      })
+    )
   })
 
   it('reports a clear error when truncated content has no raw URL', async () => {
