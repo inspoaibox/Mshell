@@ -170,6 +170,33 @@ export class WorkflowManager {
     this.saveWorkflows()
   }
 
+  /**
+   * 云同步原样写入工作流（保留 id、时间戳和本机执行统计）
+   */
+  syncUpsert(raw: any): void {
+    if (!raw?.id) return
+    const existing = this.workflows.get(raw.id)
+    const workflow: Workflow = existing
+      ? {
+          ...raw,
+          lastExecution: existing.lastExecution,
+          executionCount: existing.executionCount,
+          successCount: existing.successCount,
+          failureCount: existing.failureCount
+        }
+      : raw
+    this.workflows.set(workflow.id, workflow)
+    this.saveWorkflows()
+  }
+
+  /**
+   * 云同步删除工作流（不存在时忽略）
+   */
+  syncRemove(id: string): void {
+    if (!this.workflows.has(id)) return
+    this.delete(id)
+  }
+
   delete(id: string): void {
     this.workflows.delete(id)
     this.executions.delete(id)

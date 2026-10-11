@@ -115,9 +115,11 @@ PowerShell 环境变量只对当前窗口及其子进程有效。若 Codex 是�
 工具返回：
 
 - `command`：实际执行的查询命令。
+- `exitCode`：远程命令退出码；非 0 只表示命令本身失败（例如文件不存在），工具调用仍会返回结果。被信号终止时另有 `signal`。
 - `output`：命令标准输出，Agent 可以直接读取和分析。
-- `outputBytes`：完整输出的 UTF-8 字节数。
-- `truncated`：输出是否因超过上限而被截断。
+- `outputBytes`：完整标准输出的 UTF-8 字节数。
+- `truncated`：标准输出是否因超过上限而被截断。
+- `stderr`、`stderrBytes`、`stderrTruncated`：标准错误输出及其大小、截断标记，与标准输出分开返回。
 
 查询命令规则：
 
@@ -126,6 +128,8 @@ PowerShell 环境变量只对当前窗口及其子进程有效。若 Codex 是�
 - 返回给 Agent 的输出最多 `64 KiB`；底层捕获超过 `256 KiB` 时会终止查询并返回错误。
 - 支持 `ls`、`df`、`du`、`free`、`ps`、`ss`、`ip`、`systemctl status`、`journalctl`、`docker ps` 等白名单查询。
 - 不支持管道、重定向、`;`、`&&`、命令替换、脚本解释器、`sudo` 或不在白名单中的程序。
+- 每个参数按字面量传给远程 Shell，不做通配符、花括号、`~` 或变量展开；例如 `ls /var/log/*.log` 会查找名为 `*.log` 的文件。需要匹配多个文件时请使用 `find -name`。
+- 各程序只接受已确认只读的选项，未知选项一律拒绝。
 - `systemctl restart`、`docker stop`、`iptables -F`、`find -delete` 等修改操作会被拒绝。
 
 ## 数据库查询
@@ -200,7 +204,7 @@ Redis 只接受内置只读命令白名单，例如 `GET`、`MGET`、`HGETALL`�
 
 MySQL、MariaDB、PostgreSQL、SQLite 和 SQL Server 支持单条 `SELECT`、查询型 `WITH`、关联、聚合、子查询及常用只读函数。MySQL/MariaDB 还支持可解析的 `SHOW TABLES`、`SHOW COLUMNS`、`SHOW CREATE TABLE`、`DESCRIBE`。Oracle 支持经过保守词法校验和函数白名单检查的单条 `SELECT` 或 `WITH`。也可查询 `information_schema`、各数据库系统目录和 `sqlite_master` 了解表结构。
 
-查询入口始终拒绝多条 SQL、修改语句、写锁、`SELECT INTO`、文件输出、客户端转义命令及未确认为只读的函数。即使处于“执行”，`query_database` 仍是只读；需要修改时使用受权限模式控制的 `execute_command`。
+查询入口始终拒绝多条 SQL、修改语句、写锁、`SELECT INTO`、文件输出、客户端转义命令及未确认为只读的函数；SQL Server 另外拒绝 `EXEC`、`sp_*`/`xp_*` 存储过程、`WAITFOR`、`DBCC`、`BACKUP`、`SHUTDOWN` 等管理命令（字符串和带引号标识符中的同名文字不受影响）。即使处于“执行”，`query_database` 仍是只读；需要修改时使用受权限模式控制的 `execute_command`。
 
 返回 `output`、`format`、`maxRows`、`outputBytes` 和 `truncated`。MySQL、MariaDB 和 SQL Server 返回 TSV，PostgreSQL、SQLite 和 Oracle 返回 CSV，MongoDB 和 Redis 返回 JSON。关系型数据库在数据库侧限制行数；元数据查询的 `maxRows` 为 null，受字节上限控制。`truncated` 仅表示输出超过 64 KiB 被截断，不表示已读完所有记录。继续查询请使用稳定分页；关联查询建议明确列名并为重复列起别名。底层捕获超过 256 KiB 时中止查询。
 
@@ -242,11 +246,13 @@ Agent 权限为“确认”或“执行”。
 
 - `write_remote_file` 每次最多写入 `1 MiB` UTF-8 文本，目标已存在时会完整覆盖，不是局部补丁。
 - `execute_command` 最长 `8000` 个字符，默认超时 `20` 秒，最大 `120` 秒。
-- 修改命令返回给 Agent 的输出最多 `64 KiB`，底层捕获上限为 `2 MiB`。
+- 修改命令返回给 Agent 的标准输出和标准错误各最多 `64 KiB`，并附带 `exitCode`；底层捕获上限为 `2 MiB`。
 - 修改命令不经过查询白名单，可以执行删除、覆盖、安装、重启等高风险操作。
 - 超时或客户端断开不能保证远程进程已经回滚；执行前必须准备备份和恢复路径。
 - 权限模式会保存在本机，重启 MShell 后仍保持上次状态；任务完成后建议切回“查询”。
 - “确认”由 MShell 对每次写工具调用弹窗审批；“执行”不是第二个密码，任何持有 MCP Token 的客户端都可以直接调用写入工具。
+- 审批框显示目标会话名称和 `用户名@主机:端口`、完整命令或完整写入内容，以及自动拒绝时间；多个请求排队逐个确认。审批 2 分钟内未处理、MShell 锁屏、权限模式切换或 Agent 断开连接时，请求自动拒绝且审批框关闭。
+- Agent 断开连接时，正在执行的命令也会被取消；批准后如果会话已断开或权限已切到“查询”，操作不会执行。
 
 ## 服务端点
 
@@ -274,7 +280,9 @@ Agent 权限为“确认”或“执行”。
 - 默认“查询”只提供读取和白名单查询；写文件或执行修改命令需要“确认”或“执行”。
 - 不返回密码、私钥、代理凭据或 Electron IPC 接口。
 - 单次目录列表最多返回 `2000` 项；单个远程文件最多读取 `1 MiB`。
-- 每次 Agent 工具调用都会写入 MShell 的审计日志。
+- 每次 Agent 工具调用都会写入 MShell 的审计日志；命令输出只记录字节数和退出码，不记录内容。
+- Agent 接入的启用状态、端口、令牌和权限模式只能通过“设置 - Agent 接入”的专用接口修改；保存其它设置不会覆盖这些值。
+- 数据库发现和 MongoDB 容器查询从容器环境变量读取凭据并在 `mongosh` 内部认证，密码不会出现在进程参数中。
 - SSH 自动重连后，MShell 会按当前 SSH 客户端重建 SFTP 通道，避免使用旧连接遗留的通道。
 - MCP 服务当前运行在 MShell Windows 桌面端；Android 端不能作为 MCP HTTP 服务端。
 - MCP 端点只监听本机 `127.0.0.1`。不要通过端口转发、反向代理、内网穿透或防火墙把 `47821` 暴露给其他设备。

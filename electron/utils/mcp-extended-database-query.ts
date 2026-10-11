@@ -145,7 +145,15 @@ function buildMongoPlan(input: McpExtendedDatabaseQuery, maxRows: number, timeou
   const request = parseMongoRequest(input.query, maxRows)
   const encodedRequest = JSON.stringify(request)
   const encodedDatabase = JSON.stringify(input.database)
-  const script = `
+  // In container mode the root credentials come from the container environment and are used
+  // inside mongosh, so they never appear in a process argument list.
+  const containerAuth = input.container
+    ? `
+const authUser = process.env.MONGO_INITDB_ROOT_USERNAME;
+const authSecret = process.env.MONGO_INITDB_ROOT_PASSWORD;
+if (authUser && authSecret) db.getSiblingDB('admin').auth(authUser, authSecret);`
+    : ''
+  const script = `${containerAuth}
 const request = EJSON.deserialize(${encodedRequest});
 const targetDb = db.getSiblingDB(${encodedDatabase});
 let result;
@@ -161,7 +169,9 @@ if (request.operation === 'find') {
 } else if (request.operation === 'distinct') {
   result = { values: targetDb.getCollection(request.collection).distinct(request.field, request.filter || {}, { maxTimeMS: ${timeoutMs} }).slice(0, ${maxRows}) };
 } else {
-  result = { collections: targetDb.getCollectionInfos({}, true).slice(0, ${maxRows}).map((entry) => entry.name) };
+  const listed = targetDb.runCommand({ listCollections: 1, nameOnly: true, authorizedCollections: true, cursor: { batchSize: ${maxRows} }, maxTimeMS: ${timeoutMs} });
+  if (listed.ok !== 1) throw new Error(listed.errmsg || 'listCollections failed');
+  result = { collections: listed.cursor.firstBatch.slice(0, ${maxRows}).map((entry) => entry.name) };
 }
 print(EJSON.stringify(result, { relaxed: true }));
 `
@@ -169,14 +179,17 @@ print(EJSON.stringify(result, { relaxed: true }));
   if (input.host) args.push(`--host=${input.host}`)
   if (input.port) args.push(`--port=${input.port}`)
   if (input.container) {
-    const inner = [
-      'user="${MONGO_INITDB_ROOT_USERNAME:-}"',
-      'secret="${MONGO_INITDB_ROOT_PASSWORD:-}"',
-      'set -- mongosh --quiet --norc',
-      '[ -n "$user" ] && [ -n "$secret" ] && set -- "$@" --username="$user" --password="$secret" --authenticationDatabase=admin',
-      `exec timeout --signal=TERM --kill-after=2s ${Math.ceil(timeoutMs / 1000)}s "$@"`
-    ].join('; ')
-    args = ['docker', 'exec', '-i', input.container, 'sh', '-c', inner]
+    args = [
+      'docker',
+      'exec',
+      '-i',
+      input.container,
+      'timeout',
+      '--signal=TERM',
+      '--kill-after=2s',
+      `${Math.ceil(timeoutMs / 1000)}s`,
+      ...args
+    ]
   } else {
     args = [
       'timeout',

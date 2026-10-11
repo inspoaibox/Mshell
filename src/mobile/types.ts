@@ -24,6 +24,7 @@ export interface MobileSSHKey {
   comment?: string
   createdAt: string
   lastUsed?: string
+  updatedAt?: string
   usageCount: number
   protected: boolean
   privateKeyContent?: string

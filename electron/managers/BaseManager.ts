@@ -120,6 +120,24 @@ export abstract class BaseManager<T extends { id: string }> {
   }
 
   /**
+   * 云同步原样写入（保留 id 和时间戳，不经过子类的 create 校验）
+   */
+  async syncPut(item: any): Promise<void> {
+    if (!item || item.id === undefined || item.id === null) return
+    const restored = this.deserialize(item)
+    this.data.set(restored.id, restored)
+    await this.save()
+  }
+
+  /**
+   * 云同步删除（记录不存在时忽略）
+   */
+  async syncRemove(id: string): Promise<void> {
+    if (!this.data.delete(id)) return
+    await this.save()
+  }
+
+  /**
    * 搜索数据
    */
   search(query: string, fields: (keyof T)[]): T[] {

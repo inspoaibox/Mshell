@@ -7,6 +7,7 @@ const BACKUP_SALT = 'mshell-backup-encryption-key-v1'
 interface MobileSyncEnvelope {
   version: string
   appVersion: string
+  syncFormat?: number
   lastModified: string
   checksum: string
   encrypted: boolean
@@ -27,13 +28,15 @@ export const createEncryptedBackupPayload = async (
 
 export const createSyncPayload = async (
   data: MobileBackupData,
-  password?: string
+  password?: string,
+  options: { syncFormat?: number } = {}
 ): Promise<string> => {
   const jsonData = JSON.stringify(data)
   const encrypted = Boolean(password?.trim())
   const envelope: MobileSyncEnvelope = {
     version: '1.0.0',
     appVersion: 'mshell-mobile',
+    ...(options.syncFormat ? { syncFormat: options.syncFormat } : {}),
     lastModified: new Date().toISOString(),
     checksum: await calculateBackupChecksum(data),
     encrypted,
@@ -53,6 +56,9 @@ const calculateChecksum = async (value: string): Promise<string> => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
   return bytesToHex(new Uint8Array(digest)).slice(0, 16)
 }
+
+export const encryptSyncText = (data: string, password: string): Promise<string> =>
+  encryptDesktopAesCbcData(data, password, SYNC_SALT)
 
 const encryptDesktopAesCbcData = async (
   data: string,

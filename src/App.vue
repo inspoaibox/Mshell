@@ -393,12 +393,52 @@
       :current-settings="appStore.terminalOptions"
       @save="handleSaveTerminalSettings"
     />
+
+    <el-dialog
+      :model-value="!!currentMcpApproval && !isLocked"
+      :title="
+        currentMcpApproval?.tool === 'execute_command' ? '确认执行远程命令' : '确认写入远程文件'
+      "
+      width="640px"
+      append-to-body
+      :close-on-click-modal="false"
+      @update:model-value="(visible: boolean) => !visible && answerMcpApproval(false)"
+    >
+      <div v-if="currentMcpApproval" class="mcp-approval">
+        <div class="mcp-approval-target">
+          <template v-if="currentMcpApproval.target">
+            <strong>{{ currentMcpApproval.target.sessionName || '未命名会话' }}</strong>
+            <span>
+              {{ currentMcpApproval.target.username }}@{{ currentMcpApproval.target.host }}:{{
+                currentMcpApproval.target.port
+              }}
+            </span>
+          </template>
+          <span v-else>SSH 会话：{{ currentMcpApproval.connectionId }}</span>
+        </div>
+        <pre class="mcp-approval-summary">{{ currentMcpApproval.summary }}</pre>
+        <template v-if="currentMcpApproval.tool === 'write_remote_file'">
+          <div class="mcp-approval-label">完整写入内容：</div>
+          <pre class="mcp-approval-content">{{ currentMcpApproval.content }}</pre>
+        </template>
+        <div class="mcp-approval-meta">
+          请求将于 {{ new Date(currentMcpApproval.expiresAt).toLocaleTimeString() }} 自动拒绝
+          <span v-if="mcpApprovalQueue.length > 1">
+            ，另有 {{ mcpApprovalQueue.length - 1 }} 个请求等待确认
+          </span>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="answerMcpApproval(false)">拒绝</el-button>
+        <el-button type="warning" @click="answerMcpApproval(true)">允许本次操作</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import {
   Connection,
   Plus,
@@ -443,6 +483,7 @@ import AIChatPanel from './components/AI/AIChatPanel.vue'
 import logoImg from '@/assets/logo.png'
 
 import type { SessionConfig } from './types/session'
+import type { McpApprovalRequest } from './types/electron-env'
 
 // 国际化
 const { t } = useLocale()
@@ -454,6 +495,24 @@ const aiStore = useAIStore()
 // 锁定状态
 const isLocked = ref(false)
 const lockStatusReady = ref(false)
+
+// Agent 写操作审批队列，同一时间只展示一个请求
+const mcpApprovalQueue = ref<McpApprovalRequest[]>([])
+const currentMcpApproval = computed(() => mcpApprovalQueue.value[0])
+
+const answerMcpApproval = (approved: boolean) => {
+  const request = mcpApprovalQueue.value.shift()
+  if (!request) return
+  void window.electronAPI.mcp?.resolveApproval?.(request.approvalId, approved)
+}
+
+const rejectAllMcpApprovals = () => {
+  while (mcpApprovalQueue.value.length > 0) answerMcpApproval(false)
+}
+
+watch(isLocked, (locked) => {
+  if (locked) rejectAllMcpApprovals()
+})
 
 // 分屏视图状态
 const showSplitView = ref(false)
@@ -776,30 +835,22 @@ onMounted(async () => {
   })
   if (unsubSettings) ipcCleanups.push(unsubSettings)
 
-  const unsubMcpApproval = window.electronAPI.mcp?.onApprovalRequest?.(async (request) => {
+  const unsubMcpApproval = window.electronAPI.mcp?.onApprovalRequest?.((request) => {
     if (isLocked.value) {
-      await window.electronAPI.mcp?.resolveApproval?.(request.approvalId, false)
+      void window.electronAPI.mcp?.resolveApproval?.(request.approvalId, false)
       return
     }
-    let approved = false
-    try {
-      await ElMessageBox.confirm(
-        `${request.summary}\n\nSSH 会话：${request.connectionId}`,
-        request.tool === 'execute_command' ? '确认执行远程命令' : '确认写入远程文件',
-        {
-          confirmButtonText: '允许本次操作',
-          cancelButtonText: '拒绝',
-          type: 'warning',
-          distinguishCancelAndClose: true
-        }
-      )
-      approved = true
-    } catch {
-      approved = false
-    }
-    await window.electronAPI.mcp?.resolveApproval?.(request.approvalId, approved)
+    mcpApprovalQueue.value.push(request)
   })
   if (unsubMcpApproval) ipcCleanups.push(unsubMcpApproval)
+
+  // 主进程因超时、Agent 断开或权限切换取消审批时，关闭对应的确认框
+  const unsubMcpApprovalClosed = window.electronAPI.mcp?.onApprovalClosed?.(({ approvalId }) => {
+    mcpApprovalQueue.value = mcpApprovalQueue.value.filter(
+      (request) => request.approvalId !== approvalId
+    )
+  })
+  if (unsubMcpApprovalClosed) ipcCleanups.push(unsubMcpApprovalClosed)
 
   // 注册快捷键
   setupKeyboardShortcuts()
@@ -1343,6 +1394,51 @@ body,
 </style>
 
 <style scoped>
+.mcp-approval {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mcp-approval-target {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--text-primary);
+}
+
+.mcp-approval-target span {
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+.mcp-approval-summary,
+.mcp-approval-content {
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--bg-secondary, rgba(127, 127, 127, 0.12));
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow: auto;
+}
+
+.mcp-approval-summary {
+  max-height: 200px;
+}
+
+.mcp-approval-content {
+  max-height: 320px;
+}
+
+.mcp-approval-label,
+.mcp-approval-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 /* 主布局 */
 .app-layout {
   display: flex;

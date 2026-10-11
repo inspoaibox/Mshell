@@ -206,6 +206,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('mcp:approval-request', listener)
       return () => ipcRenderer.removeListener('mcp:approval-request', listener)
     },
+    onApprovalClosed: (callback: (event: any) => void) => {
+      const listener = (_event: any, event: any) => callback(event)
+      ipcRenderer.on('mcp:approval-closed', listener)
+      return () => ipcRenderer.removeListener('mcp:approval-closed', listener)
+    },
     regenerateToken: () => ipcRenderer.invoke('mcp:regenerateToken')
   },
 
@@ -796,7 +801,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     uploadToGitLab: () => ipcRenderer.invoke('sync:uploadToGitLab'),
     downloadFromGitLab: () => ipcRenderer.invoke('sync:downloadFromGitLab'),
     disconnectGitLab: () => ipcRenderer.invoke('sync:disconnectGitLab'),
-    sync: () => ipcRenderer.invoke('sync:sync'),
+    sync: (options?: { allowMassDelete?: boolean }) => ipcRenderer.invoke('sync:sync', options),
     getStatus: () => ipcRenderer.invoke('sync:getStatus')
   },
 

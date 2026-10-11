@@ -1,4 +1,4 @@
-import { createServer } from 'node:http'
+import { createServer, request } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => {
@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
     getAllConnections: vi.fn(),
     getConnection: vi.fn(),
     executeCommand: vi.fn(),
+    executeCommandDetailed: vi.fn(),
     hasSFTP: vi.fn(),
     initSFTP: vi.fn(),
     writeFile: vi.fn()
@@ -39,7 +40,8 @@ vi.mock('../SSHConnectionManager', () => ({
   sshConnectionManager: {
     getAllConnections: mocks.getAllConnections,
     getConnection: mocks.getConnection,
-    executeCommand: mocks.executeCommand
+    executeCommand: mocks.executeCommand,
+    executeCommandDetailed: mocks.executeCommandDetailed
   }
 }))
 
@@ -159,8 +161,16 @@ describe('MCPServerManager', () => {
     const port = await getAvailablePort()
     mocks.settings.port = port
     mocks.settings.permissionMode = 'confirm'
-    mocks.getConnection.mockReturnValue({ id: 'connected-session', status: 'connected' })
-    mocks.executeCommand.mockResolvedValue('approved\n')
+    mocks.getConnection.mockReturnValue({
+      id: 'connected-session',
+      status: 'connected',
+      options: { host: 'server.example', port: 22, username: 'root', sessionName: 'Production' }
+    })
+    mocks.executeCommandDetailed.mockResolvedValue({
+      stdout: 'approved\n',
+      stderr: '',
+      exitCode: 0
+    })
     const window = {
       isDestroyed: vi.fn(() => false),
       isMinimized: vi.fn(() => false),
@@ -182,23 +192,28 @@ describe('MCPServerManager', () => {
       }
     })
     await vi.waitFor(() => expect(window.webContents.send).toHaveBeenCalledOnce())
-    expect(mocks.executeCommand).not.toHaveBeenCalled()
+    expect(mocks.executeCommandDetailed).not.toHaveBeenCalled()
     const [eventName, approval] = window.webContents.send.mock.calls[0]
     expect(eventName).toBe('mcp:approval-request')
     expect(approval).toMatchObject({
       tool: 'execute_command',
-      connectionId: 'connected-session'
+      connectionId: 'connected-session',
+      target: { host: 'server.example', port: 22, username: 'root', sessionName: 'Production' },
+      content: 'systemctl restart nginx'
     })
     expect(approval.summary).toContain('systemctl restart nginx')
+    expect(approval.summary).toContain('root@server.example:22')
     expect(mcpServerManager.resolveApproval(approval.approvalId, true)).toBe(true)
 
     const payload = await readMcpPayload(await responsePromise)
     expect(payload.result.isError).toBeUndefined()
-    expect(mocks.executeCommand).toHaveBeenCalledWith(
+    expect(mocks.executeCommandDetailed).toHaveBeenCalledWith(
       'connected-session',
       'systemctl restart nginx',
       20_000,
-      2 * 1024 * 1024
+      2 * 1024 * 1024,
+      undefined,
+      expect.any(AbortSignal)
     )
 
     const deniedResponsePromise = postMcp(port, {
@@ -215,7 +230,7 @@ describe('MCPServerManager', () => {
     expect(mcpServerManager.resolveApproval(deniedApproval.approvalId, false)).toBe(true)
     const deniedPayload = await readMcpPayload(await deniedResponsePromise)
     expect(deniedPayload.result.isError).toBe(true)
-    expect(mocks.executeCommand).toHaveBeenCalledTimes(1)
+    expect(mocks.executeCommandDetailed).toHaveBeenCalledTimes(1)
 
     const modeSwitchResponsePromise = postMcp(port, {
       jsonrpc: '2.0',
@@ -230,7 +245,95 @@ describe('MCPServerManager', () => {
     await expect(mcpServerManager.setPermissionMode('query')).resolves.toEqual({ success: true })
     const modeSwitchPayload = await readMcpPayload(await modeSwitchResponsePromise)
     expect(modeSwitchPayload.result.isError).toBe(true)
-    expect(mocks.executeCommand).toHaveBeenCalledTimes(1)
+    expect(mocks.executeCommandDetailed).toHaveBeenCalledTimes(1)
+    expect(window.webContents.send).toHaveBeenLastCalledWith('mcp:approval-closed', {
+      approvalId: window.webContents.send.mock.calls[2][1].approvalId,
+      reason: 'cancelled'
+    })
+  })
+
+  it('cancels a pending approval when the Agent disconnects and drops queued approvals', async () => {
+    const port = await getAvailablePort()
+    mocks.settings.port = port
+    mocks.settings.permissionMode = 'confirm'
+    mocks.getConnection.mockReturnValue({
+      id: 'connected-session',
+      status: 'connected',
+      options: { host: 'server.example', port: 22, username: 'root', sessionName: '' }
+    })
+    const window = {
+      isDestroyed: vi.fn(() => false),
+      isMinimized: vi.fn(() => false),
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+      webContents: { send: vi.fn() }
+    }
+    mocks.getFocusedWindow.mockReturnValue(window)
+    await mcpServerManager.applySettings({ ...mocks.settings })
+
+    const call = (id: number, command: string) =>
+      fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json, text/event-stream',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${mocks.settings.token}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id,
+          method: 'tools/call',
+          params: {
+            name: 'execute_command',
+            arguments: { connectionId: 'connected-session', command }
+          }
+        })
+      })
+
+    const abandoned = request(`http://127.0.0.1:${port}/mcp`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json, text/event-stream',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${mocks.settings.token}`
+      }
+    })
+    abandoned.on('error', () => undefined)
+    abandoned.end(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 30,
+        method: 'tools/call',
+        params: {
+          name: 'execute_command',
+          arguments: { connectionId: 'connected-session', command: 'systemctl restart nginx' }
+        }
+      })
+    )
+    await vi.waitFor(() => expect(window.webContents.send).toHaveBeenCalledOnce())
+    const approval = window.webContents.send.mock.calls[0][1]
+    abandoned.destroy()
+
+    await vi.waitFor(() =>
+      expect(window.webContents.send).toHaveBeenCalledWith('mcp:approval-closed', {
+        approvalId: approval.approvalId,
+        reason: 'cancelled'
+      })
+    )
+    expect(mcpServerManager.resolveApproval(approval.approvalId, true)).toBe(false)
+
+    // A queued request from before a mode switch must never reach the user.
+    const first = call(31, 'systemctl restart sshd')
+    const queued = call(32, 'systemctl restart docker')
+    await vi.waitFor(() => expect(window.webContents.send).toHaveBeenCalledTimes(3))
+    await mcpServerManager.setPermissionMode('confirm')
+    expect((await readMcpPayload(await first)).result.isError).toBe(true)
+    expect((await readMcpPayload(await queued)).result.isError).toBe(true)
+    expect(
+      window.webContents.send.mock.calls.filter(([event]) => event === 'mcp:approval-request')
+    ).toHaveLength(2)
+    expect(mocks.executeCommandDetailed).not.toHaveBeenCalled()
   })
 
   it('discovers database targets before querying and does not expose credentials', async () => {
@@ -428,7 +531,11 @@ APPLICATION|worker|example/worker:latest|
       options: { host: 'server.example', port: 22, username: 'root', sessionName: 'Production' },
       lastActivity: new Date('2026-09-03T00:00:00.000Z')
     })
-    mocks.executeCommand.mockResolvedValue('Linux server 6.8.0 x86_64\n')
+    mocks.executeCommandDetailed.mockResolvedValue({
+      stdout: 'Linux server 6.8.0 x86_64\n',
+      stderr: '',
+      exitCode: 0
+    })
 
     await expect(mcpServerManager.applySettings({ ...mocks.settings })).resolves.toEqual({
       success: true
@@ -516,18 +623,28 @@ APPLICATION|worker|example/worker:latest|
     expect(queryResult).toEqual({
       connectionId: 'connected-session',
       command: 'uname -a',
+      exitCode: 0,
       output: 'Linux server 6.8.0 x86_64\n',
       outputBytes: 26,
-      truncated: false
+      truncated: false,
+      stderr: '',
+      stderrBytes: 0,
+      stderrTruncated: false
     })
-    expect(mocks.executeCommand).toHaveBeenCalledWith(
+    expect(mocks.executeCommandDetailed).toHaveBeenCalledWith(
       'connected-session',
-      'uname -a',
+      "'uname' '-a'",
       10_000,
-      256 * 1024
+      256 * 1024,
+      undefined,
+      expect.any(AbortSignal)
     )
 
-    mocks.executeCommand.mockResolvedValueOnce('x'.repeat(100 * 1024))
+    mocks.executeCommandDetailed.mockResolvedValueOnce({
+      stdout: 'x'.repeat(100 * 1024),
+      stderr: 'warning\n',
+      exitCode: 1
+    })
     const largeQueryResponse = await postMcp(port, {
       jsonrpc: '2.0',
       id: 55,
@@ -543,6 +660,12 @@ APPLICATION|worker|example/worker:latest|
     expect(largeQueryResult.output).toHaveLength(64 * 1024)
     expect(largeQueryResult.outputBytes).toBe(100 * 1024)
     expect(largeQueryResult.truncated).toBe(true)
+    expect(largeQueryResult.exitCode).toBe(1)
+    expect(largeQueryResult.stderr).toBe('warning\n')
+    const largeQueryAudit = mocks.auditLog.mock.calls.find(
+      ([, entry]) => entry.details?.command === 'journalctl -n 10000'
+    )
+    expect(JSON.stringify(largeQueryAudit)).not.toContain('warning')
 
     const rejectedResponse = await postMcp(port, {
       jsonrpc: '2.0',
@@ -555,7 +678,7 @@ APPLICATION|worker|example/worker:latest|
     })
     const rejectedPayload = await readMcpPayload(rejectedResponse)
     expect(rejectedPayload.result.isError).toBe(true)
-    expect(mocks.executeCommand).toHaveBeenCalledTimes(2)
+    expect(mocks.executeCommandDetailed).toHaveBeenCalledTimes(2)
 
     const deniedWriteResponse = await postMcp(port, {
       jsonrpc: '2.0',
@@ -618,11 +741,15 @@ APPLICATION|worker|example/worker:latest|
     })
     const deniedCommandPayload = await readMcpPayload(deniedCommandResponse)
     expect(deniedCommandPayload.result.isError).toBe(true)
-    expect(mocks.executeCommand).toHaveBeenCalledTimes(2)
+    expect(mocks.executeCommandDetailed).toHaveBeenCalledTimes(2)
 
     mocks.settings.allowWriteEnabled = true
     mocks.settings.permissionMode = 'execute'
-    mocks.executeCommand.mockResolvedValueOnce('updated\n')
+    mocks.executeCommandDetailed.mockResolvedValueOnce({
+      stdout: 'updated\n',
+      stderr: '',
+      exitCode: 0
+    })
     const commandResponse = await postMcp(port, {
       jsonrpc: '2.0',
       id: 10,
@@ -639,16 +766,22 @@ APPLICATION|worker|example/worker:latest|
     expect(JSON.parse(commandPayload.result.content[0].text)).toEqual({
       connectionId: 'connected-session',
       command: 'touch /tmp/mshell-command',
+      exitCode: 0,
       output: 'updated\n',
       outputBytes: 8,
       truncated: false,
+      stderr: '',
+      stderrBytes: 0,
+      stderrTruncated: false,
       executed: true
     })
-    expect(mocks.executeCommand).toHaveBeenLastCalledWith(
+    expect(mocks.executeCommandDetailed).toHaveBeenLastCalledWith(
       'connected-session',
       'touch /tmp/mshell-command',
       20_000,
-      2 * 1024 * 1024
+      2 * 1024 * 1024,
+      undefined,
+      expect.any(AbortSignal)
     )
     const commandAudit = mocks.auditLog.mock.calls.find(
       ([, entry]) => entry.resource === 'execute_command' && entry.success === true

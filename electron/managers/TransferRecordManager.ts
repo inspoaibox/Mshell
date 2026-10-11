@@ -115,6 +115,23 @@ export class TransferRecordManager {
   }
 
   /**
+   * 云同步原样写入传输记录
+   */
+  async syncPut(record: TransferRecord): Promise<void> {
+    if (!record?.id) return
+    this.records.set(record.id, record)
+    await this.save()
+  }
+
+  /**
+   * 云同步删除传输记录（不存在时忽略）
+   */
+  async syncRemove(id: string): Promise<void> {
+    if (!this.records.delete(id)) return
+    await this.save()
+  }
+
+  /**
    * 获取传输记录
    */
   getRecord(id: string): TransferRecord | undefined {

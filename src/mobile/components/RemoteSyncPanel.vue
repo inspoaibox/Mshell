@@ -3,7 +3,7 @@
     <div class="panel-subhead">
       <div>
         <h3>远程同步</h3>
-        <p>保存一次配置后，可以长期上传本地数据或下载远端数据。</p>
+        <p>“同步”会与远端逐条合并，各设备的修改都会保留；同一条记录两边都改时保留修改时间较新的版本。</p>
       </div>
     </div>
 
@@ -81,8 +81,18 @@
 import { onMounted, reactive, ref } from 'vue'
 import type { MobileSyncConfig } from '../types'
 import { mobileStore } from '../services/mobile-store'
-import { parseBackupOrSyncPayload } from '../services/sync-import'
-import { calculateBackupChecksum, createSyncPayload } from '../services/sync-export'
+import {
+  RemoteReadError,
+  clearMobileSyncBase,
+  forceDownloadMobile,
+  forceUploadMobile,
+  formatConflictMessage,
+  formatMassDeleteMessage,
+  loadMobileSyncBase,
+  runMobileMergeSync,
+  saveMobileSyncBase,
+  type MobileSyncDeps
+} from '../services/mobile-sync'
 import {
   loadRemoteSyncPayload,
   uploadRemoteSyncPayload
@@ -134,6 +144,7 @@ const saveConfig = (silent = false) => {
 
 const clearConfig = () => {
   mobileStore.clearSyncConfig()
+  clearMobileSyncBase()
   syncConfig.value = undefined
   Object.assign(form, {
     enabled: true,
@@ -149,41 +160,71 @@ const clearConfig = () => {
   message.value = '同步配置已清除'
 }
 
+const buildSyncDeps = (): MobileSyncDeps => ({
+  store: mobileStore,
+  password: form.password,
+  loadRemote: async () =>
+    form.remoteUrl.trim()
+      ? (await loadRemoteSyncPayload(form.remoteUrl, form.token)).text
+      : undefined,
+  upload: async (content) => {
+    const result = await uploadRemoteSyncPayload(
+      form.remoteUrl,
+      form.token,
+      content,
+      form.provider
+    )
+    form.remoteUrl = result.remoteUrl
+    return result
+  },
+  loadBase: () => loadMobileSyncBase(form.provider, form.remoteUrl, form.password),
+  saveBase: (data, remoteUrl) =>
+    saveMobileSyncBase(form.provider, remoteUrl || form.remoteUrl, form.password, data)
+})
+
 const syncNow = async () => {
   if (busy.value) return
-  if (!form.remoteUrl.trim()) {
-    await uploadLocalToRemote()
-    return
-  }
-
   busy.value = 'sync'
   try {
     validateBaseConfig()
     saveConfig(true)
-    message.value = '正在检查本地和远端数据...'
+    message.value = '正在与远端逐条合并...'
 
-    const localData = mobileStore.exportBackup()
-    const localChecksum = await calculateBackupChecksum(localData)
-    const remote = await loadRemoteSyncPayload(form.remoteUrl, form.token)
-    const remoteChecksum = extractSyncChecksum(remote.text)
-    const lastChecksum = syncConfig.value?.lastSyncChecksum
+    let result = await runMobileMergeSync(buildSyncDeps())
+    if (result.action === 'needs-confirm') {
+      const confirmed = window.confirm(
+        `本次同步将删除较多本地数据（其它设备已删除）：
+${formatMassDeleteMessage(result.massDeletes)}
 
-    if (remoteChecksum && remoteChecksum === localChecksum) {
-      markSyncState({ lastSyncChecksum: localChecksum })
+确认继续吗？`
+      )
+      if (!confirmed) {
+        message.value = '已取消同步，本地数据未改动'
+        return
+      }
+      result = await runMobileMergeSync(buildSyncDeps(), { allowMassDelete: true })
+    }
+
+    markSyncState({
+      remoteUrl: form.remoteUrl,
+      ...(result.remoteUrl ? { lastUploadAt: new Date().toISOString() } : {})
+    })
+    if (result.action === 'uploaded') {
+      message.value = result.created
+        ? '已创建远端同步数据并上传本地数据'
+        : '本地数据已上传到远端'
+    } else if (result.action === 'no-change') {
       message.value = '本地和远端数据一致，无需同步'
-      return
-    }
-
-    const localChanged = lastChecksum !== localChecksum
-    const remoteChanged = remoteChecksum ? lastChecksum !== remoteChecksum : true
-
-    if (!localChanged && remoteChanged) {
-      await applyRemotePayload(remote.text, remoteChecksum)
-    } else if (localChanged && !remoteChanged) {
-      await uploadLocalToRemote()
     } else {
-      message.value = '本地和远端数据都已变化，请手动选择“上传本地”或“下载到本地”'
+      const summary = result.summary
+      const conflictText = result.conflicts.length
+        ? `
+冲突 ${result.conflicts.length} 项（已保留修改时间较新的版本）：
+${formatConflictMessage(result.conflicts)}`
+        : ''
+      message.value = `同步完成：上传 ${summary?.uploaded || 0} 项，下载 ${summary?.downloaded || 0} 项，删除 ${summary?.deleted || 0} 项${conflictText}`
     }
+    emit('synced')
   } catch (error: any) {
     message.value = error.message || '同步失败'
   } finally {
@@ -202,8 +243,11 @@ const downloadRemoteToLocal = async () => {
 
     saveConfig(true)
     message.value = '正在从远端下载同步数据...'
-    const remote = await loadRemoteSyncPayload(form.remoteUrl, form.token)
-    await applyRemotePayload(remote.text, extractSyncChecksum(remote.text))
+    await forceDownloadMobile(buildSyncDeps())
+    const nextState = mobileStore.getState()
+    markSyncState({ lastDownloadAt: new Date().toISOString() })
+    message.value = `远端数据已下载到本地（不删除本地数据）：${nextState.sessions.length} 会话，${nextState.snippets.length} 片段，${nextState.sshKeys.length} 密钥`
+    emit('synced')
   } catch (error: any) {
     message.value = error.message || '下载失败'
   } finally {
@@ -212,50 +256,42 @@ const downloadRemoteToLocal = async () => {
 }
 
 const uploadLocalToRemote = async () => {
-  if (busy.value && busy.value !== 'sync') return
-  busy.value = busy.value || 'upload'
+  if (busy.value) return
+  busy.value = 'upload'
   try {
     validateBaseConfig()
     saveConfig(true)
     message.value = '正在上传本地同步数据...'
 
-    const data = mobileStore.exportBackup()
-    const checksum = await calculateBackupChecksum(data)
-    const payload = await createSyncPayload(data, form.password)
-    const result = await uploadRemoteSyncPayload(
-      form.remoteUrl,
-      form.token,
-      payload,
-      form.provider
-    )
+    let result
+    try {
+      result = await forceUploadMobile(buildSyncDeps())
+    } catch (error) {
+      if (!(error instanceof RemoteReadError)) throw error
+      const confirmed = window.confirm(
+        `无法读取远端数据（${error.message}）。
+继续上传将只保留移动端数据，远端中桌面端独有的数据（端口转发、设置等）会被清空。确认继续吗？`
+      )
+      if (!confirmed) {
+        message.value = '已取消上传'
+        return
+      }
+      result = await forceUploadMobile(buildSyncDeps(), { ignoreRemoteErrors: true })
+    }
 
-    form.remoteUrl = result.remoteUrl
     markSyncState({
       remoteUrl: result.remoteUrl,
-      lastUploadAt: new Date().toISOString(),
-      lastSyncChecksum: checksum
+      lastUploadAt: new Date().toISOString()
     })
     message.value = result.created
       ? '已创建远端同步数据并上传本地数据'
-      : '本地数据已上传到远端'
+      : '本地数据已上传到远端（覆盖远端的会话、片段和密钥）'
     emit('synced')
   } catch (error: any) {
     message.value = error.message || '上传失败'
   } finally {
     busy.value = ''
   }
-}
-
-const applyRemotePayload = async (payload: string, remoteChecksum?: string) => {
-  const data = await parseBackupOrSyncPayload(payload, form.password)
-  const nextState = mobileStore.importBackup(data)
-  const checksum = remoteChecksum || (await calculateBackupChecksum(data))
-  markSyncState({
-    lastDownloadAt: new Date().toISOString(),
-    lastSyncChecksum: checksum
-  })
-  message.value = `远端数据已下载到本地：${nextState.sessions.length} 会话，${nextState.snippets.length} 片段，${nextState.sshKeys.length} 密钥`
-  emit('synced')
 }
 
 const markSyncState = (updates: Partial<MobileSyncConfig>) => {
@@ -289,15 +325,6 @@ const buildConfig = (): MobileSyncConfig => ({
   lastDownloadAt: syncConfig.value?.lastDownloadAt,
   lastSyncChecksum: syncConfig.value?.lastSyncChecksum
 })
-
-const extractSyncChecksum = (payload: string): string | undefined => {
-  try {
-    const parsed = JSON.parse(payload) as { checksum?: unknown }
-    return typeof parsed.checksum === 'string' ? parsed.checksum : undefined
-  } catch {
-    return undefined
-  }
-}
 
 const providerLabel = (provider: MobileSyncConfig['provider']) =>
   provider === 'gitlab' ? 'GitLab Snippet' : 'GitHub Gist'

@@ -10,6 +10,17 @@ type ApiResult<T = void> = {
   details?: any
 }
 
+export type McpApprovalRequest = {
+  approvalId: string
+  tool: 'write_remote_file' | 'execute_command'
+  connectionId: string
+  target?: { host: string; port: number; username: string; sessionName: string }
+  summary: string
+  content: string
+  requestedAt: string
+  expiresAt: string
+}
+
 type DeleteBatchResult = {
   success: string[]
   failed: Array<{ path: string; error: string }>
@@ -486,14 +497,10 @@ export interface ElectronAPI {
       approvalId: string,
       approved: boolean
     ) => Promise<{ success: boolean; error?: string }>
-    onApprovalRequest: (callback: (request: {
-      approvalId: string
-      tool: 'write_remote_file' | 'execute_command'
-      connectionId: string
-      summary: string
-      requestedAt: string
-      expiresAt: string
-    }) => void) => () => void
+    onApprovalRequest: (callback: (request: McpApprovalRequest) => void) => () => void
+    onApprovalClosed: (
+      callback: (event: { approvalId: string; reason: 'resolved' | 'timeout' | 'cancelled' }) => void
+    ) => () => void
     regenerateToken: () => Promise<{ success: boolean; error?: string }>
   }
   terminalBackground: {
@@ -878,7 +885,9 @@ export interface ElectronAPI {
     uploadToGitLab: () => Promise<{ success: boolean; data?: any; error?: string }>
     downloadFromGitLab: () => Promise<{ success: boolean; data?: any; error?: string }>
     disconnectGitLab: () => Promise<{ success: boolean; error?: string }>
-    sync: () => Promise<{ success: boolean; data?: any; error?: string }>
+    sync: (options?: {
+      allowMassDelete?: boolean
+    }) => Promise<{ success: boolean; data?: any; error?: string }>
     getStatus: () => Promise<{ success: boolean; data?: any; error?: string }>
   }
 }

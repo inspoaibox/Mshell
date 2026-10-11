@@ -162,7 +162,7 @@ const looksLikeDesktopAesCbcData = (value: string): boolean => {
   )
 }
 
-const decryptDesktopAesCbcData = async (
+export const decryptDesktopAesCbcData = async (
   encryptedData: string,
   password: string,
   salt: string,

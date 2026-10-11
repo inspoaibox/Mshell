@@ -185,6 +185,38 @@ export class TaskSchedulerManager {
     this.saveTasks()
   }
 
+  /**
+   * 云同步原样写入任务（保留 id、时间戳和本机执行统计）
+   */
+  syncUpsert(raw: any): void {
+    if (!raw?.id) return
+    const existing = this.tasks.get(raw.id)
+    this.unscheduleTask(raw.id)
+    const task: ScheduledTask = existing
+      ? {
+          ...raw,
+          lastExecution: existing.lastExecution,
+          nextExecution: existing.nextExecution,
+          executionCount: existing.executionCount,
+          successCount: existing.successCount,
+          failureCount: existing.failureCount
+        }
+      : raw
+    this.tasks.set(task.id, task)
+    this.saveTasks()
+    if (task.enabled && cron.validate(task.cronExpression)) {
+      this.scheduleTask(task)
+    }
+  }
+
+  /**
+   * 云同步删除任务（不存在时忽略）
+   */
+  syncRemove(id: string): void {
+    if (!this.tasks.has(id)) return
+    this.delete(id)
+  }
+
   enableTask(id: string): void {
     this.update(id, { enabled: true })
   }

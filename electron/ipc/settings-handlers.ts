@@ -12,19 +12,13 @@ export function registerSettingsHandlers() {
     return appSettingsManager.getSettings()
   })
 
-  ipcMain.handle('settings:update', async (_event, updates: Partial<AppSettings>) => {
+  ipcMain.handle('settings:update', async (_event, rawUpdates: Partial<AppSettings>) => {
+    // Agent 接入设置只能通过 mcp:* 通道修改，那里会处理审批取消、令牌和权限审计；
+    // 这里忽略 agentMcp，避免保存其它设置时用渲染进程中的旧值覆盖它。
+    const { agentMcp: _ignoredAgentMcp, ...updates } = rawUpdates || {}
     const previousSettings = appSettingsManager.getSettings()
     await appSettingsManager.updateSettings(updates)
     const settings = appSettingsManager.getSettings()
-
-    if (updates.agentMcp !== undefined) {
-      const mcpResult = await mcpServerManager.applySettings(settings.agentMcp)
-      if (!mcpResult.success) {
-        await appSettingsManager.updateSettings({ agentMcp: previousSettings.agentMcp })
-        await mcpServerManager.applySettings(previousSettings.agentMcp)
-        return mcpResult
-      }
-    }
 
     if (
       previousSettings.security.savePasswords !== false &&
@@ -33,20 +27,10 @@ export function registerSettingsHandlers() {
       await sessionManager.removeSavedSecrets()
     }
 
-    const auditUpdates = updates.agentMcp
-      ? {
-          ...updates,
-          agentMcp: {
-            ...updates.agentMcp,
-            token: updates.agentMcp.token ? '***REDACTED***' : updates.agentMcp.token
-          }
-        }
-      : updates
-
     if (settings.general.enableAuditLog !== false) {
       auditLogManager.log(AuditAction.SETTINGS_UPDATE, {
         resource: 'app-settings',
-        details: { updates: auditUpdates },
+        details: { updates },
         success: true
       })
     }
@@ -76,6 +60,8 @@ export function registerSettingsHandlers() {
     await appSettingsManager.resetToDefaults()
 
     const settings = appSettingsManager.getSettings()
+    // 重置可能改变权限模式，先停止服务以取消所有等待中的审批
+    await mcpServerManager.stop()
     await mcpServerManager.applySettings(settings.agentMcp)
     if (settings.general.enableAuditLog !== false) {
       auditLogManager.log(AuditAction.SETTINGS_UPDATE, {

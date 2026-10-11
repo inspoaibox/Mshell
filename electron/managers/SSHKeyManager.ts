@@ -18,6 +18,7 @@ export interface SSHKey {
   fingerprint: string
   comment?: string
   createdAt: string
+  updatedAt?: string
   lastUsed?: string
   usageCount: number
   protected: boolean // 是否有密码保护
@@ -496,6 +497,7 @@ export class SSHKeyManager {
       key.protected = true
     }
 
+    key.updatedAt = new Date().toISOString()
     this.saveKeys()
   }
 
@@ -524,6 +526,54 @@ export class SSHKeyManager {
       this.saveKeys()
     } catch (error) {
       throw new Error(`Failed to delete key: ${(error as Error).message}`)
+    }
+  }
+
+  /**
+   * 云同步原样写入密钥（保留 id、时间戳和元数据，私钥写入本机密钥目录）
+   */
+  syncUpsertKey(raw: any): void {
+    if (!raw?.id || typeof raw.privateKeyContent !== 'string' || !raw.privateKeyContent.trim()) {
+      return
+    }
+
+    const existing = this.keys.get(raw.id)
+    const privateKeyPath = existing?.privateKeyPath || join(this.keysDir, String(raw.id))
+    const publicKey = String(raw.publicKeyContent || raw.publicKey || '').trim()
+    writeFileSync(privateKeyPath, raw.privateKeyContent, { mode: 0o600 })
+    if (publicKey) {
+      writeFileSync(`${privateKeyPath}.pub`, publicKey, { mode: 0o644 })
+    }
+
+    const {
+      privateKeyContent: _privateKeyContent,
+      publicKeyContent: _publicKeyContent,
+      ...metadata
+    } = raw
+    const key: SSHKey = {
+      ...metadata,
+      id: String(raw.id),
+      name: String(raw.name || raw.id),
+      type: raw.type || 'rsa',
+      publicKey: publicKey || existing?.publicKey || '',
+      privateKeyPath,
+      fingerprint:
+        raw.fingerprint || (publicKey ? this.generateFingerprint(publicKey) : existing?.fingerprint || ''),
+      createdAt: raw.createdAt || existing?.createdAt || new Date().toISOString(),
+      usageCount: existing?.usageCount ?? Number(raw.usageCount || 0),
+      lastUsed: existing?.lastUsed ?? raw.lastUsed,
+      protected: raw.protected === true
+    }
+    this.keys.set(key.id, key)
+    this.saveKeys()
+  }
+
+  /**
+   * 云同步删除密钥（不存在时忽略）
+   */
+  syncRemoveKey(id: string): void {
+    if (this.keys.has(id)) {
+      this.deleteKey(id)
     }
   }
 

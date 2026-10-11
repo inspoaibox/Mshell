@@ -729,8 +729,48 @@ export class PortForwardManager extends EventEmitter {
       throw new Error(`Forward not found: ${id}`)
     }
 
-    Object.assign(forward, updates)
-    await this.configManager.update(id, updates)
+    // 运行状态变化不算配置修改，避免影响云同步的修改时间比较
+    const runtimeOnly = Object.keys(updates).every((key) =>
+      ['status', 'error', 'connectionId'].includes(key)
+    )
+    const configUpdates = runtimeOnly
+      ? updates
+      : { ...updates, updatedAt: new Date().toISOString() }
+    Object.assign(forward, configUpdates)
+    await this.configManager.update(id, configUpdates)
+  }
+
+  /**
+   * 云同步原样写入端口转发配置（运行中的转发会先停止）
+   */
+  async syncUpsertForward(raw: any): Promise<void> {
+    await this.initialize()
+    if (!raw?.id) return
+
+    if (this.servers.has(raw.id) || this.remoteForwards.has(raw.id)) {
+      await this.stopForward(raw.id).catch(() => {})
+    }
+
+    const { error: _error, connectionId: _connectionId, ...config } = raw
+    const forward: PortForward = {
+      ...config,
+      sessionId: getForwardSessionId(raw),
+      status: 'inactive'
+    }
+    await this.configManager.syncPut(forward)
+    this.forwards.set(forward.id, this.configManager.get(forward.id) || forward)
+  }
+
+  /**
+   * 云同步删除端口转发配置（不存在时忽略）
+   */
+  async syncRemoveForward(id: string): Promise<void> {
+    await this.initialize()
+    if (!this.forwards.has(id)) {
+      await this.configManager.syncRemove(id)
+      return
+    }
+    await this.deleteForward(id)
   }
 
   /**
@@ -853,7 +893,23 @@ export class PortForwardManager extends EventEmitter {
    * 更新模板
    */
   async updateTemplate(id: string, updates: Partial<PortForwardTemplate>): Promise<void> {
-    await this.templateManager.update(id, updates)
+    await this.templateManager.update(id, { ...updates, updatedAt: new Date().toISOString() })
+  }
+
+  /**
+   * 云同步原样写入模板
+   */
+  async syncUpsertTemplate(raw: any): Promise<void> {
+    await this.initialize()
+    await this.templateManager.syncPut(raw)
+  }
+
+  /**
+   * 云同步删除模板（不存在时忽略）
+   */
+  async syncRemoveTemplate(id: string): Promise<void> {
+    await this.initialize()
+    await this.templateManager.syncRemove(id)
   }
 
   /**

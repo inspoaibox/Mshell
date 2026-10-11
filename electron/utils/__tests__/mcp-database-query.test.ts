@@ -235,6 +235,26 @@ TARGET|oracle|oracle-1|oracle/database:23|1521/tcp|SYS|ORCL|verified:no
     expect(() => validateMcpDatabaseQuery(query, 'sqlite')).toThrow()
   })
 
+  it.each([
+    "EXEC sp_configure 'show advanced options', 1",
+    'SELECT 1; EXECUTE xp_cmdshell 1',
+    'SELECT * FROM t WHERE 1 = 1 WAITFOR DELAY 1',
+    'SELECT name FROM sys.databases; SHUTDOWN',
+    'DBCC CHECKDB',
+    'SELECT * FROM t OPTION (MAXDOP 1) RECONFIGURE'
+  ])('rejects SQL Server procedures and admin commands: %s', (query) => {
+    expect(() => validateMcpDatabaseQuery(query, 'sqlserver')).toThrow()
+  })
+
+  it('allows SQL Server keywords inside literals and quoted identifiers', () => {
+    expect(() =>
+      validateMcpDatabaseQuery(
+        "SELECT [backup], name FROM dbo.jobs WHERE note = 'exec backup'",
+        'sqlserver'
+      )
+    ).not.toThrow()
+  })
+
   it('qualifies PostgreSQL built-ins and retains SQL conditional syntax', () => {
     const plan = buildMcpDatabaseQuery({
       engine: 'postgresql',

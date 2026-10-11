@@ -945,6 +945,7 @@ textarea {
 .message {
   margin: 0;
   color: #bae6fd;
+  white-space: pre-line;
 }
 
 @media (max-width: 760px) {

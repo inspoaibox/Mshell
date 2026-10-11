@@ -402,12 +402,16 @@ export class SessionManager {
       (updates as any).expiryDate = new Date(updates.expiryDate)
     }
 
+    // 仅记录连接次数/时间时不算内容修改，避免影响云同步的修改时间比较
+    const usageOnly = Object.keys(updates).every((key) =>
+      ['usageCount', 'lastConnected'].includes(key)
+    )
     const updated: SessionConfig = {
       ...session,
       ...updates,
       id: session.id, // 确保 ID 不被修改
       createdAt: session.createdAt, // 确保创建时间不被修改
-      updatedAt: new Date()
+      updatedAt: usageOnly ? session.updatedAt : new Date()
     }
 
     // 处理 null 值：前端用 null 表示"清除此字段"
@@ -432,6 +436,51 @@ export class SessionManager {
 
     this.sessions.delete(id)
     this.saveSessions().catch((error) => console.error('Failed to save after delete:', error))
+  }
+
+  /**
+   * 云同步原样写入会话（保留 id 和时间戳）
+   */
+  async syncUpsertSession(raw: any): Promise<void> {
+    if (!raw?.id) return
+    const now = new Date()
+    const session = this.sanitizeSavedSecrets({ ...raw }) as SessionConfig
+    session.createdAt = this.parseSessionDate(raw.createdAt, now)
+    session.updatedAt = this.parseSessionDate(raw.updatedAt, now)
+    for (const field of ['expiryDate', 'lastConnected'] as const) {
+      if (raw[field]) {
+        ;(session as any)[field] = this.parseSessionDate(raw[field], now)
+      } else {
+        delete (session as any)[field]
+      }
+    }
+    this.sessions.set(session.id, session)
+    await this.saveSessions()
+  }
+
+  /**
+   * 云同步删除会话（不存在时忽略）
+   */
+  async syncRemoveSession(id: string): Promise<void> {
+    if (!this.sessions.delete(id)) return
+    await this.saveSessions()
+  }
+
+  /**
+   * 云同步原样写入分组
+   */
+  async syncUpsertGroup(raw: any): Promise<void> {
+    if (!raw?.id) return
+    this.groups.set(raw.id, { id: raw.id, name: String(raw.name || ''), sessions: [] })
+    await this.saveSessions()
+  }
+
+  /**
+   * 云同步删除分组（会话的分组引用由会话自身的同步结果决定）
+   */
+  async syncRemoveGroup(id: string): Promise<void> {
+    if (!this.groups.delete(id)) return
+    await this.saveSessions()
   }
 
   /**

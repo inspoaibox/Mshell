@@ -8,6 +8,16 @@ import { backupManager, BackupData } from './BackupManager'
 import { logger } from '../utils/logger'
 import { credentialManager } from './CredentialManager'
 import { isLocalTerminalBackground } from '../../src/types/terminal-background'
+import {
+  DESKTOP_SYNC_SCHEMA,
+  SYNC_FORMAT_VERSION,
+  formatMergeSummary,
+  isLegacyMobileEnvelope,
+  mergeSnapshot,
+  scopeLegacyMobileRemote,
+  type MassDeleteWarning,
+  type SyncConflict
+} from '../../src/lib/sync/merge'
 import axios from 'axios'
 
 /**
@@ -53,6 +63,8 @@ type SyncConfigUpdate = Partial<
 interface SyncData {
   version: string
   appVersion: string
+  /** 2 = 支持逐条合并的新版客户端写入 */
+  syncFormat?: number
   lastModified: string
   checksum: string
   encrypted: boolean
@@ -68,10 +80,65 @@ const GITHUB_GIST_RAW_CHUNK_BYTES = 1024 * 1024
  */
 export interface SyncResult {
   success: boolean
-  action?: 'uploaded' | 'downloaded' | 'no-change' | 'conflict'
+  action?: 'uploaded' | 'downloaded' | 'merged' | 'no-change' | 'needs-confirm'
   message: string
   localTime?: string
   remoteTime?: string
+  /** 合并同步的条数统计 */
+  summary?: { uploaded: number; downloaded: number; deleted: number }
+  /** 两边都修改过的记录（已按修改时间较新的一方保留） */
+  conflicts?: SyncConflict[]
+  /** action 为 needs-confirm 时，将被大量删除的数据类别 */
+  massDeletes?: MassDeleteWarning[]
+}
+
+export interface SyncOptions {
+  /** 确认允许删除本地大量数据 */
+  allowMassDelete?: boolean
+}
+
+type RemoteSyncProvider = 'github' | 'gitlab'
+
+/** 合并期间云端被其它设备改写时的最大重试次数 */
+const MERGE_SYNC_MAX_ATTEMPTS = 3
+
+const FULL_RESTORE_OPTIONS: Parameters<typeof backupManager.applyBackup>[1] = {
+  restoreSessions: true,
+  restoreSnippets: true,
+  restoreSettings: true,
+  restoreBackupConfig: false,
+  restoreSyncConfig: false,
+  restoreCommandHistory: true,
+  restoreSSHKeys: true, // 恢复 SSH 密钥（包含私钥）
+  restorePortForwards: true,
+  restoreSessionTemplates: true,
+  restoreScheduledTasks: true,
+  restoreWorkflows: true,
+  restoreAIConfig: true,
+  restoreAIChatHistory: true, // 全局 + 终端
+  restoreConnectionStats: true,
+  restoreAuditLogs: true,
+  restoreTransferRecords: true,
+  restoreLockConfig: true,
+  restoreQuickCommands: true,
+  restoreLazyScripts: true
+}
+
+const SESSION_SECRET_FIELDS = ['password', 'passphrase']
+
+/**
+ * 本地缺失的会话密码（含代理、跳板机）从基准中补回。
+ */
+const fillMissingSecrets = (target: any, source: any): void => {
+  if (!target || !source || typeof target !== 'object' || typeof source !== 'object') return
+  for (const field of SESSION_SECRET_FIELDS) {
+    if ((target[field] === undefined || target[field] === null || target[field] === '') && source[field]) {
+      target[field] = source[field]
+    }
+  }
+  for (const nested of ['proxy', 'proxyJump', 'nextJump']) {
+    if (target[nested] && source[nested]) fillMissingSecrets(target[nested], source[nested])
+  }
 }
 
 /**
@@ -400,8 +467,12 @@ export class SyncManager {
    * 收集同步数据
    */
   private async collectSyncData(): Promise<BackupData> {
-    const data = await backupManager.collectBackupData()
-    return this.stripLocalTerminalBackgrounds(data)
+    const data = this.stripLocalTerminalBackgrounds(await backupManager.collectBackupData())
+    // MCP 接入的端口、令牌和权限模式是本机配置，不上传
+    if (data.settings && typeof data.settings === 'object') {
+      delete data.settings.agentMcp
+    }
+    return data
   }
 
   private stripLocalTerminalBackgrounds(data: BackupData): BackupData {
@@ -951,64 +1022,248 @@ export class SyncManager {
     }
   }
 
-  /**
-   * 上传到 GitLab Snippet
-   */
-  async uploadToGitLab(): Promise<SyncResult> {
-    if (!this.config.gitlab?.token) {
-      return { success: false, message: '未配置 GitLab Token' }
-    }
+  // ==================== 云端读写（GitHub / GitLab 共用） ====================
 
-    const encryptionPassword = this.getEncryptionPassword()
-    if (!encryptionPassword) {
-      return { success: false, message: '未设置同步加密密码' }
+  private providerLabel(provider: RemoteSyncProvider): string {
+    return provider === 'github' ? 'GitHub' : 'GitLab'
+  }
+
+  private getProviderToken(provider: RemoteSyncProvider): string | undefined {
+    return provider === 'github' ? this.config.github?.token : this.config.gitlab?.token
+  }
+
+  private getRemoteId(provider: RemoteSyncProvider): string | undefined {
+    return provider === 'github' ? this.config.github?.gistId : this.config.gitlab?.snippetId
+  }
+
+  private async forgetRemote(provider: RemoteSyncProvider): Promise<void> {
+    if (provider === 'github' && this.config.github) {
+      this.config.github.gistId = undefined
+      this.config.github.gistUrl = undefined
+    } else if (provider === 'gitlab' && this.config.gitlab) {
+      this.config.gitlab.snippetId = undefined
+      this.config.gitlab.snippetUrl = undefined
     }
+    await this.saveConfig()
+  }
+
+  private async readRemote(
+    provider: RemoteSyncProvider
+  ): Promise<{ content: string; updatedAt: string } | null> {
+    const token = this.getProviderToken(provider)
+    const remoteId = this.getRemoteId(provider)
+    if (!token || !remoteId) return null
+    return provider === 'github'
+      ? await this.getGist(token, remoteId)
+      : await this.getSnippet(token, remoteId)
+  }
+
+  /**
+   * 只读取云端文件的更新时间，用于上传前检查期间是否有其它设备写入。
+   */
+  private async readRemoteUpdatedAt(provider: RemoteSyncProvider): Promise<string | null> {
+    const token = this.getProviderToken(provider)
+    const remoteId = this.getRemoteId(provider)
+    if (!token || !remoteId) return null
 
     try {
-      // 收集数据
-      const backupData = await this.collectSyncData()
-      const jsonData = JSON.stringify(backupData)
-
-      // 加密数据
-      const encryptedData = await this.encryptData(jsonData, encryptionPassword)
-
-      // 构建同步数据
-      const syncData: SyncData = {
-        version: '1.0.0',
-        appVersion: app.getVersion(),
-        lastModified: new Date().toISOString(),
-        checksum: this.calculateBackupChecksum(backupData),
-        encrypted: true,
-        data: encryptedData
+      if (provider === 'github') {
+        const response = await axios.get(`https://api.github.com/gists/${remoteId}`, {
+          headers: {
+            Authorization: `token ${token}`,
+            Accept: 'application/vnd.github.v3+json'
+          }
+        })
+        return response.data?.updated_at ?? null
       }
 
-      const content = JSON.stringify(syncData, null, 2)
+      const response = await axios.get(`${this.getGitLabApiUrl()}/api/v4/snippets/${remoteId}`, {
+        headers: { 'PRIVATE-TOKEN': token }
+      })
+      return response.data?.updated_at ?? null
+    } catch (error: any) {
+      if (error.response?.status === 404) return null
+      throw error
+    }
+  }
 
-      // 上传到 Snippet
-      if (this.config.gitlab.snippetId) {
-        // 更新现有 Snippet
-        await this.updateSnippet(this.config.gitlab.token, this.config.gitlab.snippetId, content)
+  private async writeRemote(provider: RemoteSyncProvider, content: string): Promise<void> {
+    if (provider === 'github') {
+      const github = this.config.github!
+      if (github.gistId) {
+        await this.updateGist(github.token, github.gistId, content)
       } else {
-        // 创建新 Snippet
-        const result = await this.createSnippet(this.config.gitlab.token, content)
-        this.config.gitlab.snippetId = String(result.id)
-        this.config.gitlab.snippetUrl = result.url
+        const result = await this.createGist(github.token, content)
+        github.gistId = result.id
+        github.gistUrl = result.url
         await this.saveConfig()
       }
+      return
+    }
 
-      // 更新同步状态
-      this.config.lastSync = new Date().toISOString()
-      this.config.lastSyncChecksum = syncData.checksum
+    const gitlab = this.config.gitlab!
+    if (gitlab.snippetId) {
+      await this.updateSnippet(gitlab.token, gitlab.snippetId, content)
+    } else {
+      const result = await this.createSnippet(gitlab.token, content)
+      gitlab.snippetId = String(result.id)
+      gitlab.snippetUrl = result.url
       await this.saveConfig()
+    }
+  }
 
+  private async decodeRemote(
+    content: string,
+    password: string
+  ): Promise<{ envelope: SyncData; data: BackupData }> {
+    const envelope: SyncData = JSON.parse(content)
+    const jsonData = envelope.encrypted
+      ? await this.decryptData(envelope.data, password)
+      : envelope.data
+    return { envelope, data: JSON.parse(jsonData) as BackupData }
+  }
+
+  /**
+   * 上传数据，并把它记为下次合并的基准。
+   */
+  private async uploadData(
+    provider: RemoteSyncProvider,
+    data: BackupData,
+    password: string
+  ): Promise<SyncData> {
+    const syncData: SyncData = {
+      version: '1.0.0',
+      appVersion: app.getVersion(),
+      syncFormat: SYNC_FORMAT_VERSION,
+      lastModified: new Date().toISOString(),
+      checksum: this.calculateBackupChecksum(data),
+      encrypted: true,
+      data: await this.encryptData(JSON.stringify(data), password)
+    }
+
+    await this.writeRemote(provider, JSON.stringify(syncData, null, 2))
+    await this.saveBase(provider, data, password)
+
+    this.config.lastSync = new Date().toISOString()
+    this.config.lastSyncChecksum = syncData.checksum
+    await this.saveConfig()
+    return syncData
+  }
+
+  // ==================== 合并基准（上次同步结果） ====================
+
+  private getBasePath(provider: RemoteSyncProvider): string {
+    return join(app.getPath('userData'), `sync-base-${provider}.enc`)
+  }
+
+  /**
+   * 读取上次同步结果。文件不存在或无法解密（例如更换了同步密码）时返回 undefined，
+   * 按“首次合并”处理。
+   */
+  private async loadBase(
+    provider: RemoteSyncProvider,
+    password: string
+  ): Promise<BackupData | undefined> {
+    try {
+      const encrypted = await fs.readFile(this.getBasePath(provider), 'utf-8')
+      return JSON.parse(await this.decryptData(encrypted.trim(), password)) as BackupData
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') {
+        logger.logError('system', 'Failed to load sync base snapshot', error as Error)
+      }
+      return undefined
+    }
+  }
+
+  private async saveBase(
+    provider: RemoteSyncProvider,
+    data: BackupData,
+    password: string
+  ): Promise<void> {
+    const normalized = this.normalizeForMerge(data)
+    const encrypted = await this.encryptData(JSON.stringify(normalized), password)
+    await fs.writeFile(this.getBasePath(provider), encrypted, { encoding: 'utf-8', mode: 0o600 })
+  }
+
+  private async deleteBase(provider: RemoteSyncProvider): Promise<void> {
+    try {
+      await fs.rm(this.getBasePath(provider), { force: true })
+    } catch (error) {
+      logger.logError('system', 'Failed to delete sync base snapshot', error as Error)
+    }
+  }
+
+  /**
+   * 合并前统一数据形态：
+   * - 去掉本机 MCP 接入配置（不参与同步）；
+   * - 去掉 AI 渠道的 updatedAt（每次保存 AI 配置都会刷新，不代表内容变化）；
+   * - 不保存密码时，本地会话缺失的密码从基准补回，避免被当成“本地删除了密码”。
+   */
+  private normalizeForMerge(data: BackupData, base?: BackupData): BackupData {
+    const normalized = JSON.parse(JSON.stringify(data ?? {})) as BackupData
+
+    if (normalized.settings && typeof normalized.settings === 'object') {
+      delete normalized.settings.agentMcp
+    }
+
+    if (Array.isArray(normalized.aiConfig?.channels)) {
+      for (const channel of normalized.aiConfig.channels) {
+        if (channel && typeof channel === 'object') delete channel.updatedAt
+      }
+    }
+
+    if (
+      base &&
+      Array.isArray(normalized.sessions) &&
+      Array.isArray(base.sessions) &&
+      normalized.settings?.security?.savePasswords === false
+    ) {
+      const baseSessions = new Map(base.sessions.map((session: any) => [session?.id, session]))
+      for (const session of normalized.sessions) {
+        const baseSession = baseSessions.get(session?.id)
+        if (baseSession) fillMissingSecrets(session, baseSession)
+      }
+    }
+
+    return normalized
+  }
+
+  private stripLocalOnlySettings(data: BackupData): BackupData {
+    const copy = { ...data }
+    if (copy.settings && typeof copy.settings === 'object') {
+      copy.settings = { ...copy.settings }
+      delete copy.settings.agentMcp
+    }
+    return copy
+  }
+
+  // ==================== 上传 / 下载（强制，不合并） ====================
+
+  private checkProviderReady(provider: RemoteSyncProvider): SyncResult | string {
+    if (!this.getProviderToken(provider)) {
+      return { success: false, message: `未配置 ${this.providerLabel(provider)} Token` }
+    }
+    const password = this.getEncryptionPassword()
+    if (!password) {
+      return { success: false, message: '未设置同步加密密码' }
+    }
+    return password
+  }
+
+  private async forceUpload(provider: RemoteSyncProvider): Promise<SyncResult> {
+    const ready = this.checkProviderReady(provider)
+    if (typeof ready !== 'string') return ready
+
+    try {
+      const syncData = await this.uploadData(provider, await this.collectSyncData(), ready)
       return {
         success: true,
         action: 'uploaded',
-        message: '数据已上传到 GitLab',
+        message: `数据已上传到 ${this.providerLabel(provider)}（覆盖云端）`,
         localTime: syncData.lastModified
       }
     } catch (error: any) {
-      logger.logError('system', 'Failed to upload to GitLab', error)
+      logger.logError('system', `Failed to upload to ${this.providerLabel(provider)}`, error)
       return {
         success: false,
         message: error.response?.data?.message || error.message || '上传失败'
@@ -1016,83 +1271,56 @@ export class SyncManager {
     }
   }
 
-  /**
-   * 从 GitLab Snippet 下载
-   */
-  async downloadFromGitLab(): Promise<SyncResult> {
-    if (!this.config.gitlab?.token) {
-      return { success: false, message: '未配置 GitLab Token' }
-    }
+  private async forceDownload(provider: RemoteSyncProvider): Promise<SyncResult> {
+    const ready = this.checkProviderReady(provider)
+    if (typeof ready !== 'string') return ready
 
-    if (!this.config.gitlab.snippetId) {
+    if (!this.getRemoteId(provider)) {
       return { success: false, message: '未找到同步数据，请先上传' }
     }
 
-    const encryptionPassword = this.getEncryptionPassword()
-    if (!encryptionPassword) {
-      return { success: false, message: '未设置同步加密密码' }
-    }
-
     try {
-      // 获取 Snippet 内容
-      const snippet = await this.getSnippet(this.config.gitlab.token, this.config.gitlab.snippetId)
-      if (!snippet) {
-        return { success: false, message: 'Snippet 不存在或已被删除' }
+      const remote = await this.readRemote(provider)
+      if (!remote) {
+        return {
+          success: false,
+          message: provider === 'github' ? 'Gist 不存在或已被删除' : 'Snippet 不存在或已被删除'
+        }
       }
 
-      // 解析同步数据
-      const syncData: SyncData = JSON.parse(snippet.content)
+      const { envelope, data } = await this.decodeRemote(remote.content, ready)
+      const remoteData = isLegacyMobileEnvelope(envelope)
+        ? (scopeLegacyMobileRemote(data, await this.loadBase(provider, ready)) as BackupData)
+        : data
 
-      // 解密数据
-      let jsonData: string
-      if (syncData.encrypted) {
-        jsonData = await this.decryptData(syncData.data, encryptionPassword)
-      } else {
-        jsonData = syncData.data
-      }
+      await backupManager.applyBackup(this.stripLocalOnlySettings(remoteData), FULL_RESTORE_OPTIONS)
 
-      // 解析备份数据
-      const backupData: BackupData = JSON.parse(jsonData)
+      // 下载只新增/覆盖、不删除本地数据；以云端内容作为基准，
+      // 本地独有的数据会在下次智能同步时作为新增上传。
+      await this.saveBase(provider, remoteData, ready)
 
-      // 应用数据
-      await backupManager.applyBackup(backupData, {
-        restoreSessions: true,
-        restoreSnippets: true,
-        restoreSettings: true,
-        restoreBackupConfig: false,
-        restoreSyncConfig: false,
-        restoreCommandHistory: true,
-        restoreSSHKeys: true, // 恢复 SSH 密钥（包含私钥）
-        restorePortForwards: true,
-        restoreSessionTemplates: true,
-        restoreScheduledTasks: true,
-        restoreWorkflows: true,
-        restoreAIConfig: true, // 恢复 AI 配置
-        restoreAIChatHistory: true, // 恢复 AI 聊天历史（全局 + 终端）
-        restoreConnectionStats: true,
-        restoreAuditLogs: true,
-        restoreTransferRecords: true,
-        restoreLockConfig: true,
-        restoreQuickCommands: true, // 恢复快捷命令
-        restoreLazyScripts: true // 恢复懒人脚本
-      })
-
-      // 更新同步状态
       this.config.lastSync = new Date().toISOString()
-      this.config.lastSyncChecksum = syncData.checksum
+      this.config.lastSyncChecksum = envelope.checksum
       await this.saveConfig()
 
       return {
         success: true,
         action: 'downloaded',
-        message: '数据已从 GitLab 下载并应用',
-        remoteTime: syncData.lastModified
+        message: `数据已从 ${this.providerLabel(provider)} 下载并应用`,
+        remoteTime: envelope.lastModified
       }
     } catch (error: any) {
-      logger.logError('system', 'Failed to download from GitLab', error)
+      logger.logError('system', `Failed to download from ${this.providerLabel(provider)}`, error)
 
       if (error.message?.includes('解密失败') || error.message?.includes('decipher')) {
         return { success: false, message: '解密失败，密码可能不正确' }
+      }
+
+      if (this.isInterruptedRemoteDownload(error)) {
+        return {
+          success: false,
+          message: `${this.providerLabel(provider)} 大文件下载连接中断，请检查网络后重试`
+        }
       }
 
       return {
@@ -1103,70 +1331,17 @@ export class SyncManager {
   }
 
   /**
-   * GitLab 智能同步
+   * 上传到 GitLab Snippet（覆盖云端）
    */
-  private async syncWithGitLab(): Promise<SyncResult> {
-    if (!this.config.gitlab?.token) {
-      return { success: false, message: '未配置 GitLab Token' }
-    }
+  async uploadToGitLab(): Promise<SyncResult> {
+    return this.forceUpload('gitlab')
+  }
 
-    if (!this.getEncryptionPassword()) {
-      return { success: false, message: '未设置同步加密密码' }
-    }
-
-    try {
-      // 收集本地数据
-      const localData = await this.collectSyncData()
-      const localChecksum = this.calculateBackupChecksum(localData)
-
-      // 如果没有 Snippet，直接上传
-      if (!this.config.gitlab.snippetId) {
-        return await this.uploadToGitLab()
-      }
-
-      // 获取远程数据
-      const snippet = await this.getSnippet(this.config.gitlab.token, this.config.gitlab.snippetId)
-      if (!snippet) {
-        // Snippet 被删除，重新创建
-        this.config.gitlab.snippetId = undefined
-        await this.saveConfig()
-        return await this.uploadToGitLab()
-      }
-
-      const remoteSyncData: SyncData = JSON.parse(snippet.content)
-
-      // 比较校验和
-      if (localChecksum === remoteSyncData.checksum) {
-        return {
-          success: true,
-          action: 'no-change',
-          message: '数据已是最新，无需同步'
-        }
-      }
-
-      const localChanged = this.config.lastSyncChecksum !== localChecksum
-      const remoteChanged = this.config.lastSyncChecksum !== remoteSyncData.checksum
-
-      if (localChanged && !remoteChanged) {
-        return await this.uploadToGitLab()
-      } else if (!localChanged && remoteChanged) {
-        return await this.downloadFromGitLab()
-      } else if (localChanged && remoteChanged) {
-        return {
-          success: true,
-          action: 'conflict',
-          message: '本地和云端数据都已变化，请手动选择上传或下载'
-        }
-      }
-
-      return { success: true, action: 'no-change', message: '数据已是最新，无需同步' }
-    } catch (error: any) {
-      logger.logError('system', 'GitLab sync failed', error)
-      return {
-        success: false,
-        message: error.message || '同步失败'
-      }
-    }
+  /**
+   * 从 GitLab Snippet 下载（新增/覆盖本地，不删除）
+   */
+  async downloadFromGitLab(): Promise<SyncResult> {
+    return this.forceDownload('gitlab')
   }
 
   /**
@@ -1187,171 +1362,28 @@ export class SyncManager {
     this.config.lastSync = undefined
     this.config.lastSyncChecksum = undefined
     await this.saveConfig()
+    await this.deleteBase('gitlab')
     this.stopAutoSync()
   }
 
   /**
-   * 上传到 GitHub Gist
+   * 上传到 GitHub Gist（覆盖云端）
    */
   async uploadToGitHub(): Promise<SyncResult> {
-    if (!this.config.github?.token) {
-      return { success: false, message: '未配置 GitHub Token' }
-    }
-
-    const encryptionPassword = this.getEncryptionPassword()
-    if (!encryptionPassword) {
-      return { success: false, message: '未设置同步加密密码' }
-    }
-
-    try {
-      // 收集数据
-      const backupData = await this.collectSyncData()
-      const jsonData = JSON.stringify(backupData)
-
-      // 加密数据
-      const encryptedData = await this.encryptData(jsonData, encryptionPassword)
-
-      // 构建同步数据
-      const syncData: SyncData = {
-        version: '1.0.0',
-        appVersion: app.getVersion(),
-        lastModified: new Date().toISOString(),
-        checksum: this.calculateBackupChecksum(backupData),
-        encrypted: true,
-        data: encryptedData
-      }
-
-      const content = JSON.stringify(syncData, null, 2)
-
-      // 上传到 Gist
-      if (this.config.github.gistId) {
-        // 更新现有 Gist
-        await this.updateGist(this.config.github.token, this.config.github.gistId, content)
-      } else {
-        // 创建新 Gist
-        const result = await this.createGist(this.config.github.token, content)
-        this.config.github.gistId = result.id
-        this.config.github.gistUrl = result.url
-        await this.saveConfig()
-      }
-
-      // 更新同步状态
-      this.config.lastSync = new Date().toISOString()
-      this.config.lastSyncChecksum = syncData.checksum
-      await this.saveConfig()
-
-      return {
-        success: true,
-        action: 'uploaded',
-        message: '数据已上传到 GitHub',
-        localTime: syncData.lastModified
-      }
-    } catch (error: any) {
-      logger.logError('system', 'Failed to upload to GitHub', error)
-      return {
-        success: false,
-        message: error.response?.data?.message || error.message || '上传失败'
-      }
-    }
+    return this.forceUpload('github')
   }
 
   /**
-   * 从 GitHub Gist 下载
+   * 从 GitHub Gist 下载（新增/覆盖本地，不删除）
    */
   async downloadFromGitHub(): Promise<SyncResult> {
-    if (!this.config.github?.token) {
-      return { success: false, message: '未配置 GitHub Token' }
-    }
-
-    if (!this.config.github.gistId) {
-      return { success: false, message: '未找到同步数据，请先上传' }
-    }
-
-    const encryptionPassword = this.getEncryptionPassword()
-    if (!encryptionPassword) {
-      return { success: false, message: '未设置同步加密密码' }
-    }
-
-    try {
-      // 获取 Gist 内容
-      const gist = await this.getGist(this.config.github.token, this.config.github.gistId)
-      if (!gist) {
-        return { success: false, message: 'Gist 不存在或已被删除' }
-      }
-
-      // 解析同步数据
-      const syncData: SyncData = JSON.parse(gist.content)
-
-      // 解密数据
-      let jsonData: string
-      if (syncData.encrypted) {
-        jsonData = await this.decryptData(syncData.data, encryptionPassword)
-      } else {
-        jsonData = syncData.data
-      }
-
-      // 解析备份数据
-      const backupData: BackupData = JSON.parse(jsonData)
-
-      // 应用数据
-      await backupManager.applyBackup(backupData, {
-        restoreSessions: true,
-        restoreSnippets: true,
-        restoreSettings: true,
-        restoreBackupConfig: false,
-        restoreSyncConfig: false,
-        restoreCommandHistory: true,
-        restoreSSHKeys: true, // 恢复 SSH 密钥（包含私钥）
-        restorePortForwards: true,
-        restoreSessionTemplates: true,
-        restoreScheduledTasks: true,
-        restoreWorkflows: true,
-        restoreAIConfig: true, // 恢复 AI 配置
-        restoreAIChatHistory: true, // 恢复 AI 聊天历史（全局 + 终端）
-        restoreConnectionStats: true,
-        restoreAuditLogs: true,
-        restoreTransferRecords: true,
-        restoreLockConfig: true,
-        restoreQuickCommands: true, // 恢复快捷命令
-        restoreLazyScripts: true // 恢复懒人脚本
-      })
-
-      // 更新同步状态
-      this.config.lastSync = new Date().toISOString()
-      this.config.lastSyncChecksum = syncData.checksum
-      await this.saveConfig()
-
-      return {
-        success: true,
-        action: 'downloaded',
-        message: '数据已从 GitHub 下载并应用',
-        remoteTime: syncData.lastModified
-      }
-    } catch (error: any) {
-      logger.logError('system', 'Failed to download from GitHub', error)
-
-      if (error.message?.includes('解密失败') || error.message?.includes('decipher')) {
-        return { success: false, message: '解密失败，密码可能不正确' }
-      }
-
-      if (this.isInterruptedRemoteDownload(error)) {
-        return {
-          success: false,
-          message: 'GitHub 大文件下载连接中断，请检查网络后重试'
-        }
-      }
-
-      return {
-        success: false,
-        message: error.message || '下载失败'
-      }
-    }
+    return this.forceDownload('github')
   }
 
   /**
-   * 智能同步 - 自动判断上传或下载
+   * 智能同步 - 与云端逐条合并
    */
-  async sync(): Promise<SyncResult> {
+  async sync(options: SyncOptions = {}): Promise<SyncResult> {
     if (this.isSyncing) {
       return { success: false, message: '同步正在进行中' }
     }
@@ -1363,10 +1395,8 @@ export class SyncManager {
     this.isSyncing = true
 
     try {
-      if (this.config.provider === 'github') {
-        return await this.syncWithGitHub()
-      } else if (this.config.provider === 'gitlab') {
-        return await this.syncWithGitLab()
+      if (this.config.provider === 'github' || this.config.provider === 'gitlab') {
+        return await this.mergeSync(this.config.provider, options)
       }
 
       return { success: false, message: '不支持的同步方式' }
@@ -1376,74 +1406,133 @@ export class SyncManager {
   }
 
   /**
-   * GitHub 智能同步
+   * 三方合并同步：本地、云端各自的修改都保留，删除也会同步；
+   * 同一条记录两边都改时保留 updatedAt 较新的版本，并在结果中列出。
    */
-  private async syncWithGitHub(): Promise<SyncResult> {
-    if (!this.config.github?.token) {
-      return { success: false, message: '未配置 GitHub Token' }
-    }
-
-    if (!this.getEncryptionPassword()) {
-      return { success: false, message: '未设置同步加密密码' }
-    }
+  private async mergeSync(
+    provider: RemoteSyncProvider,
+    options: SyncOptions
+  ): Promise<SyncResult> {
+    const ready = this.checkProviderReady(provider)
+    if (typeof ready !== 'string') return ready
+    const password = ready
+    const label = this.providerLabel(provider)
 
     try {
-      // 收集本地数据
-      const localData = await this.collectSyncData()
-      const localChecksum = this.calculateBackupChecksum(localData)
+      for (let attempt = 0; attempt < MERGE_SYNC_MAX_ATTEMPTS; attempt++) {
+        const remote = await this.readRemote(provider)
+        if (!remote) {
+          if (this.getRemoteId(provider)) await this.forgetRemote(provider)
+          const syncData = await this.uploadData(provider, await this.collectSyncData(), password)
+          return {
+            success: true,
+            action: 'uploaded',
+            message: `云端没有同步数据，已上传本地数据到 ${label}`,
+            localTime: syncData.lastModified
+          }
+        }
 
-      // 如果没有 Gist，直接上传
-      if (!this.config.github.gistId) {
-        return await this.uploadToGitHub()
-      }
+        const { envelope, data } = await this.decodeRemote(remote.content, password)
+        const base = await this.loadBase(provider, password)
+        const remoteData = this.normalizeForMerge(
+          isLegacyMobileEnvelope(envelope)
+            ? (scopeLegacyMobileRemote(data, base) as BackupData)
+            : data
+        )
 
-      // 获取远程数据
-      const gist = await this.getGist(this.config.github.token, this.config.github.gistId)
-      if (!gist) {
-        // Gist 被删除，重新创建
-        this.config.github.gistId = undefined
-        await this.saveConfig()
-        return await this.uploadToGitHub()
-      }
+        if (!base) {
+          // 首次合并（老版本升级或更换了同步密码）：没有基准无法判断删除，
+          // 只把云端数据合并进本地（按名称/ID 匹配，不删除），再上传合集。
+          await backupManager.applyBackup(this.stripLocalOnlySettings(remoteData), FULL_RESTORE_OPTIONS)
+          const merged = await this.collectSyncData()
 
-      const remoteSyncData: SyncData = JSON.parse(gist.content)
+          if ((await this.readRemoteUpdatedAt(provider)) !== remote.updatedAt) continue
 
-      // 比较校验和
-      if (localChecksum === remoteSyncData.checksum) {
+          const syncData = await this.uploadData(provider, merged, password)
+          return {
+            success: true,
+            action: 'merged',
+            message: `首次合并同步完成：已合并 ${label} 上的数据并上传本地数据`,
+            localTime: syncData.lastModified,
+            remoteTime: envelope.lastModified,
+            summary: { uploaded: 0, downloaded: 0, deleted: 0 },
+            conflicts: []
+          }
+        }
+
+        const local = this.normalizeForMerge(await this.collectSyncData(), base)
+        const result = mergeSnapshot(
+          this.normalizeForMerge(base),
+          local,
+          remoteData,
+          DESKTOP_SYNC_SCHEMA
+        )
+
+        if (result.massDeletes.length > 0 && !options.allowMassDelete) {
+          return {
+            success: true,
+            action: 'needs-confirm',
+            message: `本次同步将删除本地大量数据：${result.massDeletes
+              .map((item) => `${item.label} ${item.deleteCount}/${item.localCount} 条`)
+              .join('，')}。请确认后再同步。`,
+            summary: result.summary,
+            conflicts: result.conflicts,
+            massDeletes: result.massDeletes
+          }
+        }
+
+        if (result.remoteChanged) {
+          // 先确认云端没有被其它设备改写，再修改本地，避免基于旧数据合并
+          if ((await this.readRemoteUpdatedAt(provider)) !== remote.updatedAt) continue
+        }
+
+        await backupManager.applySyncChanges(result.localChanges)
+
+        const merged = result.merged as BackupData
+        let localTime: string | undefined
+        if (result.remoteChanged) {
+          localTime = (await this.uploadData(provider, merged, password)).lastModified
+        } else {
+          await this.saveBase(provider, merged, password)
+          this.config.lastSync = new Date().toISOString()
+          this.config.lastSyncChecksum = envelope.checksum
+          await this.saveConfig()
+        }
+
+        const changed =
+          result.remoteChanged || Object.keys(result.localChanges).length > 0
         return {
           success: true,
-          action: 'no-change',
-          message: '数据已是最新，无需同步'
+          action: changed ? 'merged' : 'no-change',
+          message: changed ? `合并同步完成：${formatMergeSummary(result)}` : '数据已是最新，无需同步',
+          localTime,
+          remoteTime: envelope.lastModified,
+          summary: result.summary,
+          conflicts: result.conflicts
         }
       }
 
-      const localChanged = this.config.lastSyncChecksum !== localChecksum
-      const remoteChanged = this.config.lastSyncChecksum !== remoteSyncData.checksum
-
-      if (localChanged && !remoteChanged) {
-        return await this.uploadToGitHub()
-      } else if (!localChanged && remoteChanged) {
-        return await this.downloadFromGitHub()
-      } else if (localChanged && remoteChanged) {
-        return {
-          success: true,
-          action: 'conflict',
-          message: '本地和云端数据都已变化，请手动选择上传或下载'
-        }
+      return {
+        success: false,
+        message: `${label} 上的数据在同步期间被其它设备多次修改，请稍后重试`
       }
-
-      return { success: true, action: 'no-change', message: '数据已是最新，无需同步' }
     } catch (error: any) {
-      logger.logError('system', 'Sync failed', error)
+      logger.logError('system', `${label} sync failed`, error)
+
+      if (error.message?.includes('解密失败') || error.message?.includes('decipher')) {
+        return { success: false, message: '解密失败，密码可能不正确' }
+      }
+
       if (this.isInterruptedRemoteDownload(error)) {
         return {
           success: false,
-          message: 'GitHub 大文件下载连接中断，请检查网络后重试'
+          message: `${label} 大文件下载连接中断，请检查网络后重试`
         }
       }
+
       return {
         success: false,
-        message: error.message || '同步失败'
+        message: error.response?.data?.message || error.message || '同步失败'
       }
     }
   }
@@ -1498,6 +1587,7 @@ export class SyncManager {
     this.config.lastSync = undefined
     this.config.lastSyncChecksum = undefined
     await this.saveConfig()
+    await this.deleteBase('github')
     this.stopAutoSync()
   }
 

@@ -176,7 +176,8 @@ describe('MCP extended database queries', () => {
       database: 'ORCL',
       query: 'SELECT COUNT(*) FROM audit_logs'
     })
-    expect(mongo.command).toContain('MONGO_INITDB_ROOT_PASSWORD')
+    expect(mongo.command).not.toContain('password')
+    expect(mongo.stdin).toContain('process.env.MONGO_INITDB_ROOT_PASSWORD')
     expect(redis.command).toContain('REDIS_PASSWORD')
     expect(sqlserver.command).toContain('MSSQL_SA_PASSWORD')
     expect(oracle.command).toContain("'docker' 'exec' '-i' 'oracle-db'")

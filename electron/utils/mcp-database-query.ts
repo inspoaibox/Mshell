@@ -379,13 +379,8 @@ if command -v docker >/dev/null 2>&1; then
         db_default=$(docker exec "$id" sh -c 'printf %s "\${MONGO_INITDB_DATABASE:-admin}"' 2>/dev/null)
         case "$db_user" in *[!A-Za-z0-9_.@-]*) db_user="" ;; esac
         case "$db_default" in ''|*[!A-Za-z0-9_.-]*) db_default=admin ;; esac
-        databases=$(docker exec "$id" sh -c '
-          user="\${MONGO_INITDB_ROOT_USERNAME:-}"
-          secret="\${MONGO_INITDB_ROOT_PASSWORD:-}"
-          set -- mongosh --quiet --norc
-          [ -n "$user" ] && [ -n "$secret" ] && set -- "$@" --username="$user" --password="$secret" --authenticationDatabase=admin
-          exec "$@" --eval "const status=db.runCommand({connectionStatus:1}); const users=status.authInfo&&status.authInfo.authenticatedUsers||[]; const username=users.length?users[0].user:String(); const listed=db.adminCommand({listDatabases:1,nameOnly:true}); if(listed.ok===1) listed.databases.forEach((entry)=>print(username+String.fromCharCode(124)+entry.name));"
-        ' 2>/dev/null)
+        # Credentials are read from the container environment inside mongosh, never passed in argv.
+        databases=$(docker exec "$id" mongosh --quiet --norc --eval "const authUser=process.env.MONGO_INITDB_ROOT_USERNAME; const authSecret=process.env.MONGO_INITDB_ROOT_PASSWORD; if(authUser&&authSecret) db.getSiblingDB(String.fromCharCode(97,100,109,105,110)).auth(authUser,authSecret); const status=db.runCommand({connectionStatus:1}); const users=status.authInfo&&status.authInfo.authenticatedUsers||[]; const username=users.length?users[0].user:String(); const listed=db.adminCommand({listDatabases:1,nameOnly:true}); if(listed.ok===1) listed.databases.forEach((entry)=>print(username+String.fromCharCode(124)+entry.name));" 2>/dev/null)
         if [ $? -eq 0 ] && [ -n "$databases" ]; then
           printf '%s\n' "$databases" | while IFS='|' read -r actual_user database extra; do
             case "$actual_user" in *[!A-Za-z0-9_.@-]*) continue ;; esac
@@ -912,13 +907,23 @@ export function validateMcpDatabaseQuery(query: string, engine: McpDatabaseEngin
   ) {
     throw new Error('查询不允许客户端转义命令或可执行注释')
   }
-  if (
-    engine === 'sqlserver' &&
-    /\b(?:next\s+value\s+for|openrowset|opendatasource|openquery|openxml|updlock|xlock|tablockx|holdlock)\b/i.test(
-      query
-    )
-  ) {
-    throw new Error('SQL Server 查询包含序列写入、外部数据源或写锁')
+  if (engine === 'sqlserver') {
+    // Match keywords outside string literals and quoted identifiers, so values stay queryable.
+    const code = query.replace(/N?'(?:[^']|'')*'|\[[^\]]*\]|"[^"]*"/g, ' ')
+    if (
+      /\b(?:next\s+value\s+for|openrowset|opendatasource|openquery|openxml|updlock|xlock|tablockx|holdlock)\b/i.test(
+        code
+      )
+    ) {
+      throw new Error('SQL Server 查询包含序列写入、外部数据源或写锁')
+    }
+    if (
+      /\b(?:exec|execute|sp_\w*|xp_\w*|reconfigure|shutdown|dbcc|waitfor|bulk|backup|restore|kill|grant|revoke|deny|truncate|merge|insert|update|delete|drop|alter|create|use)\b/i.test(
+        code
+      )
+    ) {
+      throw new Error('SQL Server 查询包含存储过程、管理命令或修改语句')
+    }
   }
   let statements
   try {

@@ -20,6 +20,8 @@ import { transferRecordManager } from './TransferRecordManager'
 import { sessionLockManager } from './SessionLockManager'
 import { logger } from '../utils/logger'
 import { credentialManager } from './CredentialManager'
+import { isLocalTerminalBackground as isSyncLocalTerminalBackground } from '../../src/types/terminal-background'
+import type { CategoryChanges, CollectionChanges } from '../../src/lib/sync/merge'
 
 const scryptAsync = promisify(scrypt)
 const TERMINAL_BACKGROUND_SCHEME = 'mshell-terminal-background'
@@ -1440,6 +1442,216 @@ export class BackupManager {
     } catch (error) {
       logger.logError('system', 'Failed to apply backup', error as Error)
       throw error
+    }
+  }
+
+  /**
+   * 应用云同步三方合并后的逐条变化（新增、更新、删除）。
+   * 与 applyBackup 不同：按 id 原样写入，保留时间戳，并会执行删除。
+   */
+  async applySyncChanges(changes: Record<string, CategoryChanges>): Promise<void> {
+    const collection = (category: string): CollectionChanges | undefined => {
+      const change = changes[category]
+      return change && (change.kind === 'collection' || change.kind === 'map') ? change : undefined
+    }
+    const value = (category: string): any => {
+      const change = changes[category]
+      return change && (change.kind === 'object' || change.kind === 'value') ? change.value : undefined
+    }
+    const run = async (label: string, action: () => Promise<void> | void) => {
+      try {
+        await action()
+      } catch (error) {
+        logger.logError('system', `Failed to apply sync change: ${label}`, error as Error)
+      }
+    }
+    const applyCollection = async (
+      category: string,
+      upsert: (record: any) => Promise<void> | void,
+      remove: (key: string) => Promise<void> | void
+    ) => {
+      const change = collection(category)
+      if (!change) return
+      for (const record of change.upserts) {
+        await run(`${category}:${record?.id ?? record?.key ?? ''}`, () => upsert(record))
+      }
+      for (const key of change.deletes) {
+        await run(`${category}:${key}`, () => remove(key))
+      }
+    }
+
+    // 分组先于会话写入；分组删除放在会话处理之后
+    await applyCollection(
+      'sessionGroups',
+      (record) => sessionManager.syncUpsertGroup(record),
+      () => undefined
+    )
+    await applyCollection(
+      'sessions',
+      (record) => {
+        const current = sessionManager.getSession(record.id)
+        // 本机图片背景不参与同步，云端版本没有背景时保留本机设置
+        if (
+          !record.terminalBackground &&
+          current?.terminalBackground &&
+          isSyncLocalTerminalBackground(current.terminalBackground)
+        ) {
+          record = { ...record, terminalBackground: current.terminalBackground }
+        }
+        return sessionManager.syncUpsertSession(record)
+      },
+      (id) => sessionManager.syncRemoveSession(id)
+    )
+    for (const id of collection('sessionGroups')?.deletes || []) {
+      await run(`sessionGroups:${id}`, () => sessionManager.syncRemoveGroup(id))
+    }
+
+    await applyCollection(
+      'snippets',
+      (record) => snippetManager.syncPut(record),
+      (id) => snippetManager.syncRemove(id)
+    )
+    await applyCollection(
+      'commandHistory',
+      (record) => commandHistoryManager.syncPut(record),
+      (id) => commandHistoryManager.syncRemove(id)
+    )
+    await applyCollection(
+      'sshKeys',
+      (record) => sshKeyManager.syncUpsertKey(record),
+      (id) => sshKeyManager.syncRemoveKey(id)
+    )
+    await applyCollection(
+      'portForwards',
+      (record) => portForwardManager.syncUpsertForward(record),
+      (id) => portForwardManager.syncRemoveForward(id)
+    )
+    await applyCollection(
+      'portForwardTemplates',
+      (record) => portForwardManager.syncUpsertTemplate(record),
+      (id) => portForwardManager.syncRemoveTemplate(id)
+    )
+    await applyCollection(
+      'sessionTemplates',
+      (record) => sessionTemplateManager.syncPut(record),
+      (id) => sessionTemplateManager.syncRemove(id)
+    )
+    await applyCollection(
+      'scheduledTasks',
+      (record) => taskSchedulerManager.syncUpsert(record),
+      (id) => taskSchedulerManager.syncRemove(id)
+    )
+    await applyCollection(
+      'workflows',
+      (record) => workflowManager.syncUpsert(record),
+      (id) => workflowManager.syncRemove(id)
+    )
+    await applyCollection(
+      'connectionStats',
+      (record) => connectionStatsManager.syncPut(record),
+      (id) => connectionStatsManager.syncRemove(id)
+    )
+    await applyCollection(
+      'auditLogs',
+      (record) => auditLogManager.syncPut(record),
+      (id) => auditLogManager.syncRemove(id)
+    )
+    await applyCollection(
+      'transferRecords',
+      (record) => transferRecordManager.syncPut(record),
+      (id) => transferRecordManager.syncRemove(id)
+    )
+
+    if (collection('quickCommands')) {
+      const { quickCommandManager } = await import('./QuickCommandManager')
+      await quickCommandManager.initialize()
+      await applyCollection(
+        'quickCommands',
+        (record) => quickCommandManager.syncPut(record),
+        (id) => quickCommandManager.syncRemove(id)
+      )
+    }
+
+    if (collection('lazyScripts')) {
+      const { lazyScriptManager } = await import('./LazyScriptManager')
+      await lazyScriptManager.initialize()
+      // 懒人脚本按文件名匹配（默认脚本在各设备上的 id 不同）
+      const findByFileName = (fileName: string) =>
+        lazyScriptManager.getAll().find((script) => (script.fileName || script.name) === fileName)
+      await applyCollection(
+        'lazyScripts',
+        async (record) => {
+          const existing = findByFileName(record.fileName || record.name)
+          if (existing && existing.id !== record.id) {
+            await lazyScriptManager.syncRemove(existing.id)
+          }
+          await lazyScriptManager.syncPut(record)
+        },
+        async (fileName) => {
+          const existing = findByFileName(fileName)
+          if (existing) await lazyScriptManager.syncRemove(existing.id)
+        }
+      )
+    }
+
+    const settings = value('settings')
+    if (settings) {
+      await run('settings', async () => {
+        const { appSettingsManager } = await import('../utils/app-settings')
+        const current = appSettingsManager.getSettings() as any
+        const updates = JSON.parse(JSON.stringify(settings))
+        // MCP 接入配置是本机配置，不随同步改写
+        delete updates.agentMcp
+        const currentBackground = current?.terminal?.background
+        if (
+          updates.terminal &&
+          !updates.terminal.background &&
+          currentBackground &&
+          isSyncLocalTerminalBackground(currentBackground)
+        ) {
+          updates.terminal.background = currentBackground
+        }
+        await appSettingsManager.updateSettings(updates)
+        if (appSettingsManager.getSettings().security.savePasswords === false) {
+          await sessionManager.removeSavedSecrets()
+        }
+        this.broadcastSettingsChanged(appSettingsManager.getSettings())
+      })
+    }
+
+    const lockConfig = value('lockConfig')
+    const aiConfig = value('aiConfig')
+    const aiChatHistory = value('aiChatHistory')
+    if (lockConfig || aiConfig || aiChatHistory) {
+      await this.applyBackup({ lockConfig, aiConfig, aiChatHistory } as BackupData, {
+        restoreSessions: false,
+        restoreSnippets: false,
+        restoreSettings: false,
+        restoreLockConfig: !!lockConfig,
+        restoreAIConfig: !!aiConfig,
+        restoreAIChatHistory: !!aiChatHistory
+      })
+    }
+
+    const terminalHistory = collection('aiTerminalChatHistory')
+    if (terminalHistory) {
+      const historyDir = join(app.getPath('userData'), 'ai-terminal-history')
+      await fs.mkdir(historyDir, { recursive: true })
+      const safeName = (name: string) => (name && basename(name) === name ? name : undefined)
+      for (const entry of terminalHistory.upserts) {
+        const fileName = safeName(entry.key)
+        if (!fileName) continue
+        await run(`aiTerminalChatHistory:${fileName}`, () =>
+          fs.writeFile(join(historyDir, fileName), JSON.stringify(entry.value, null, 2), 'utf-8')
+        )
+      }
+      for (const key of terminalHistory.deletes) {
+        const fileName = safeName(key)
+        if (!fileName) continue
+        await run(`aiTerminalChatHistory:${fileName}`, () =>
+          fs.rm(join(historyDir, fileName), { force: true })
+        )
+      }
     }
   }
 

@@ -815,7 +815,7 @@
                     <el-form-item label="操作" v-if="syncConfig.provider === 'github'">
                       <div class="sync-action-buttons">
                         <el-tooltip
-                          content="比较本地和云端数据，自动选择上传或下载；两边都变化时会提示手动选择"
+                          content="逐条合并本地和云端的新增、修改和删除；同一条记录两边都改时保留修改时间较新的"
                           placement="top"
                         >
                           <span>
@@ -831,7 +831,7 @@
                           </span>
                         </el-tooltip>
                         <el-tooltip
-                          content="用本地数据更新云端同步数据；云端已有数据时会被覆盖"
+                          content="不合并：用本地数据整体覆盖云端，其它设备尚未同步的修改会丢失"
                           placement="top"
                         >
                           <span>
@@ -845,7 +845,7 @@
                             </el-button>
                           </span>
                         </el-tooltip>
-                        <el-tooltip content="用云端同步数据覆盖本地数据" placement="top">
+                        <el-tooltip content="不合并：用云端数据新增或覆盖本地同名数据，不删除本地独有数据" placement="top">
                           <span>
                             <el-button
                               :icon="Download"
@@ -1003,7 +1003,7 @@
                     <el-form-item label="操作" v-if="syncConfig.provider === 'gitlab'">
                       <div class="sync-action-buttons">
                         <el-tooltip
-                          content="比较本地和云端数据，自动选择上传或下载；两边都变化时会提示手动选择"
+                          content="逐条合并本地和云端的新增、修改和删除；同一条记录两边都改时保留修改时间较新的"
                           placement="top"
                         >
                           <span>
@@ -1019,7 +1019,7 @@
                           </span>
                         </el-tooltip>
                         <el-tooltip
-                          content="用本地数据更新云端同步数据；云端已有数据时会被覆盖"
+                          content="不合并：用本地数据整体覆盖云端，其它设备尚未同步的修改会丢失"
                           placement="top"
                         >
                           <span>
@@ -1033,7 +1033,7 @@
                             </el-button>
                           </span>
                         </el-tooltip>
-                        <el-tooltip content="用云端同步数据覆盖本地数据" placement="top">
+                        <el-tooltip content="不合并：用云端数据新增或覆盖本地同名数据，不删除本地独有数据" placement="top">
                           <span>
                             <el-button
                               :icon="Download"
@@ -1824,7 +1824,7 @@ command=systemctl restart nginx
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, toRaw, watch, computed } from 'vue'
+import { ref, onMounted, toRaw, watch, computed, h } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DocumentCopy,
@@ -2013,7 +2013,7 @@ const DEFAULT_RESTORE_OPTIONS = [
 const restoreOptions = ref<string[]>([...DEFAULT_RESTORE_OPTIONS])
 const backupLoading = ref(false)
 
-const appVersion = ref('0.2.20')
+const appVersion = ref('0.2.21')
 
 const mcpStatus = ref({
   enabled: false,
@@ -2471,8 +2471,9 @@ const saveSettings = async () => {
     await ensureSftpDefaultLocalPath()
     ensureTerminalBackground()
 
-    // 保存常规设置
-    await window.electronAPI.settings.update(toRaw(settings.value))
+    // 保存常规设置；Agent 接入设置由 mcp:* 接口单独保存
+    const { agentMcp: _agentMcp, ...generalSettings } = toRaw(settings.value)
+    await window.electronAPI.settings.update(generalSettings)
 
     // 保存 AI 设置（如果有更改）
     if (aiSettingsPanelRef.value) {
@@ -3076,20 +3077,47 @@ const doSync = async () => {
   syncState.value.syncing = true
 
   try {
-    const result = await window.electronAPI.sync?.sync()
+    let result = await window.electronAPI.sync?.sync()
+
+    if (result?.success && result.data?.action === 'needs-confirm') {
+      const massDeletes: Array<{ label: string; deleteCount: number; localCount: number }> =
+        result.data.massDeletes || []
+      try {
+        await ElMessageBox.confirm(
+          h('div', [
+            h('p', '云端已删除了较多数据，本次同步会删除本地以下数据：'),
+            h(
+              'ul',
+              { style: 'margin: 8px 0; padding-left: 20px' },
+              massDeletes.map((item) =>
+                h('li', `${item.label}：${item.deleteCount} 条（本地共 ${item.localCount} 条）`)
+              )
+            ),
+            h('p', '如果这不是预期的结果，请取消，并在其它设备上检查同步数据。')
+          ]),
+          '确认删除本地数据',
+          { type: 'warning', confirmButtonText: '确认删除并同步', cancelButtonText: '取消' }
+        )
+      } catch {
+        return
+      }
+      result = await window.electronAPI.sync?.sync({ allowMassDelete: true })
+    }
 
     if (result?.success) {
       const data = result.data
       if (data.action === 'uploaded') {
-        ElMessage.success('数据已上传到云端')
-      } else if (data.action === 'downloaded') {
-        ElMessage.success('数据已从云端下载并应用')
+        ElMessage.success(data.message || '数据已上传到云端')
+      } else if (data.action === 'merged') {
+        ElMessage.success(data.message || '合并同步完成')
+        showSyncConflicts(data.conflicts)
       } else if (data.action === 'no-change') {
         ElMessage.info('数据已是最新，无需同步')
-      } else if (data.action === 'conflict') {
-        ElMessage.warning(data.message || '本地和云端数据都已变化，请手动选择上传或下载')
       }
       await loadSyncConfig()
+      if (data.action === 'merged') {
+        await loadSettings()
+      }
     } else {
       ElMessage.error(result?.data?.message || '同步失败')
     }
@@ -3098,6 +3126,35 @@ const doSync = async () => {
   } finally {
     syncState.value.syncing = false
   }
+}
+
+const showSyncConflicts = (
+  conflicts?: Array<{
+    label: string
+    name: string
+    kept: 'local' | 'remote'
+    reason: 'both-modified' | 'modified-deleted'
+  }>
+) => {
+  if (!conflicts?.length) return
+  const describe = (item: (typeof conflicts)[number]) => {
+    const source = item.kept === 'local' ? '本机' : '云端'
+    return item.reason === 'modified-deleted'
+      ? `一边删除、一边修改，已保留${source}修改后的版本`
+      : `两边都修改过，已保留${source}的版本`
+  }
+  void ElMessageBox.alert(
+    h('div', [
+      h('p', `以下 ${conflicts.length} 项在本机和云端都有改动，已按修改时间保留较新的版本：`),
+      h(
+        'ul',
+        { style: 'margin: 8px 0; padding-left: 20px; max-height: 280px; overflow: auto' },
+        conflicts.map((item) => h('li', `${item.label}「${item.name}」：${describe(item)}`))
+      )
+    ]),
+    '同步冲突',
+    { type: 'info', confirmButtonText: '知道了' }
+  ).catch(() => undefined)
 }
 
 const doUpload = async () => {
@@ -3140,9 +3197,13 @@ const doDownload = async () => {
   }
 
   try {
-    await ElMessageBox.confirm('从云端下载将覆盖本地数据，确定要继续吗？', '从云端下载', {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm(
+      '从云端下载会用云端数据覆盖本地同名数据（不合并），确定要继续吗？',
+      '从云端下载',
+      {
+        type: 'warning'
+      }
+    )
   } catch {
     return
   }
@@ -3305,9 +3366,13 @@ const doDownloadGitLab = async () => {
   }
 
   try {
-    await ElMessageBox.confirm('从云端下载将覆盖本地数据，确定要继续吗？', '从云端下载', {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm(
+      '从云端下载会用云端数据覆盖本地同名数据（不合并），确定要继续吗？',
+      '从云端下载',
+      {
+        type: 'warning'
+      }
+    )
   } catch {
     return
   }
@@ -3627,8 +3692,9 @@ const saveShortcutSettings = async () => {
       }
     }
 
+    const { agentMcp: _agentMcp, ...generalSettings } = toRaw(settings.value)
     await window.electronAPI.settings.update({
-      ...toRaw(settings.value),
+      ...generalSettings,
       shortcuts: shortcutSettings
     })
   } catch (error) {

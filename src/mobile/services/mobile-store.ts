@@ -1,4 +1,5 @@
 import type { SessionConfig, SessionGroup } from '@/types/session'
+import type { CategoryChanges } from '@/lib/sync/merge'
 import type {
   MobileBackupData,
   MobileQuickCommand,
@@ -9,7 +10,7 @@ import type {
 } from '../types'
 
 const STORAGE_KEY = 'mshell-mobile-state-v1'
-const MOBILE_BACKUP_VERSION = '0.2.0'
+export const MOBILE_BACKUP_VERSION = '0.2.0'
 const QUICK_SNIPPET_PREFIX = 'quick:'
 
 const emptyState = (): MobileStoreState => ({
@@ -250,7 +251,8 @@ export class MobileStore {
       normalizeKey({
         ...(existing || key),
         ...key,
-        createdAt: existing?.createdAt || key.createdAt || now
+        createdAt: existing?.createdAt || key.createdAt || now,
+        updatedAt: now
       })
     ])
     this.save()
@@ -334,6 +336,79 @@ export class MobileStore {
     return this.getState()
   }
 
+  /**
+   * 导出移动端参与云同步合并的数据（只包含移动端管理的类别）
+   */
+  exportSyncData(): MobileSyncData {
+    const backup = this.exportBackup()
+    return cloneForJson({
+      sessions: backup.sessions || [],
+      sessionGroups: backup.sessionGroups || [],
+      snippets: backup.snippets || [],
+      quickCommands: backup.quickCommands || [],
+      sshKeys: backup.sshKeys || []
+    })
+  }
+
+  /**
+   * 应用云同步合并结果：写入新增/更新的记录，删除对方已删除的记录
+   */
+  applySyncChanges(changes: Record<string, CategoryChanges>): MobileStoreState {
+    const collection = (category: string) => {
+      const change = changes[category]
+      return change && 'upserts' in change ? change : undefined
+    }
+
+    const sessions = collection('sessions')
+    if (sessions) {
+      this.state.sessions = replaceById(
+        this.state.sessions.filter((session) => !sessions.deletes.includes(session.id)),
+        sessions.upserts
+          .filter((session) => hasId(session) && isSshSession(session as SessionConfig))
+          .map((session) => normalizeSession(session as SessionConfig))
+      )
+    }
+
+    const groups = collection('sessionGroups')
+    if (groups) {
+      this.state.sessionGroups = replaceById(
+        this.state.sessionGroups.filter((group) => !groups.deletes.includes(group.id)),
+        groups.upserts.filter(hasId).map((group) => normalizeSessionGroup(group as SessionGroup))
+      )
+    }
+
+    const snippets = collection('snippets')
+    const quickCommands = collection('quickCommands')
+    if (snippets || quickCommands) {
+      const deleted = new Set([
+        ...(snippets?.deletes || []),
+        ...(quickCommands?.deletes || []).map((id) => `${QUICK_SNIPPET_PREFIX}${id}`)
+      ])
+      this.state.snippets = replaceById(
+        this.state.snippets.filter((snippet) => !deleted.has(snippet.id)),
+        [
+          ...(snippets?.upserts || [])
+            .filter(hasId)
+            .map((snippet) => normalizeSnippet(snippet as MobileSnippet)),
+          ...(quickCommands?.upserts || [])
+            .filter(hasId)
+            .map((command) => quickCommandToSnippet(command as MobileQuickCommand))
+        ]
+      )
+    }
+
+    const keys = collection('sshKeys')
+    if (keys) {
+      this.state.sshKeys = mergeKeysById(
+        this.state.sshKeys.filter((key) => !keys.deletes.includes(key.id)),
+        keys.upserts.filter(hasId).map((key) => normalizeKey(key as MobileSSHKey))
+      )
+    }
+
+    this.save()
+    return this.getState()
+  }
+
   exportBackup(): MobileBackupData {
     const snippets = this.state.snippets
       .filter((snippet) => !snippet.id.startsWith(QUICK_SNIPPET_PREFIX))
@@ -391,6 +466,13 @@ export class MobileStore {
   }
 }
 
+const replaceById = <T extends { id: string }>(existing: T[], incoming: T[]): T[] => {
+  const map = new Map<string, T>()
+  existing.forEach((item) => map.set(item.id, item))
+  incoming.forEach((item) => map.set(item.id, item))
+  return Array.from(map.values())
+}
+
 const mergeById = <T extends { id: string }>(existing: T[], incoming: T[]): T[] => {
   const map = new Map<string, T>()
   existing.forEach((item) => map.set(item.id, item))
@@ -399,6 +481,7 @@ const mergeById = <T extends { id: string }>(existing: T[], incoming: T[]): T[] 
 }
 
 const normalizeSessionGroup = (group: SessionGroup): SessionGroup => ({
+  ...group,
   id: group.id,
   name: group.name || '未命名分组',
   sessions: asArray<string>(group.sessions)
@@ -419,6 +502,72 @@ const mergeKeysById = (existing: MobileSSHKey[], incoming: MobileSSHKey[]): Mobi
     map.set(item.id, merged)
   })
   return Array.from(map.values())
+}
+
+/** 移动端参与云同步合并的类别 */
+export const MOBILE_SYNC_CATEGORIES = [
+  'sessions',
+  'sessionGroups',
+  'snippets',
+  'quickCommands',
+  'sshKeys'
+] as const
+
+export type MobileSyncData = Record<(typeof MOBILE_SYNC_CATEGORIES)[number], any[]>
+
+const SYNC_DATE_FIELDS = ['createdAt', 'updatedAt']
+
+/**
+ * 把一条同步记录整理成移动端存储时的形状，用于三方合并比较。
+ * 与本地存储的规范化一致，但不凭空生成时间字段。
+ */
+export const normalizeSyncRecord = (
+  category: (typeof MOBILE_SYNC_CATEGORIES)[number],
+  record: any
+): any => {
+  let normalized: any
+  switch (category) {
+    case 'sessions':
+      normalized = normalizeSession(record)
+      break
+    case 'sessionGroups':
+      normalized = normalizeSessionGroup(record)
+      break
+    case 'snippets':
+      normalized = normalizeSnippet(record)
+      break
+    case 'quickCommands':
+      normalized = snippetToQuickCommand(quickCommandToSnippet(record))
+      break
+    case 'sshKeys':
+      normalized = normalizeKey(record)
+      break
+  }
+  for (const field of SYNC_DATE_FIELDS) {
+    if (record[field] === undefined || record[field] === null || record[field] === '') {
+      delete normalized[field]
+    } else if (field in normalized) {
+      normalized[field] = normalizeDateString(record[field])
+    }
+  }
+  return cloneForJson(normalized)
+}
+
+/**
+ * 从完整同步数据中取出移动端管理的类别并规范化；非 SSH 会话不参与合并。
+ */
+export const pickMobileSyncData = (data: Record<string, any> | undefined): MobileSyncData => {
+  const result = {} as MobileSyncData
+  for (const category of MOBILE_SYNC_CATEGORIES) {
+    let records = asArray<any>(data?.[category]).filter(
+      (record) => record && typeof record === 'object' && hasId(record)
+    )
+    if (category === 'sessions') {
+      records = records.filter(isSshSession)
+    }
+    result[category] = records.map((record) => normalizeSyncRecord(category, record))
+  }
+  return result
 }
 
 export const mobileStore = new MobileStore()

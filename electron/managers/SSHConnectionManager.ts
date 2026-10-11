@@ -602,6 +602,98 @@ export class SSHConnectionManager extends EventEmitter {
   }
 
   /**
+   * 执行命令并分别返回 stdout、stderr 和退出码；非 0 退出码不视为失败。
+   * signal 中止时会关闭远程通道。
+   */
+  async executeCommandDetailed(
+    id: string,
+    command: string,
+    timeout: number,
+    maxOutputBytes: number,
+    stdin?: string,
+    signal?: AbortSignal
+  ): Promise<{ stdout: string; stderr: string; exitCode: number | null; signal?: string }> {
+    return new Promise((resolve, reject) => {
+      const connection = this.connections.get(id)
+      if (!connection || !connection.client) {
+        reject(new Error(`Connection not found: ${id}`))
+        return
+      }
+      if (signal?.aborted) {
+        reject(new Error('Command cancelled'))
+        return
+      }
+
+      const stdoutChunks: Buffer[] = []
+      const stderrChunks: Buffer[] = []
+      let outputBytes = 0
+      let settled = false
+      let timeoutHandle: NodeJS.Timeout | undefined
+      let channel: { close: () => void } | undefined
+
+      const cleanup = () => {
+        if (timeoutHandle) clearTimeout(timeoutHandle)
+        signal?.removeEventListener('abort', onAbort)
+      }
+      const rejectOnce = (error: Error) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(error)
+        channel?.close()
+      }
+      function onAbort() {
+        rejectOnce(new Error('Command cancelled'))
+      }
+
+      signal?.addEventListener('abort', onAbort, { once: true })
+      timeoutHandle = setTimeout(() => {
+        rejectOnce(new Error(`Command execution timed out after ${timeout} ms`))
+      }, timeout)
+
+      connection.client.exec(command, (err, stream) => {
+        if (err) {
+          rejectOnce(err)
+          return
+        }
+        if (settled) {
+          stream.close()
+          return
+        }
+        channel = stream
+
+        const appendOutput = (data: Buffer, target: Buffer[]) => {
+          if (settled) return
+          outputBytes += data.length
+          if (outputBytes > maxOutputBytes) {
+            rejectOnce(new Error(`Command output exceeded limit of ${maxOutputBytes} bytes`))
+            return
+          }
+          target.push(data)
+        }
+
+        stream.on('data', (data: Buffer) => appendOutput(data, stdoutChunks))
+        stream.stderr.on('data', (data: Buffer) => appendOutput(data, stderrChunks))
+        stream.on('close', (code: number | null, exitSignal?: string) => {
+          if (settled) return
+          settled = true
+          cleanup()
+          connection.lastActivity = new Date()
+          resolve({
+            stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+            stderr: Buffer.concat(stderrChunks).toString('utf8'),
+            exitCode: typeof code === 'number' ? code : null,
+            ...(exitSignal ? { signal: exitSignal } : {})
+          })
+        })
+        stream.on('error', (error: Error) => rejectOnce(error))
+
+        if (stdin !== undefined) stream.end(stdin)
+      })
+    })
+  }
+
+  /**
    * 获取 shell 进程的 PID
    */
   private async getShellPid(id: string): Promise<number | null> {

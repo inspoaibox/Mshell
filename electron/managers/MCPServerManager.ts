@@ -21,7 +21,7 @@ import {
 } from '../utils/mcp-database-query'
 import {
   MCP_READ_ONLY_QUERY_PROGRAMS,
-  validateMcpReadOnlyCommand
+  parseMcpReadOnlyCommand
 } from '../utils/mcp-readonly-command'
 
 // Electron's main-process Node runtime may not expose Web Crypto globally,
@@ -52,6 +52,7 @@ const MAX_COMMAND_TIMEOUT_MS = 120_000
 const MAX_COMMAND_LENGTH = 8000
 const MAX_COMMAND_CAPTURE_BYTES = 2 * 1024 * 1024
 const MCP_APPROVAL_TIMEOUT_MS = 2 * 60 * 1000
+const MAX_AUDIT_ERROR_LENGTH = 500
 
 class MCPRequestError extends Error {
   constructor(
@@ -66,6 +67,34 @@ class MCPRequestError extends Error {
 type ActiveRequest = {
   server: McpServer
   transport: StreamableHTTPServerTransport
+  abortController: AbortController
+}
+
+/** Node 18 (Electron 28) has no AbortSignal.any, so link the signals manually. */
+function linkAbortSignals(...signals: Array<AbortSignal | undefined>): AbortSignal {
+  const controller = new AbortController()
+  for (const signal of signals) {
+    if (!signal) continue
+    if (signal.aborted) {
+      controller.abort()
+      break
+    }
+    signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+  return controller.signal
+}
+
+function truncateUtf8(
+  value: string,
+  maxBytes: number
+): { text: string; bytes: number; truncated: boolean } {
+  const buffer = Buffer.from(value, 'utf8')
+  if (buffer.length <= maxBytes) return { text: value, bytes: buffer.length, truncated: false }
+  return {
+    text: buffer.subarray(0, maxBytes).toString('utf8'),
+    bytes: buffer.length,
+    truncated: true
+  }
 }
 
 export interface McpServerStatus {
@@ -79,18 +108,32 @@ export interface McpServerStatus {
   token: string
 }
 
+export interface McpApprovalTarget {
+  host: string
+  port: number
+  username: string
+  sessionName: string
+}
+
 export interface McpApprovalRequest {
   approvalId: string
   tool: 'write_remote_file' | 'execute_command'
   connectionId: string
+  target?: McpApprovalTarget
   summary: string
+  /** Full command or file content the user is approving. */
+  content: string
   requestedAt: string
   expiresAt: string
 }
 
+export interface McpApprovalClosed {
+  approvalId: string
+  reason: 'resolved' | 'timeout' | 'cancelled'
+}
+
 interface PendingApproval {
-  resolve: (approved: boolean) => void
-  timeout: NodeJS.Timeout
+  settle: (approved: boolean, reason: McpApprovalClosed['reason']) => void
 }
 
 export interface McpOperationResult {
@@ -104,6 +147,8 @@ class MCPServerManager {
   private activeRequests = new Set<ActiveRequest>()
   private pendingApprovals = new Map<string, PendingApproval>()
   private approvalQueue: Promise<void> = Promise.resolve()
+  /** Bumped whenever approvals are cancelled, so requests queued before that are dropped. */
+  private approvalGeneration = 0
 
   async initialize(): Promise<McpOperationResult> {
     const settings = appSettingsManager.getSettings().agentMcp
@@ -190,9 +235,7 @@ class MCPServerManager {
   resolveApproval(approvalId: string, approved: boolean): boolean {
     const pending = this.pendingApprovals.get(approvalId)
     if (!pending) return false
-    clearTimeout(pending.timeout)
-    this.pendingApprovals.delete(approvalId)
-    pending.resolve(approved)
+    pending.settle(approved, 'resolved')
     return true
   }
 
@@ -221,7 +264,8 @@ class MCPServerManager {
     this.activeRequests.clear()
 
     await Promise.all(
-      activeRequests.map(async ({ server, transport }) => {
+      activeRequests.map(async ({ server, transport, abortController }) => {
+        abortController.abort()
         await Promise.allSettled([transport.close(), server.close()])
       })
     )
@@ -348,14 +392,17 @@ class MCPServerManager {
       return
     }
 
-    const requestServer = this.createMcpServer()
+    // Aborted when the client disconnects, so pending approvals and remote commands stop too.
+    const abortController = new AbortController()
+    const requestServer = this.createMcpServer(abortController.signal)
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined
     })
-    const activeRequest = { server: requestServer, transport }
+    const activeRequest = { server: requestServer, transport, abortController }
     this.activeRequests.add(activeRequest)
 
     const cleanup = () => {
+      abortController.abort()
       this.activeRequests.delete(activeRequest)
       void Promise.allSettled([transport.close(), requestServer.close()])
     }
@@ -425,7 +472,7 @@ class MCPServerManager {
     })
   }
 
-  private createMcpServer(): McpServer {
+  private createMcpServer(requestSignal: AbortSignal): McpServer {
     const server = new McpServer(
       {
         name: 'mshell',
@@ -585,6 +632,8 @@ class MCPServerManager {
         description:
           'Execute one restricted read-only query command on a currently connected SSH session and return its output. ' +
           'Shell pipelines, redirection, command chains, script interpreters, sudo, and modifying commands are rejected. ' +
+          'Arguments are passed literally: the remote shell performs no glob, brace, tilde or variable expansion. ' +
+          'The result contains stdout (output), stderr and exitCode; a non-zero exitCode is reported, not treated as a tool error. ' +
           'For database data and schema queries, use query_database instead. ' +
           `Supported programs: ${MCP_READ_ONLY_QUERY_PROGRAMS.join(', ')}.`,
         inputSchema: {
@@ -593,39 +642,25 @@ class MCPServerManager {
           timeoutMs: z.number().int().min(1000).max(MAX_QUERY_TIMEOUT_MS).optional()
         }
       },
-      async ({ connectionId, command, timeoutMs }) => {
+      async ({ connectionId, command, timeoutMs }, extra) => {
         try {
           this.requireConnectedConnection(connectionId)
-          const validatedCommand = validateMcpReadOnlyCommand(command)
-          const output = await sshConnectionManager.executeCommand(
+          const parsed = parseMcpReadOnlyCommand(command)
+          const execution = await sshConnectionManager.executeCommandDetailed(
             connectionId,
-            validatedCommand,
+            parsed.shellCommand,
             timeoutMs || DEFAULT_QUERY_TIMEOUT_MS,
-            MAX_QUERY_CAPTURE_BYTES
+            MAX_QUERY_CAPTURE_BYTES,
+            undefined,
+            linkAbortSignals(requestSignal, extra.signal)
           )
-          const outputBuffer = Buffer.from(output, 'utf8')
-          const truncated = outputBuffer.length > MAX_QUERY_OUTPUT_BYTES
-          const visibleOutput = truncated
-            ? outputBuffer.subarray(0, MAX_QUERY_OUTPUT_BYTES).toString('utf8')
-            : output
-          const result = {
-            connectionId,
-            command: validatedCommand,
-            output: visibleOutput,
-            outputBytes: outputBuffer.length,
-            truncated
-          }
+          const output = this.formatCommandOutput(execution)
           this.auditToolCall(
             'execute_readonly_command',
-            {
-              connectionId,
-              command: validatedCommand,
-              outputBytes: outputBuffer.length,
-              truncated
-            },
+            { connectionId, command: parsed.command, ...output.audit },
             true
           )
-          return this.toToolResult(result)
+          return this.toToolResult({ connectionId, command: parsed.command, ...output.result })
         } catch (error) {
           return this.toToolError('execute_readonly_command', { connectionId, command }, error)
         }
@@ -780,21 +815,24 @@ class MCPServerManager {
           content: z.string().max(MAX_WRITE_FILE_BYTES)
         }
       },
-      async ({ connectionId, filePath, content }) => {
+      async ({ connectionId, filePath, content }, extra) => {
         try {
           const bytes = Buffer.byteLength(content, 'utf8')
           if (bytes > MAX_WRITE_FILE_BYTES) {
             throw new Error(`写入内容超过上限 ${MAX_WRITE_FILE_BYTES} 字节`)
           }
           this.requireConnectedConnection(connectionId)
-          const permissionMode = await this.requireWriteAccess('write_remote_file', {
-            connectionId,
-            filePath,
-            bytes,
-            contentPreview: content.slice(0, 1200),
-            contentTruncated: content.length > 1200,
-            contentSha256: createHash('sha256').update(content).digest('hex')
-          })
+          const permissionMode = await this.requireWriteAccess(
+            'write_remote_file',
+            {
+              connectionId,
+              filePath,
+              bytes,
+              content,
+              contentSha256: createHash('sha256').update(content).digest('hex')
+            },
+            linkAbortSignals(requestSignal, extra.signal)
+          )
 
           await this.ensureSftp(connectionId)
           await sftpManager.writeFile(connectionId, filePath, content)
@@ -820,65 +858,60 @@ class MCPServerManager {
       {
         title: 'Execute an explicitly authorized SSH command',
         description:
-          'Execute a command that may modify the remote server and return its output. Query mode denies it, confirm mode waits for MShell approval, and execute mode runs it directly.',
+          'Execute a command that may modify the remote server and return its stdout (output), stderr and exitCode. ' +
+          'A non-zero exitCode is reported, not treated as a tool error. Query mode denies it, confirm mode waits for MShell approval, and execute mode runs it directly.',
         inputSchema: {
           connectionId: z.string().min(1).max(200),
           command: z.string().min(1).max(MAX_COMMAND_LENGTH),
           timeoutMs: z.number().int().min(1000).max(MAX_COMMAND_TIMEOUT_MS).optional()
         }
       },
-      async ({ connectionId, command, timeoutMs }) => {
+      async ({ connectionId, command, timeoutMs }, extra) => {
         try {
           const normalizedCommand = command.trim()
           if (!normalizedCommand) throw new Error('执行命令不能为空')
           this.requireConnectedConnection(connectionId)
-          const permissionMode = await this.requireWriteAccess('execute_command', {
-            connectionId,
-            command: normalizedCommand,
-            timeoutMs: timeoutMs || DEFAULT_COMMAND_TIMEOUT_MS
-          })
+          const signal = linkAbortSignals(requestSignal, extra.signal)
+          const permissionMode = await this.requireWriteAccess(
+            'execute_command',
+            {
+              connectionId,
+              command: normalizedCommand,
+              timeoutMs: timeoutMs || DEFAULT_COMMAND_TIMEOUT_MS
+            },
+            signal
+          )
 
-          const output = await sshConnectionManager.executeCommand(
+          const execution = await sshConnectionManager.executeCommandDetailed(
             connectionId,
             normalizedCommand,
             timeoutMs || DEFAULT_COMMAND_TIMEOUT_MS,
-            MAX_COMMAND_CAPTURE_BYTES
+            MAX_COMMAND_CAPTURE_BYTES,
+            undefined,
+            signal
           )
-          const outputBuffer = Buffer.from(output, 'utf8')
-          const truncated = outputBuffer.length > MAX_QUERY_OUTPUT_BYTES
-          const visibleOutput = truncated
-            ? outputBuffer.subarray(0, MAX_QUERY_OUTPUT_BYTES).toString('utf8')
-            : output
-          const result = {
-            connectionId,
-            command: normalizedCommand,
-            output: visibleOutput,
-            outputBytes: outputBuffer.length,
-            truncated,
-            executed: true
-          }
+          const output = this.formatCommandOutput(execution)
           this.auditToolCall(
             'execute_command',
             {
               connectionId,
               ...this.getCommandAuditDetails(normalizedCommand),
-              outputBytes: outputBuffer.length,
-              truncated,
+              ...output.audit,
               permissionMode
             },
             true
           )
-          return this.toToolResult(result)
+          return this.toToolResult({
+            connectionId,
+            command: normalizedCommand,
+            ...output.result,
+            executed: true
+          })
         } catch (error) {
-          const timeout = timeoutMs || DEFAULT_COMMAND_TIMEOUT_MS
-          const safeError =
-            error instanceof Error && error.message.startsWith('Command execution timeout:')
-              ? new Error(`Command execution timeout after ${timeout} ms`)
-              : error
           return this.toToolError(
             'execute_command',
             { connectionId, ...this.getCommandAuditDetails(command) },
-            safeError
+            error
           )
         }
       }
@@ -889,7 +922,8 @@ class MCPServerManager {
 
   private async requireWriteAccess(
     tool: McpApprovalRequest['tool'],
-    details: Record<string, unknown>
+    details: Record<string, unknown>,
+    signal: AbortSignal
   ): Promise<AgentMcpPermissionMode> {
     const permissionMode = appSettingsManager.getSettings().agentMcp.permissionMode
     if (permissionMode === 'query') {
@@ -897,16 +931,28 @@ class MCPServerManager {
     }
     if (permissionMode === 'execute') return permissionMode
 
-    const approved = await this.enqueueApproval(tool, details)
+    const approved = await this.enqueueApproval(tool, details, signal)
+    if (signal.aborted) throw new Error('Agent 请求已取消，操作未执行')
     if (!approved) throw new Error('Agent 写操作未获得 MShell 用户批准')
+    if (appSettingsManager.getSettings().agentMcp.permissionMode === 'query') {
+      throw new Error('Agent 当前为“查询”模式，写入和修改操作已被服务端拒绝')
+    }
+    // The session may have dropped while the user was deciding.
+    this.requireConnectedConnection(String(details.connectionId || ''))
     return permissionMode
   }
 
   private enqueueApproval(
     tool: McpApprovalRequest['tool'],
-    details: Record<string, unknown>
+    details: Record<string, unknown>,
+    signal: AbortSignal
   ): Promise<boolean> {
-    const pending = this.approvalQueue.then(() => this.dispatchApproval(tool, details))
+    const generation = this.approvalGeneration
+    const pending = this.approvalQueue.then(() =>
+      generation === this.approvalGeneration && !signal.aborted
+        ? this.dispatchApproval(tool, details, signal)
+        : false
+    )
     this.approvalQueue = pending.then(
       () => undefined,
       () => undefined
@@ -916,7 +962,8 @@ class MCPServerManager {
 
   private dispatchApproval(
     tool: McpApprovalRequest['tool'],
-    details: Record<string, unknown>
+    details: Record<string, unknown>,
+    signal: AbortSignal
   ): Promise<boolean> {
     const currentMode = appSettingsManager.getSettings().agentMcp.permissionMode
     if (currentMode === 'query') return Promise.resolve(false)
@@ -927,32 +974,58 @@ class MCPServerManager {
       BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed())
     if (!window || window.isDestroyed()) return Promise.resolve(false)
 
+    const connectionId = String(details.connectionId || '')
+    const options = sshConnectionManager.getConnection(connectionId)?.options
+    const target: McpApprovalTarget | undefined = options
+      ? {
+          host: options.host,
+          port: options.port,
+          username: options.username,
+          sessionName: options.sessionName || ''
+        }
+      : undefined
+    const targetLine = target
+      ? `目标主机：${target.sessionName ? `${target.sessionName} ` : ''}(${target.username}@${target.host}:${target.port})`
+      : `SSH 会话：${connectionId}`
+
     const approvalId = randomUUID()
     const requestedAt = new Date()
     const request: McpApprovalRequest = {
       approvalId,
       tool,
-      connectionId: String(details.connectionId || ''),
+      connectionId,
+      target,
       summary:
         tool === 'execute_command'
-          ? `执行远程命令：\n${String(details.command || '')}`
+          ? [targetLine, '执行远程命令：', String(details.command || '')].join('\n')
           : [
+              targetLine,
               `写入远程文件：${String(details.filePath || '')}`,
               `内容大小：${Number(details.bytes) || 0} 字节`,
-              `SHA-256：${String(details.contentSha256 || '')}`,
-              `内容预览${details.contentTruncated ? '（已截断）' : ''}：`,
-              String(details.contentPreview || '')
+              `SHA-256：${String(details.contentSha256 || '')}`
             ].join('\n'),
+      content: String((tool === 'execute_command' ? details.command : details.content) || ''),
       requestedAt: requestedAt.toISOString(),
       expiresAt: new Date(requestedAt.getTime() + MCP_APPROVAL_TIMEOUT_MS).toISOString()
     }
 
     return new Promise<boolean>((resolve) => {
-      const timeout = setTimeout(() => {
-        this.pendingApprovals.delete(approvalId)
-        resolve(false)
-      }, MCP_APPROVAL_TIMEOUT_MS)
-      this.pendingApprovals.set(approvalId, { resolve, timeout })
+      const onAbort = () => settle(false, 'cancelled')
+      const timeout = setTimeout(() => settle(false, 'timeout'), MCP_APPROVAL_TIMEOUT_MS)
+      const settle = (approved: boolean, reason: McpApprovalClosed['reason']) => {
+        if (!this.pendingApprovals.delete(approvalId)) return
+        clearTimeout(timeout)
+        signal.removeEventListener('abort', onAbort)
+        // The renderer closes its own dialog when the user answers; otherwise tell it to.
+        if (reason !== 'resolved' && !window.isDestroyed()) {
+          const closed: McpApprovalClosed = { approvalId, reason }
+          window.webContents.send('mcp:approval-closed', closed)
+        }
+        resolve(approved)
+      }
+
+      this.pendingApprovals.set(approvalId, { settle })
+      signal.addEventListener('abort', onAbort, { once: true })
       window.webContents.send('mcp:approval-request', request)
       if (window.isMinimized()) window.restore()
       window.show()
@@ -961,10 +1034,38 @@ class MCPServerManager {
   }
 
   private rejectPendingApprovals(): void {
-    for (const [approvalId, pending] of this.pendingApprovals) {
-      clearTimeout(pending.timeout)
-      this.pendingApprovals.delete(approvalId)
-      pending.resolve(false)
+    this.approvalGeneration++
+    for (const pending of Array.from(this.pendingApprovals.values())) {
+      pending.settle(false, 'cancelled')
+    }
+  }
+
+  private formatCommandOutput(execution: {
+    stdout: string
+    stderr: string
+    exitCode: number | null
+    signal?: string
+  }) {
+    const stdout = truncateUtf8(execution.stdout, MAX_QUERY_OUTPUT_BYTES)
+    const stderr = truncateUtf8(execution.stderr, MAX_QUERY_OUTPUT_BYTES)
+    return {
+      result: {
+        exitCode: execution.exitCode,
+        ...(execution.signal ? { signal: execution.signal } : {}),
+        output: stdout.text,
+        outputBytes: stdout.bytes,
+        truncated: stdout.truncated,
+        stderr: stderr.text,
+        stderrBytes: stderr.bytes,
+        stderrTruncated: stderr.truncated
+      },
+      // Command output may contain secrets, so the audit log only keeps sizes.
+      audit: {
+        exitCode: execution.exitCode,
+        outputBytes: stdout.bytes,
+        stderrBytes: stderr.bytes,
+        truncated: stdout.truncated || stderr.truncated
+      }
     }
   }
 
@@ -1010,7 +1111,14 @@ class MCPServerManager {
 
   private toToolError(tool: string, details: Record<string, unknown>, error: unknown) {
     const message = error instanceof Error ? error.message : String(error)
-    this.auditToolCall(tool, details, false, message)
+    this.auditToolCall(
+      tool,
+      details,
+      false,
+      message.length > MAX_AUDIT_ERROR_LENGTH
+        ? `${message.slice(0, MAX_AUDIT_ERROR_LENGTH)}…`
+        : message
+    )
     return {
       isError: true,
       content: [

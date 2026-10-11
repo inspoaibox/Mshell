@@ -137,9 +137,9 @@ export function registerSyncHandlers(): void {
   })
 
   // 智能同步
-  ipcMain.handle('sync:sync', async () => {
+  ipcMain.handle('sync:sync', async (_event, options?: { allowMassDelete?: boolean }) => {
     try {
-      const result = await syncManager.sync()
+      const result = await syncManager.sync({ allowMassDelete: options?.allowMassDelete === true })
       return { success: result.success, data: result }
     } catch (error: any) {
       return { success: false, error: error.message }

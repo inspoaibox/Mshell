@@ -4,6 +4,7 @@
     "src/mobile/**/*.ts",
     "src/mobile/**/*.vue",
     "src/types/session.ts",
+    "src/lib/sync/**/*.ts",
     "vite.mobile.config.ts",
     "capacitor.config.ts"
   ],
