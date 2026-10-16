@@ -19,8 +19,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setReconnectConfig: (id: string, maxAttempts: number, interval: number) =>
       ipcRenderer.invoke('ssh:setReconnectConfig', id, maxAttempts, interval),
     testProxy: (proxyConfig: any) => ipcRenderer.invoke('ssh:testProxy', proxyConfig),
-    testProxyJump: (proxyJumpConfig: any, underlyingProxy?: any) =>
-      ipcRenderer.invoke('ssh:testProxyJump', proxyJumpConfig, underlyingProxy),
+    testProxyJump: (proxyJumpConfig: any, underlyingProxy?: any, target?: { host: string; port: number }) =>
+      ipcRenderer.invoke('ssh:testProxyJump', proxyJumpConfig, underlyingProxy, target),
     // 返回取消订阅函数，防止内存泄漏
     onData: (callback: (id: string, data: string) => void) => {
       const listener = (_event: any, id: string, data: string) => callback(id, data)

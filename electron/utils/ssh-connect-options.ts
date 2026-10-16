@@ -6,6 +6,7 @@ import { logger } from './logger'
 import type { SSHConnectionOptions } from '../managers/SSHConnectionManager'
 import type { TrustedHostKey } from './known-hosts'
 import type { ProxyConfig, ProxyJumpConfig } from '../../src/types/session'
+import { ProxyJumpHelper } from './proxy-jump'
 
 /**
  * 将 PKCS8 格式的私钥转换为 ssh2 兼容的格式。
@@ -58,6 +59,9 @@ export function convertPrivateKeyForSSH2(keyBuffer: Buffer, passphrase?: string)
 export async function processProxyJumpPrivateKeys(
   config: ProxyJumpConfig
 ): Promise<ProxyJumpConfig> {
+  if (!config.enabled) return { ...config }
+  const validation = ProxyJumpHelper.validateProxyConfig(config)
+  if (!validation.valid) throw new Error(validation.error)
   const processed = { ...config }
 
   if (processed.authType === 'privateKey' && processed.privateKeyPath && !processed.privateKey) {
@@ -69,7 +73,11 @@ export async function processProxyJumpPrivateKeys(
     }
   }
 
-  if (processed.nextJump) {
+  if (processed.authType === 'privateKey' && processed.privateKey) {
+    processed.privateKey = convertPrivateKeyForSSH2(Buffer.from(processed.privateKey), processed.passphrase).toString()
+  }
+
+  if (processed.nextJump?.enabled) {
     processed.nextJump = await processProxyJumpPrivateKeys(processed.nextJump)
   }
 

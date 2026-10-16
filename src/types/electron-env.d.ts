@@ -283,7 +283,7 @@ export interface ElectronAPI {
     getAllConnections: () => Promise<any[]>
     setReconnectConfig: (id: string, maxAttempts: number, interval: number) => Promise<ApiResult>
     testProxy: (proxyConfig: any) => Promise<ApiResult<any>>
-    testProxyJump: (proxyJumpConfig: any, underlyingProxy?: any) => Promise<ApiResult<any>>
+    testProxyJump: (proxyJumpConfig: any, underlyingProxy?: any, target?: { host: string; port: number }) => Promise<ApiResult<any>>
     // 事件监听器返回取消订阅函数
     onData: (callback: (id: string, data: string) => void) => () => void
     onError: (callback: (id: string, error: string) => void) => () => void

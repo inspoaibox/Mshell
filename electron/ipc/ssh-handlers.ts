@@ -363,8 +363,11 @@ export function registerSSHHandlers() {
   // 测试跳板机连接
   ipcMain.handle(
     'ssh:testProxyJump',
-    async (_event, proxyJumpConfig: ProxyJumpConfig, underlyingProxy?: ProxyConfig) => {
+    async (_event, proxyJumpConfig: ProxyJumpConfig, underlyingProxy?: ProxyConfig, target?: { host: string; port: number }) => {
       try {
+        if (!target?.host?.trim() || !Number.isInteger(target.port) || target.port < 1 || target.port > 65535) {
+          return { success: false, error: '请先填写目标服务器的主机和有效端口' }
+        }
         // 处理私钥
         const processedConfig = await processProxyJumpPrivateKeys(proxyJumpConfig)
 
@@ -374,9 +377,9 @@ export function registerSSHHandlers() {
           return { success: false, error: validation.error }
         }
 
-        // 使用一个测试目标（跳板机自身）
-        const testHost = processedConfig.host
-        const testPort = processedConfig.port
+        // Verify forwarding to the actual destination, not back to the jump server itself.
+        const testHost = target.host
+        const testPort = target.port
 
         const startTime = Date.now()
 
@@ -397,7 +400,7 @@ export function registerSSHHandlers() {
 
         return {
           success: true,
-          message: `跳板机连接成功: ${chainDesc}`,
+          message: `跳板链路已连通: ${chainDesc} -> ${testHost}:${testPort}；目标账号认证请连接终端验证`,
           latency
         }
       } catch (error: any) {

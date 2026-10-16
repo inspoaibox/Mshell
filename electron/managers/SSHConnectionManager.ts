@@ -5,6 +5,7 @@ import { appSettingsManager } from '../utils/app-settings'
 import { ErrorHandler } from '../utils/error-handler'
 import { ProxyJumpHelper } from '../utils/proxy-jump'
 import { ProxyHelper } from '../utils/proxy'
+import type { SSHTransport } from '../utils/ssh-transport'
 import {
   getHostKeyFingerprint,
   knownHostsManager,
@@ -77,7 +78,8 @@ export interface SSHConnection {
   options: SSHConnectionOptions
   status: 'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting'
   client: Client
-  socket?: net.Socket
+  socket?: SSHTransport
+  cancelConnect?: () => void
   stream?: ClientChannel
   lastActivity: Date
   monitorTimer?: NodeJS.Timeout
@@ -112,57 +114,23 @@ export class SSHConnectionManager extends EventEmitter {
    * 建立 SSH 连接
    */
   async connect(id: string, options: SSHConnectionOptions): Promise<void> {
-    return new Promise(async (resolve, reject) => {
-      const existingConnection = this.connections.get(id)
-      if (existingConnection) {
-        try {
-          await this.disconnect(id, 'replace')
-        } catch (error) {
-          ErrorHandler.handle(error as Error, `Disconnect existing connection ${id}`)
-        }
-      }
+    if (this.connections.has(id)) await this.disconnect(id, 'replace')
+    if (options.proxyJump?.enabled) {
+      const validation = ProxyJumpHelper.validateProxyConfig(options.proxyJump)
+      if (!validation.valid) throw new Error(validation.error)
+    }
 
-      const client = new Client()
-      const settings = appSettingsManager.getSettings()
+    const client = new Client()
+    const settings = appSettingsManager.getSettings()
+    const controller = new AbortController()
+    const timeoutMs = Math.max(1, options.readyTimeout || settings.ssh.timeout * 1000 || 20_000)
+    const stages =
+      1 +
+      (options.proxyJump?.enabled ? ProxyJumpHelper.getProxyDepth(options.proxyJump) : 0) +
+      (options.proxy?.enabled ? 1 : 0)
+    let socket: SSHTransport | undefined
 
-      // Explicitly create socket to enable TCP_NODELAY for lower latency
-      let socket: net.Socket
-
-      try {
-        if (options.proxyJump && options.proxyJump.enabled) {
-          // 验证跳板机配置
-          const validation = ProxyJumpHelper.validateProxyConfig(options.proxyJump)
-          if (!validation.valid) {
-            throw new Error(validation.error)
-          }
-
-          // 通过跳板机建立连接，传递底层代理配置（如果有）
-          socket = await ProxyJumpHelper.connectThroughProxy(
-            options.proxyJump,
-            options.host,
-            options.port,
-            options.proxy // 传递底层代理
-          )
-
-          // 发送跳板机连接成功事件
-          const chainDesc = ProxyJumpHelper.getProxyChainDescription(options.proxyJump)
-          this.emit('proxy-connected', id, chainDesc)
-        } else if (options.proxy && options.proxy.enabled) {
-          // 只有代理，没有跳板机 -> 通过代理连接目标主机
-          socket = await ProxyHelper.connect(options.proxy, options.host, options.port)
-          this.emit('proxy-connected', id, `Via ${options.proxy.type.toUpperCase()} Proxy`)
-        } else {
-          // 直接连接
-          socket = new net.Socket()
-        }
-      } catch (err: any) {
-        const appError = ErrorHandler.handle(err, `Connection Init ${id}`)
-        reject(appError)
-        return
-      }
-
-      socket.setNoDelay(true)
-
+    return new Promise((resolve, reject) => {
       const connection: SSHConnection = {
         id,
         options,
@@ -181,30 +149,41 @@ export class SSHConnectionManager extends EventEmitter {
       this.connections.set(id, connection)
       let connectSettled = false
       let hostKeyChallenge: HostKeyChallengeDetails | undefined
+      // Also bounds TCP setup, forwarding and shell creation, not just SSH's handshake.
+      const timer = setTimeout(
+        () => rejectWhileConnecting(new Error(`SSH 连接超时：${options.host}:${options.port}`)),
+        timeoutMs * stages
+      )
+      const finishConnect = () => {
+        connectSettled = true
+        clearTimeout(timer)
+        connection.cancelConnect = undefined
+      }
 
       const rejectWhileConnecting = (error: Error) => {
         if (connectSettled) return
-        connectSettled = true
-        connection.status = 'error'
+        finishConnect()
+        connection.status = connection.manualDisconnect ? 'disconnected' : 'error'
         this.stopSessionMonitor(id)
 
         if (this.connections.get(id) === connection) {
           this.connections.delete(id)
         }
 
-        try {
-          client.end()
-        } catch {}
-        try {
-          socket.destroy()
-        } catch {}
-
         reject(error)
+        controller.abort()
+        try {
+          client.destroy()
+        } catch {}
+        try {
+          socket?.destroy()
+        } catch {}
       }
 
       const resolveOnce = () => {
         if (connectSettled) return
-        connectSettled = true
+        finishConnect()
+        connection.status = 'connected'
         resolve()
       }
 
@@ -214,28 +193,11 @@ export class SSHConnectionManager extends EventEmitter {
         return true
       }
 
-      // Handle socket errors
-      socket.on('error', (err) => {
-        if (rejectHostKeyChallenge()) return
-
-        const appError = ErrorHandler.handle(err, `SSH Connection ${id}`)
-        connection.lastError = appError.userMessage
-        connection.lastErrorCode = (err as any)?.code
-        if (connection.status === 'connecting') {
-          this.emit('error', id, appError.userMessage)
-          rejectWhileConnecting(appError)
-          return
-        }
-        this.emit('error', id, appError.userMessage)
-      })
-
-      socket.on('close', (hadError: boolean) => {
-        connection.lastSocketCloseHadError = hadError
-      })
+      connection.cancelConnect = () => rejectWhileConnecting(new Error('已取消 SSH 连接'))
 
       // Setup SSH Client events
       client.on('ready', () => {
-        connection.status = 'connected'
+        if (connectSettled || this.connections.get(id) !== connection) return
         connection.lastActivity = new Date()
 
         if (options.openShell === false) {
@@ -270,68 +232,77 @@ export class SSHConnectionManager extends EventEmitter {
           }
         }
 
-        client.shell(window as any, shellOptions, (err, stream) => {
-          if (err) {
-            connection.status = 'error'
-            const appError = ErrorHandler.handle(err, `SSH Shell ${id}`)
-            this.emit('error', id, appError.userMessage)
-            rejectWhileConnecting(appError)
-            return
-          }
-
-          connection.stream = stream
-
-          // 监听数据 - Pass Buffer directly to avoid string conversion overhead and encoding issues
-          stream.on('data', (data: Buffer) => {
-            connection.lastActivity = new Date()
-            this.emit('data', id, data)
-          })
-
-          stream.on('close', () => {
-            if (connectSettled && this.connections.get(id) !== connection) {
+        try {
+          client.shell(window as any, shellOptions, (err, stream) => {
+            if (connectSettled || this.connections.get(id) !== connection) {
+              stream?.destroy()
               return
             }
-            const closeSource = connection.manualDisconnect
-              ? connection.manualDisconnectReason || 'manual'
-              : 'stream'
-            const closeReason = connection.manualDisconnect
-              ? `SSH connection closed by ${closeSource}`
-              : 'SSH shell channel closed'
-            this.emitCloseOnce(id, connection, closeSource, closeReason)
-          })
+            if (err) {
+              connection.status = 'error'
+              const appError = ErrorHandler.handle(err, `SSH Shell ${id}`)
+              this.emit('error', id, appError.userMessage)
+              rejectWhileConnecting(appError)
+              return
+            }
 
-          stream.stderr.on('data', (data: Buffer) => {
-            const appError = ErrorHandler.createConnectionError(data.toString())
-            this.emit('error', id, appError.userMessage)
-          })
+            connection.stream = stream
 
-          // 启动会话监控（超时检测）
-          this.startSessionMonitor(id)
+            // 监听数据 - Pass Buffer directly to avoid string conversion overhead and encoding issues
+            stream.on('data', (data: Buffer) => {
+              connection.lastActivity = new Date()
+              this.emit('data', id, data)
+            })
 
-          // 获取 shell 的 PID（用于后续获取当前目录）
-          this.getShellPid(id)
-            .then((pid) => {
-              if (pid) {
-                connection.shellPid = pid
+            stream.on('close', () => {
+              if (connectSettled && this.connections.get(id) !== connection) {
+                return
               }
-            })
-            .catch(() => {
-              // 忽略错误，PID 获取失败不影响正常使用
+              const closeSource = connection.manualDisconnect
+                ? connection.manualDisconnectReason || 'manual'
+                : 'stream'
+              const closeReason = connection.manualDisconnect
+                ? `SSH connection closed by ${closeSource}`
+                : 'SSH shell channel closed'
+              this.emitCloseOnce(id, connection, closeSource, closeReason)
             })
 
-          resolveOnce()
-        })
+            stream.stderr.on('data', (data: Buffer) => {
+              const appError = ErrorHandler.createConnectionError(data.toString())
+              this.emit('error', id, appError.userMessage)
+            })
+
+            // 启动会话监控（超时检测）
+            this.startSessionMonitor(id)
+
+            // 获取 shell 的 PID（用于后续获取当前目录）
+            this.getShellPid(id)
+              .then((pid) => {
+                if (pid) {
+                  connection.shellPid = pid
+                }
+              })
+              .catch(() => {
+                // 忽略错误，PID 获取失败不影响正常使用
+              })
+
+            resolveOnce()
+          })
+        } catch (error) {
+          rejectWhileConnecting(error instanceof Error ? error : new Error(String(error)))
+        }
       })
 
       client.on('error', (err) => {
+        if (this.connections.get(id) !== connection) return
         if (rejectHostKeyChallenge()) return
 
         const appError = ErrorHandler.handle(err, `SSH Client ${id}`)
         connection.lastError = appError.userMessage
         connection.lastErrorCode = (err as any)?.code
         this.emit('error', id, appError.userMessage)
-        // 只在连接阶段（connecting）才 reject Promise，避免已连接后的错误重复 reject
-        if (connection.status === 'connecting') {
+        // Authentication may have finished while opening the shell is still pending.
+        if (!connectSettled) {
           rejectWhileConnecting(appError)
         } else {
           connection.status = 'error'
@@ -339,7 +310,11 @@ export class SSHConnectionManager extends EventEmitter {
       })
 
       client.on('close', () => {
-        if (connectSettled && this.connections.get(id) !== connection) {
+        if (!connectSettled) {
+          rejectWhileConnecting(new Error(connection.lastError || 'SSH 连接在就绪前关闭'))
+          return
+        }
+        if (this.connections.get(id) !== connection) {
           return
         }
 
@@ -377,7 +352,6 @@ export class SSHConnectionManager extends EventEmitter {
 
       // 连接配置
       const connectConfig: any = {
-        sock: socket, // Use our custom socket
         username: options.username,
         readyTimeout: readyTimeout || 20000,
         keepaliveInterval: keepaliveInterval,
@@ -449,18 +423,70 @@ export class SSHConnectionManager extends EventEmitter {
         }
       }
 
-      // 如果使用了代理或跳板机，socket 已经是连接状态，不需要再次 connect
-      if (
-        (options.proxyJump && options.proxyJump.enabled) ||
-        (options.proxy && options.proxy.enabled)
-      ) {
-        client.connect(connectConfig)
-      } else {
-        // 如果是新创建的 socket（未使用代理/跳板机），需要手动连接
-        socket.connect(options.port, options.host, () => {
-          client.connect(connectConfig)
-        })
+      const startClient = () => {
+        if (connectSettled) return
+        try {
+          client.connect({ ...connectConfig, sock: socket })
+        } catch (error) {
+          rejectWhileConnecting(error instanceof Error ? error : new Error(String(error)))
+        }
       }
+      const initializeTransport = async () => {
+        const attempt = { timeoutMs, signal: controller.signal }
+        if (options.proxyJump?.enabled) {
+          socket = await ProxyJumpHelper.connectThroughProxy(
+            options.proxyJump,
+            options.host,
+            options.port,
+            options.proxy,
+            attempt
+          )
+        } else if (options.proxy?.enabled) {
+          socket = await ProxyHelper.connect(options.proxy, options.host, options.port, attempt)
+        } else {
+          socket = new net.Socket()
+        }
+        if (connectSettled || this.connections.get(id) !== connection) {
+          socket.destroy()
+          return
+        }
+        connection.socket = socket
+        if ('setNoDelay' in socket) socket.setNoDelay(true)
+        socket.on('error', (error: Error) => {
+          if (this.connections.get(id) !== connection) return
+          if (rejectHostKeyChallenge()) return
+          const appError = ErrorHandler.handle(error, `SSH Connection ${id}`)
+          connection.lastError = appError.userMessage
+          connection.lastErrorCode = (error as NodeJS.ErrnoException).code
+          rejectWhileConnecting(appError)
+          this.emit('error', id, appError.userMessage)
+        })
+        socket.on('close', (hadError?: boolean) => {
+          connection.lastSocketCloseHadError = hadError === true
+          if (!connectSettled) {
+            rejectWhileConnecting(new Error('SSH 传输在连接完成前关闭'))
+          } else {
+            client.destroy()
+          }
+        })
+        if (options.proxyJump?.enabled || options.proxy?.enabled) {
+          this.emit(
+            'proxy-connected',
+            id,
+            options.proxyJump?.enabled
+              ? ProxyJumpHelper.getProxyChainDescription(options.proxyJump)
+              : `Via ${options.proxy!.type.toUpperCase()} Proxy`
+          )
+          startClient()
+        } else {
+          // This branch always owns a real TCP socket.
+          ;(socket as net.Socket).connect(options.port, options.host, startClient)
+        }
+      }
+      // An async Promise executor would lose exceptions here and leave IPC pending forever.
+      void initializeTransport().catch((error) => {
+        rejectWhileConnecting(error instanceof Error ? error : new Error(String(error)))
+      })
     })
   }
 
@@ -476,6 +502,7 @@ export class SSHConnectionManager extends EventEmitter {
 
     connection.manualDisconnect = true
     connection.manualDisconnectReason = reason
+    connection.cancelConnect?.()
 
     // 取消重连
     this.cancelReconnect(id)
@@ -826,7 +853,8 @@ export class SSHConnectionManager extends EventEmitter {
     reason: string,
     reconnecting = false
   ): SSHCloseDetails {
-    const socket = connection.socket
+    const socket =
+      connection.socket && 'remoteAddress' in connection.socket ? connection.socket : undefined
     const socketInfo = socket
       ? {
           destroyed: socket.destroyed,
@@ -894,6 +922,7 @@ export class SSHConnectionManager extends EventEmitter {
     // 检查是否超过最大重连次数
     if (connection.reconnectAttempts! >= connection.maxReconnectAttempts!) {
       console.log(`Max reconnect attempts reached for session ${id}`)
+      connection.status = 'error'
       this.emit('reconnect-failed', id, '已达到最大重连次数')
       return
     }
@@ -913,6 +942,9 @@ export class SSHConnectionManager extends EventEmitter {
 
     // 延迟重连
     connection.reconnectTimer = setTimeout(async () => {
+      connection.reconnectTimer = undefined
+      if (connection.manualDisconnect || this.connections.get(id) !== connection) return
+      let attempt: SSHConnection | undefined
       try {
         // 先清理旧连接
         if (connection.stream) {
@@ -920,11 +952,9 @@ export class SSHConnectionManager extends EventEmitter {
           connection.stream.end()
         }
         if (connection.client) {
-          connection.client.removeAllListeners()
           connection.client.end()
         }
         if (connection.socket) {
-          connection.socket.removeAllListeners()
           connection.socket.destroy()
         }
 
@@ -932,7 +962,10 @@ export class SSHConnectionManager extends EventEmitter {
         this.connections.delete(id)
 
         // 尝试重新连接
-        await this.connect(id, connection.options)
+        const reconnect = this.connect(id, connection.options)
+        attempt = this.connections.get(id)
+        await reconnect
+        if (!attempt || attempt.manualDisconnect || this.connections.get(id) !== attempt) return
 
         // 重连成功，更新新连接对象的计数器
         const newConnection = this.connections.get(id)
@@ -942,6 +975,9 @@ export class SSHConnectionManager extends EventEmitter {
         console.log(`Successfully reconnected session ${id}`)
         this.emit('reconnected', id)
       } catch (error) {
+        // A cancelled/replaced attempt must not resurrect an orphan connection.
+        if (connection.manualDisconnect || attempt?.manualDisconnect || this.connections.has(id))
+          return
         console.error(
           `Reconnect attempt ${connection.reconnectAttempts} failed for session ${id}:`,
           error
@@ -970,6 +1006,11 @@ export class SSHConnectionManager extends EventEmitter {
       connection.reconnectTimer = undefined
     }
 
+    if (connection.status === 'connecting' || connection.status === 'reconnecting') {
+      connection.manualDisconnect = true
+      connection.cancelConnect?.()
+      connection.status = 'disconnected'
+    }
     connection.reconnectAttempts = 0
     console.log(`Reconnect cancelled for session ${id}`)
   }

@@ -356,6 +356,7 @@
           :config="form.proxyJump"
           :target-host="form.host"
           :target-port="form.port"
+          :underlying-proxy="form.proxy"
           @update="handleProxyJumpUpdate"
         />
 

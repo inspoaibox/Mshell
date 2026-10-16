@@ -13,10 +13,10 @@
           :loading="testing"
           @click.prevent="testConnection"
         >
-          测试连接
+          测试链路
         </el-button>
         <el-button
-          v-if="localConfig.enabled && !isNested"
+          v-if="localConfig.enabled && !localConfig.nextJump && level < 7"
           type="primary"
           size="small"
           :icon="Plus"
@@ -113,13 +113,11 @@
         <div class="preview-label">连接路径：</div>
         <div class="preview-chain">
           <el-tag type="info" size="small">本机</el-tag>
-          <el-icon><Right /></el-icon>
-          <el-tag type="primary" size="small">
-            {{ localConfig.username || 'user' }}@{{ localConfig.host || 'host' }}:{{ localConfig.port }}
-          </el-tag>
-          <template v-if="localConfig.nextJump">
+          <template v-for="(hop, index) in previewHops" :key="index">
             <el-icon><Right /></el-icon>
-            <el-tag type="warning" size="small">...</el-tag>
+            <el-tag type="primary" size="small">
+              {{ hop.username || 'user' }}@{{ hop.host || 'host' }}:{{ hop.port }}
+            </el-tag>
           </template>
           <el-icon><Right /></el-icon>
           <el-tag type="success" size="small">
@@ -134,6 +132,8 @@
           :config="localConfig.nextJump"
           :level="level + 1"
           :is-nested="true"
+          :target-host="targetHost"
+          :target-port="targetPort"
           @update="handleNextJumpUpdate"
           @remove="removeNextJump"
         />
@@ -143,10 +143,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Connection, Plus, Delete, Right } from '@element-plus/icons-vue'
-import type { ProxyJumpConfig as ProxyJumpConfigType } from '@/types/session'
+import type { ProxyJumpConfig as ProxyJumpConfigType, ProxyConfig } from '@/types/session'
 
 interface Props {
   config?: ProxyJumpConfigType
@@ -154,6 +154,7 @@ interface Props {
   isNested?: boolean
   targetHost?: string
   targetPort?: number
+  underlyingProxy?: ProxyConfig
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -180,6 +181,15 @@ const localConfig = ref<ProxyJumpConfigType>({
 })
 
 const testing = ref(false)
+const previewHops = computed(() => {
+  const hops: ProxyJumpConfigType[] = []
+  let hop: ProxyJumpConfigType | undefined = localConfig.value
+  while (hop?.enabled && hops.length < 8 && !hops.includes(hop)) {
+    hops.push(hop)
+    hop = hop.nextJump
+  }
+  return hops
+})
 
 // 监听外部配置变化
 watch(() => props.config, (newConfig) => {
@@ -195,6 +205,10 @@ const emitUpdate = () => {
 
 // 测试跳板机连接
 const testConnection = async () => {
+  if (!props.targetHost?.trim() || !props.targetPort) {
+    ElMessage.warning('请先填写目标服务器的主机和端口')
+    return
+  }
   if (!localConfig.value.host || !localConfig.value.port || !localConfig.value.username) {
     ElMessage.warning('请填写跳板机主机、端口和用户名')
     return
@@ -212,17 +226,11 @@ const testConnection = async () => {
 
   testing.value = true
   try {
-    const result = await window.electronAPI.ssh.testProxyJump({
-      enabled: true,
-      host: localConfig.value.host,
-      port: localConfig.value.port,
-      username: localConfig.value.username,
-      authType: localConfig.value.authType,
-      password: localConfig.value.password,
-      privateKeyPath: localConfig.value.privateKeyPath,
-      passphrase: localConfig.value.passphrase,
-      nextJump: localConfig.value.nextJump
-    })
+    const result = await window.electronAPI.ssh.testProxyJump(
+      JSON.parse(JSON.stringify(localConfig.value)),
+      props.underlyingProxy ? JSON.parse(JSON.stringify(props.underlyingProxy)) : undefined,
+      { host: props.targetHost, port: props.targetPort }
+    )
 
     if (result.success) {
       ElMessage.success(`${result.message} (延迟: ${result.latency}ms)`)
