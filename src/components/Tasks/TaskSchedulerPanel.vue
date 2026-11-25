@@ -128,7 +128,7 @@
           <el-input v-model="taskForm.cronExpression" placeholder="秒 分 时 日 月 周" />
           <div class="form-tip">
             格式：秒(0-59) 分(0-59) 时(0-23) 日(1-31) 月(1-12) 周(0-7)
-            <br>示例：0 30 2 * * * = 每天凌晨 2:30
+            <br />示例：0 30 2 * * * = 每天凌晨 2:30
           </div>
         </el-form-item>
         

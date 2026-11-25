@@ -3,6 +3,26 @@ import { baseParse, NodeTypes } from '@vue/compiler-dom'
 
 const HAN = /[\u4e00-\u9fff]/
 
+// These attributes are rendered as user-facing strings by Vue/Element Plus.
+// Keeping the list explicit avoids translating data attributes, values, or
+// user-provided content at build time.
+const TRANSLATABLE_ATTRIBUTES = new Set([
+  'title',
+  'content',
+  'label',
+  'placeholder',
+  'aria-label',
+  'start-placeholder',
+  'end-placeholder',
+  'range-separator',
+  'confirm-button-text',
+  'cancel-button-text',
+  'empty-text',
+  'loading-text',
+  'no-match-text',
+  'no-data-text'
+])
+
 function json(value: string): string {
   return JSON.stringify(value)
 }
@@ -20,11 +40,29 @@ function transformTemplate(template: string): string {
       const leading = node.content.match(/^\s*/)?.[0] || ''
       const trailing = node.content.match(/\s*$/)?.[0] || ''
       const value = node.content.trim()
-      if (value && !value.includes('{{')) {
+      if (value) {
         replacements.push({
           start: node.loc.start.offset,
           end: node.loc.end.offset,
           value: `${leading}{{ $legacyT(${json(value)}) }}${trailing}`
+        })
+      }
+    }
+    if (node.type === NodeTypes.ELEMENT && node.props) {
+      for (const prop of node.props) {
+        if (
+          prop.type !== NodeTypes.ATTRIBUTE ||
+          !prop.value ||
+          !TRANSLATABLE_ATTRIBUTES.has(prop.name) ||
+          !HAN.test(prop.value.content)
+        ) continue
+
+        const attrStart = prop.loc.start.offset
+        const attrEnd = prop.loc.end.offset
+        replacements.push({
+          start: attrStart,
+          end: attrEnd,
+          value: `:${prop.name}='$legacyT(${json(prop.value.content)})'`
         })
       }
     }

@@ -23,6 +23,7 @@
     "android:build:bundle": "node scripts/build-android.mjs bundle",
     "android:open": "cap open android",
     "test": "vitest",
+    "i18n:audit": "node scripts/audit-i18n.mjs",
     "test:ui": "vitest --ui",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
     "format": "prettier --write src/"

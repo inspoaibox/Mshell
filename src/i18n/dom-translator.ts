@@ -10,8 +10,24 @@ function preserveWhitespace(original: string, translated: string): string {
 }
 
 function translateAttributes(root: HTMLElement) {
-  root.querySelectorAll<HTMLElement>('[title], [placeholder], [aria-label]').forEach((el) => {
-    for (const name of ['title', 'placeholder', 'aria-label']) {
+  const attributes = [
+    'title',
+    'content',
+    'label',
+    'placeholder',
+    'aria-label',
+    'start-placeholder',
+    'end-placeholder',
+    'range-separator',
+    'confirm-button-text',
+    'cancel-button-text',
+    'empty-text',
+    'loading-text',
+    'no-match-text',
+    'no-data-text'
+  ]
+  root.querySelectorAll<HTMLElement>(attributes.map((name) => `[${name}]`).join(',')).forEach((el) => {
+    for (const name of attributes) {
       const value = el.getAttribute(name)
       if (!value) continue
       const translated = translateLegacy(value)
