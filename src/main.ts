@@ -6,11 +6,18 @@ import './styles/main.css'
 import App from './App.vue'
 import i18n from './i18n'
 import { applyAppShellTheme } from './utils/app-appearance'
+import { translateLegacy } from './i18n/legacy'
+import { installDomTranslator } from './i18n/dom-translator'
 
 // 在应用挂载前应用主题，避免闪烁
 async function initializeTheme() {
   try {
     const settings = await window.electronAPI.settings.get()
+    if (settings?.general?.language === 'zh-CN' || settings?.general?.language === 'en-US') {
+      i18n.global.locale = settings.general.language
+      localStorage.setItem('locale', settings.general.language)
+      document.documentElement.lang = settings.general.language
+    }
     if (settings?.general?.theme) {
       applyAppShellTheme({
         theme: settings.general.theme,
@@ -30,6 +37,10 @@ initializeTheme().then(() => {
   app.use(pinia)
   app.use(ElementPlus)
   app.use(i18n)
+  app.config.globalProperties.$legacyT = translateLegacy
 
   app.mount('#app')
+  installDomTranslator(document.body)
 })
+
+

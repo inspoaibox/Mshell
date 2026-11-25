@@ -1,5 +1,6 @@
 <template>
-  <div id="app">
+  <el-config-provider :locale="elementLocale">
+    <div id="app">
     <!-- 锁定屏幕 -->
     <LockScreen v-if="isLocked" @unlock="handleUnlock" />
 
@@ -442,7 +443,8 @@
         <el-button type="warning" @click="answerMcpApproval(true)">允许本次操作</el-button>
       </template>
     </el-dialog>
-  </div>
+    </div>
+  </el-config-provider>
 </template>
 
 <script setup lang="ts">
@@ -463,6 +465,8 @@ import { useAIStore } from '@/stores/ai'
 import { v4 as uuidv4 } from 'uuid'
 import { keyboardShortcutManager } from '@/utils/keyboard-shortcuts'
 import { useLocale } from '@/composables/useLocale'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
+import en from 'element-plus/es/locale/lang/en'
 
 // 组件导入
 import Sidebar from './components/Common/Sidebar.vue'
@@ -496,7 +500,8 @@ import type { SessionConfig } from './types/session'
 import type { McpApprovalRequest } from './types/electron-env'
 
 // 国际化
-const { t } = useLocale()
+const { t, locale } = useLocale()
+const elementLocale = computed(() => (locale.value === 'en-US' ? en : zhCn))
 
 // 使用 store - 集中管理所有状态
 const appStore = useAppStore()

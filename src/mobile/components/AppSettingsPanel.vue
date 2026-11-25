@@ -15,17 +15,27 @@
       </select>
     </label>
 
+    <label>
+      语言
+      <select v-model="localSettings.language" @change="saveSettings">
+        <option value="zh-CN">简体中文</option>
+        <option value="en-US">English</option>
+      </select>
+    </label>
+
     <p v-if="message" class="message">{{ message }}</p>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { MobileAppSettings } from '../services/app-settings'
 import { appSettingsStore } from '../services/app-settings'
 
 const props = defineProps<{ settings: MobileAppSettings }>()
 const emit = defineEmits<{ updated: [settings: MobileAppSettings] }>()
+const { locale } = useI18n()
 
 const localSettings = reactive<MobileAppSettings>({ ...props.settings })
 const message = computed(() =>
@@ -48,6 +58,10 @@ watch(
 )
 
 const saveSettings = () => {
+  locale.value = localSettings.language
+  localStorage.setItem('locale', localSettings.language)
+  document.documentElement.lang = localSettings.language
+  window.dispatchEvent(new Event('mshell-locale-changed'))
   emit('updated', appSettingsStore.update(localSettings))
 }
 </script>

@@ -2,13 +2,14 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 import { fileURLToPath, URL } from 'url'
+import { legacyI18nPlugin } from './src/i18n/vite-plugin'
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url))
 const mobileRoot = resolve(rootDir, 'src/mobile')
 
 export default defineConfig({
   root: mobileRoot,
-  plugins: [vue()],
+  plugins: [legacyI18nPlugin(), vue()],
   resolve: {
     alias: {
       '@': resolve(rootDir, 'src')

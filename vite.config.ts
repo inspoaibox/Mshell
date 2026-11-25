@@ -2,9 +2,11 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import electron from 'vite-plugin-electron'
 import { resolve } from 'path'
+import { legacyI18nPlugin } from './src/i18n/vite-plugin'
 
 export default defineConfig({
   plugins: [
+    legacyI18nPlugin(),
     vue(),
     electron([
       {
@@ -50,12 +52,12 @@ export default defineConfig({
     }
   },
   build: {
-    target: 'esnext' // 支持 top-level await
+    target: 'esnext'
   },
   server: {
-    host: '127.0.0.1', // 明确使用IPv4地址
+    host: '127.0.0.1',
     port: 5173,
-    strictPort: true // 如果端口被占用则失败，而不是尝试其他端口
+    strictPort: true
   },
   optimizeDeps: {
     esbuildOptions: {

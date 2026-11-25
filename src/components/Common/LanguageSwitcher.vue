@@ -19,15 +19,30 @@ import { ElMessage } from 'element-plus'
 const { locale } = useI18n()
 const currentLocale = ref(locale.value)
 
-const changeLocale = () => {
+const changeLocale = async () => {
   locale.value = currentLocale.value
   localStorage.setItem('locale', currentLocale.value)
+  document.documentElement.lang = currentLocale.value
+  window.dispatchEvent(new Event('mshell-locale-changed'))
+
+  try {
+    const settings = await window.electronAPI.settings.get()
+    await window.electronAPI.settings.update({
+      general: {
+        ...settings?.general,
+        language: currentLocale.value
+      }
+    })
+  } catch (error) {
+    console.warn('Failed to persist locale setting:', error)
+  }
   
   // 显示切换成功消息
-  const message = currentLocale.value === 'zh-CN' 
-    ? '语言已切换为简体中文' 
-    : 'Language switched to English'
-  ElMessage.success(message)
+  ElMessage.success(
+    currentLocale.value === 'zh-CN'
+      ? '语言已切换为简体中文'
+      : 'Language switched to English'
+  )
 }
 
 // Watch for external locale changes

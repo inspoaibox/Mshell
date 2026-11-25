@@ -54,12 +54,9 @@
                 <el-switch v-model="settings.general.enableSystemLog" />
                 <span class="form-hint">记录系统错误、连接错误和内部运行日志</span>
               </el-form-item>
-              <!-- 语言切换暂时禁用，当前代码大部分为中文硬编码 -->
-              <!--
               <el-form-item label="语言">
                 <LanguageSwitcher />
               </el-form-item>
-              -->
             </el-form>
           </div>
         </el-tab-pane>
@@ -1827,6 +1824,7 @@ command=systemctl restart nginx
 <script setup lang="ts">
 import { ref, onMounted, toRaw, watch, computed, h } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import {
   DocumentCopy,
   Download,
@@ -1849,10 +1847,12 @@ import {
   type TerminalShortcutsConfig
 } from '@/utils/terminal-shortcuts'
 import AISettingsPanel from '../AI/AISettingsPanel.vue'
+import LanguageSwitcher from './LanguageSwitcher.vue'
 import logoImg from '@/assets/logo.png'
 
 // AI 设置面板引用
 const aiSettingsPanelRef = ref<InstanceType<typeof AISettingsPanel> | null>(null)
+const { locale } = useI18n()
 
 const props = withDefaults(
   defineProps<{
@@ -2240,6 +2240,10 @@ const loadSettings = async () => {
         agentMcp: { ...settings.value.agentMcp, ...saved.agentMcp }
       }
       currentTheme.value = settings.value.terminal.theme
+      if (saved.general?.language === 'zh-CN' || saved.general?.language === 'en-US') {
+        locale.value = saved.general.language
+        localStorage.setItem('locale', saved.general.language)
+      }
       if (saved.terminalShortcuts) {
         terminalShortcutsManager.replaceAll(saved.terminalShortcuts)
         terminalShortcuts.value = terminalShortcutsManager.getAll()
@@ -2471,6 +2475,8 @@ const saveSettings = async () => {
   try {
     await ensureSftpDefaultLocalPath()
     ensureTerminalBackground()
+
+    settings.value.general.language = locale.value as 'zh-CN' | 'en-US'
 
     // 保存常规设置；Agent 接入设置由 mcp:* 接口单独保存
     const { agentMcp: _agentMcp, ...generalSettings } = toRaw(settings.value)
