@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { serverMonitorManager } from '../managers/ServerMonitorManager'
 import { sshConnectionManager } from '../managers/SSHConnectionManager'
+import { serverSecurityManager } from '../managers/ServerSecurityManager'
 
 /**
  * Register server monitor IPC handlers
@@ -10,7 +11,7 @@ export function registerServerMonitorHandlers() {
   ipcMain.handle('serverMonitor:start', async (_event, sessionId: string, config?: any) => {
     try {
       const connection = sshConnectionManager.getConnection(sessionId)
-      if (!connection || !connection.client) {
+      if (!connection || connection.status !== 'connected' || !connection.client) {
         return { success: false, error: 'Connection not found or not active' }
       }
 
@@ -80,6 +81,24 @@ export function registerServerMonitorHandlers() {
     } catch (error) {
       console.error('Failed to update config:', error)
       return { success: false, error: (error as Error).message }
+    }
+  })
+
+  // 安全信息（在线会话、SSH 连接、认证失败次数）
+  ipcMain.handle('serverMonitor:security', async (_event, sessionId: string) => {
+    try {
+      return { success: true, data: await serverSecurityManager.getSummary(sessionId) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : '安全信息采集失败' }
+    }
+  })
+
+  // 安全详情（含登录历史和认证日志）
+  ipcMain.handle('serverMonitor:securityDetails', async (_event, sessionId: string) => {
+    try {
+      return { success: true, data: await serverSecurityManager.getDetails(sessionId) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : '安全详情读取失败' }
     }
   })
 

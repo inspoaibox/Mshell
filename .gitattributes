@@ -1,0 +1,2 @@
+# These scripts run on Linux even when the desktop application is built on Windows.
+src/utils/firewall/*.sh text eol=lf

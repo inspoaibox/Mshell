@@ -59,6 +59,7 @@ const SPECIAL_READ_ONLY_PROGRAMS = new Set([
   'ip6tables',
   'iptables',
   'journalctl',
+  'pm2',
   'nft',
   'systemctl',
   'ufw'
@@ -480,6 +481,34 @@ function validateJournalctl(args: string[]): void {
   rejectShortFlags(args, 'f', 'nupSUtoDMgFcTiI', '持续跟随日志不适合 MCP 查询')
 }
 
+function validatePm2(args: string[]): void {
+  const action = args[0]
+  const noArgumentActions = new Set([
+    'list',
+    'ls',
+    'l',
+    'status',
+    'jlist',
+    'prettylist',
+    'ping',
+    'version',
+    '--version'
+  ])
+  if (action && noArgumentActions.has(action)) {
+    if (args.length !== 1) throw new Error(`pm2 ${action} 仅允许无参数查询`)
+    return
+  }
+  if (action === 'describe' || action === 'show') {
+    if (args.length !== 2 || !/^[a-zA-Z0-9_.:@/-]{1,200}$/.test(args[1])) {
+      throw new Error(`pm2 ${action} 仅允许查询一个进程名称或 ID`)
+    }
+    return
+  }
+  throw new Error(
+    'pm2 仅允许 list、ls、status、jlist、prettylist、ping、version、describe 和 show 查询'
+  )
+}
+
 function validateSpecialProgram(program: string, args: string[]): void {
   switch (program) {
     case 'systemctl':
@@ -521,6 +550,9 @@ function validateSpecialProgram(program: string, args: string[]): void {
       return
     case 'journalctl':
       validateJournalctl(args)
+      return
+    case 'pm2':
+      validatePm2(args)
       return
     case 'crontab':
       requireExactArgs(args, { '-l': false, '-u': true }, 'crontab')

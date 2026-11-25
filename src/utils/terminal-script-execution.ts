@@ -1,3 +1,5 @@
+import { quoteShell, validateDeployedScriptPath } from './lazy-script-template'
+
 const SCRIPT_MARKER_PREFIX = 'mshell-script-done'
 const TOKEN_PATTERN = /^[a-f0-9-]{16,64}$/i
 
@@ -5,14 +7,20 @@ export function createScriptRunToken(): string {
   return crypto.randomUUID()
 }
 
-export function buildInteractiveScriptCommand(scriptPath: string, token: string): string {
+export function buildInteractiveScriptCommand(
+  scriptPath: string,
+  token: string,
+  removeAfter = false
+): string {
   if (!TOKEN_PATTERN.test(token)) throw new Error('脚本运行标记无效')
-  if (!/^~\/\.mshell\/scripts\/'[^'\r\n]+'$/.test(scriptPath)) {
-    throw new Error('脚本路径无效')
+  validateDeployedScriptPath(scriptPath)
+  if (removeAfter && scriptPath.slice(scriptPath.lastIndexOf('/') + 1) !== `.run-${token}.sh`) {
+    throw new Error('仅允许清理当前任务的临时脚本')
   }
   return [
-    `bash ${scriptPath}`,
+    `bash ${quoteShell(scriptPath)}`,
     'mshell_status=$?',
+    ...(removeAfter ? [`rm -f -- ${quoteShell(scriptPath)}`] : []),
     `printf '\\n\\033]777;${SCRIPT_MARKER_PREFIX};${token};%s\\007' "$mshell_status"`
   ].join('; ')
 }

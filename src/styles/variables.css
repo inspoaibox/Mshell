@@ -13,6 +13,19 @@
   --success-color: #22c55e;
   --warning-color: #f59e0b;
   --error-color: #ef4444;
+  /* Pair destructive-action foregrounds with their surfaces in both themes. */
+  --danger-color: #fda4af;
+  --danger-solid-bg: #b91c1c;
+  --danger-solid-hover: #991b1b;
+  --danger-solid-active: #7f1d1d;
+  --danger-on-solid: #ffffff;
+  --danger-soft-bg: #351b25;
+  --danger-soft-hover: #4a202c;
+  --danger-soft-active: #5d2533;
+  --danger-border: #c45b6a;
+  --danger-disabled-text: #b89ba4;
+  --danger-disabled-bg: #30242b;
+  --danger-disabled-border: #69515b;
   --info-color: #3b82f6;
 
   /* 专业深色主题 - 更舒适的对比度 */
@@ -126,6 +139,14 @@
 
 /* 浅色主题 */
 :root.light-theme {
+  --danger-color: #b91c1c;
+  --danger-soft-bg: #fff1f2;
+  --danger-soft-hover: #ffe4e6;
+  --danger-soft-active: #fecdd3;
+  --danger-border: #c2414b;
+  --danger-disabled-text: #805562;
+  --danger-disabled-bg: #f6e9ed;
+  --danger-disabled-border: #c4a7b1;
   /* 品牌色保持一致，微调亮度 */
   --primary-color: #0284c7;
   /* Darker blue for light mode */

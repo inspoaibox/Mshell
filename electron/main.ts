@@ -23,10 +23,14 @@ import { registerWorkflowHandlers } from './ipc/workflow-handlers'
 import { registerAIHandlers } from './ipc/ai-handlers'
 import { registerRDPHandlers } from './ipc/rdp-handlers'
 import { registerVNCHandlers } from './ipc/vnc-handlers'
+import { registerIPMIHandlers } from './ipc/ipmi-handlers'
 import { registerSyncHandlers } from './ipc/sync-handlers'
 import { registerQuickCommandHandlers } from './ipc/quick-command-handlers'
 import { registerLazyScriptHandlers } from './ipc/lazy-script-handlers'
+import { registerFirewallHandlers } from './ipc/firewall-handlers'
+import { registerPortHandlers } from './ipc/port-handlers'
 import { registerDockerHandlers } from './ipc/docker-handlers'
+import { registerFail2BanHandlers } from './ipc/fail2ban-handlers'
 import { registerMCPHandlers } from './ipc/mcp-handlers'
 import {
   handleTerminalBackgroundProtocol,
@@ -83,6 +87,45 @@ const requestAppQuit = () => {
 const ensureTray = () => {
   if (tray) return true
   return createTray()
+}
+
+/**
+ * 仅允许正式安装版注册 Windows 开机启动。
+ *
+ * 开发模式下 Electron 的 app 名称是 `Electron`，如果调用
+ * setLoginItemSettings，会在注册表中留下 electron.app.Electron，
+ * 开机时启动一个没有应用参数的 Electron 壳子。传入 false 可以
+ * 清理这个开发入口，同时不影响正式版的 MShell 启动项。
+ */
+const clearLegacyElectronLoginItem = () => {
+  if (process.platform !== 'win32') return
+
+  try {
+    const legacyItem = app
+      .getLoginItemSettings()
+      .launchItems?.find(
+        (item) =>
+          item.name === 'electron.app.Electron' &&
+          /[\\/]node_modules[\\/]electron[\\/]dist[\\/]electron\.exe$/i.test(item.path)
+      )
+
+    if (legacyItem) {
+      app.setLoginItemSettings({
+        openAtLogin: false,
+        name: legacyItem.name
+      })
+      console.log('[Main] Removed legacy Electron development startup entry')
+    }
+  } catch (error) {
+    console.warn('[Main] Failed to remove legacy Electron startup entry:', error)
+  }
+}
+
+const syncLoginItemSettings = (openAtLogin: boolean) => {
+  clearLegacyElectronLoginItem()
+  app.setLoginItemSettings({
+    openAtLogin: app.isPackaged && openAtLogin
+  })
 }
 
 const shouldHideToTrayOnClose = () => {
@@ -167,10 +210,14 @@ registerWorkflowHandlers()
 registerAIHandlers(ipcMain, aiManager)
 registerRDPHandlers()
 registerVNCHandlers()
+registerIPMIHandlers()
 registerSyncHandlers()
 registerQuickCommandHandlers()
 registerLazyScriptHandlers()
+registerFirewallHandlers()
+registerPortHandlers()
 registerDockerHandlers()
+registerFail2BanHandlers()
 registerTerminalBackgroundHandlers()
 registerMCPHandlers()
 
@@ -360,6 +407,23 @@ function createWindow() {
     mainWindow?.show()
   })
 
+  // 阻止页面被导航离开应用（例如把文件拖放到非投放区域时，Chromium 会导航到 file://…）。
+  // 只允许导航到当前文档本身（忽略 hash/query，兼容开发服务器重载与 hash 路由）。
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const stripDocument = (value: string): string => {
+      try {
+        const parsed = new URL(value)
+        return `${parsed.protocol}//${parsed.host}${parsed.pathname}`
+      } catch {
+        return value
+      }
+    }
+    const currentURL = mainWindow?.webContents.getURL() || ''
+    if (!currentURL || stripDocument(url) !== stripDocument(currentURL)) {
+      event.preventDefault()
+    }
+  })
+
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https:') || url.startsWith('http:')) {
@@ -460,9 +524,7 @@ if (gotSingleInstanceLock && !isInstallerQuitRequest()) {
 
     // 应用启动时打开设置
     const settings = appSettingsManager.getSettings()
-    app.setLoginItemSettings({
-      openAtLogin: settings.general.startWithSystem
-    })
+    syncLoginItemSettings(settings.general.startWithSystem)
 
     createWindow()
 

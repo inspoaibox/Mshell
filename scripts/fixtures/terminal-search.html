@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+<head><meta charset="utf-8"><title>MShell 终端搜索验证</title></head>
+<body><div id="preview"></div>
+<script type="module">
+import { createApp, h, ref, onMounted } from 'vue'
+import ElementPlus from 'element-plus'
+import { Terminal } from 'xterm'
+import { SearchAddon } from 'xterm-addon-search'
+import SearchBar from '/src/components/Terminal/TerminalSearch.vue'
+import { TerminalSearchController, emptySearchResult } from '/src/utils/terminal-search.ts'
+import 'element-plus/dist/index.css'
+import 'xterm/css/xterm.css'
+import '/src/styles/variables.css'
+
+const write = (terminal, text) => new Promise(resolve => terminal.write(text, resolve))
+const sample = Array.from({ length: 160 }, (_, i) => `line ${i + 1}: ${[12, 80, 140].includes(i) ? 'needle' : 'ordinary output'}`).join('\r\n')
+const screen = '\x1b[?1049h\x1b[2J\x1b[Hnano — sample.txt\r\nneedle visible here\r\ncurrent screen only'
+const checks = ref([])
+const verify = (value, label) => { if (!value) throw new Error(label) }
+
+async function runChecks() {
+  const host = document.createElement('div')
+  host.style.cssText = 'position:fixed;left:-10000px;width:900px;height:320px'
+  document.body.append(host)
+  const terminal = new Terminal({ cols: 90, rows: 12, scrollback: 2000, allowProposedApi: true })
+  const addon = new SearchAddon()
+  terminal.loadAddon(addon)
+  terminal.open(host)
+  let result = emptySearchResult()
+  const controller = new TerminalSearchController(terminal, addon, next => result = next)
+  const run = async (name, action) => {
+    try { await action(); checks.value.push({ name, passed: true }) }
+    catch(error) { checks.value.push({ name, passed: false, error: error.message }) }
+  }
+  await write(terminal, sample)
+  await run('搜索屏幕外的历史并居中定位', () => {
+    controller.search('needle')
+    verify(result.matchCount === 3 && result.currentMatch === 1, 'incorrect match count')
+    verify(result.row === 13 && result.column === 10, 'incorrect position')
+    verify(terminal.buffer.active.viewportY === 6, 'result was not centered')
+  })
+  await run('下一处、上一处与首尾循环', () => {
+    controller.next(); verify(result.row === 81 && result.currentMatch === 2, 'next failed')
+    controller.previous(); verify(result.row === 13, 'previous failed')
+    controller.previous(); verify(result.row === 141 && result.currentMatch === 3, 'wrap failed')
+  })
+  await run('大小写选项立即生效', () => {
+    controller.search('NEEDLE', { caseSensitive: true }); verify(!result.found, 'case sensitive failed')
+    controller.search('NEEDLE', { caseSensitive: false }); verify(result.matchCount === 3, 'case insensitive failed')
+  })
+  await run('正则表达式及无效正则反馈', () => {
+    controller.search('need.e', { regex: true }); verify(result.matchCount === 3, 'regex failed')
+    controller.search('[', { regex: true }); verify(!!result.error && !terminal.hasSelection(), 'invalid regex left a match')
+  })
+  await run('清空搜索同时清除选中与计数', () => {
+    controller.search('needle'); controller.clear()
+    verify(!terminal.hasSelection() && result.matchCount === null, 'clear failed')
+  })
+  await run('全屏程序只搜索当前画面，不混入普通终端历史', async () => {
+    await write(terminal, screen)
+    controller.search('needle')
+    verify(result.scope === 'screen' && result.found && result.row === 2, 'screen search failed')
+    verify(result.matchCount === null, 'alternate buffer must not report a false zero count')
+    controller.search('ordinary output'); verify(!result.found, 'history leaked into screen search')
+  })
+  await run('退出全屏后恢复搜索终端历史', async () => {
+    await write(terminal, '\x1b[?1049l')
+    controller.search('needle')
+    verify(result.scope === 'history' && result.matchCount === 3, 'normal buffer not restored')
+  })
+  await run('超过高亮上限后仍可定位，并标注计数下限', async () => {
+    controller.clear(); terminal.reset()
+    await write(terminal, Array.from({ length: 1100 }, () => 'needle').join('\r\n'))
+    controller.search('needle')
+    verify(result.limited && result.matchCount === 1000, 'limit not marked')
+    controller.previous()
+    verify(result.found && result.row === 1100 && result.currentMatch === null, 'unhighlighted match lost')
+  })
+  controller.dispose(); terminal.dispose(); host.remove()
+}
+
+createApp({
+  setup() {
+    const visible = ref(true)
+    const result = ref(emptySearchResult())
+    const terminalHost = ref()
+    const viewport = ref(0)
+    let terminal, controller
+    onMounted(async () => {
+      terminal = new Terminal({ cols: 100, rows: 16, scrollback: 2000, allowProposedApi: true, overviewRulerWidth: 8, theme: { background: '#101827' } })
+      const addon = new SearchAddon()
+      terminal.loadAddon(addon); terminal.open(terminalHost.value)
+      controller = new TerminalSearchController(terminal, addon, next => {
+        result.value = next
+        viewport.value = terminal.buffer.active.viewportY
+      })
+      terminal.onScroll(y => viewport.value = y)
+      await write(terminal, sample)
+      await runChecks()
+    })
+    const loadNormal = async () => {
+      controller.clear(); terminal.reset(); await write(terminal, sample)
+      visible.value = true
+    }
+    return () => h('main', [
+      h('h1', '终端 Search 验证'),
+      h('div', { class: 'fixture-actions' }, [
+        h('button', { onClick: loadNormal }, '载入终端历史'),
+        h('button', { onClick: () => write(terminal, screen) }, '进入全屏编辑器'),
+        h('button', { onClick: () => write(terminal, '\x1b[?1049l') }, '退出全屏编辑器'),
+        h('button', { onClick: () => visible.value = true }, '打开搜索')
+      ]),
+      h(SearchBar, { visible: visible.value, result: result.value,
+        'onUpdate:visible': value => { visible.value = value; if (!value) controller.clear() },
+        onSearch: (term, options) => controller.search(term, options),
+        onFindNext: () => controller.next(), onFindPrevious: () => controller.previous(), onClose: () => terminal.focus()
+      }),
+      h('div', { ref: terminalHost, class: 'fixture-terminal' }),
+      h('p', { 'data-testid': 'viewport' }, `当前视口起始行：${viewport.value + 1}`),
+      h('h2', '自动验证结果'),
+      h('ul', checks.value.map(check => h('li', { style: { color: check.passed ? '#63dba7' : '#ff8d91' } }, `${check.passed ? 'PASS' : 'FAIL'} · ${check.name}${check.error ? '：' + check.error : ''}`)))
+    ])
+  }
+}).use(ElementPlus).mount('#preview')
+</script>
+<style>
+body { margin: 0; background: #0c111c; color: #e7edf8; font: 14px 'Segoe UI', sans-serif; }
+main { max-width: 1000px; margin: 20px auto; padding: 0 16px; }
+h1 { font-size: 20px; } h2 { font-size: 16px; }
+.fixture-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.fixture-actions button { color: #e7edf8; background: #25314a; padding: 7px 12px; border: 1px solid #4c6086; border-radius: 6px; cursor: pointer; }
+.fixture-terminal { padding: 8px; background: #101827; }
+.fixture-terminal .xterm-viewport { overflow-y: auto; }
+li { line-height: 1.7; }
+</style>
+</body></html>

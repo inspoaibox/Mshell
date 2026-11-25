@@ -16,6 +16,29 @@ export function registerDialogHandlers() {
     return result.filePaths[0]
   })
 
+  // Open multiple files dialog: returns all selected paths, null when cancelled
+  ipcMain.handle('dialog:openFiles', async (_event, options) => {
+    const { properties: extraProperties, ...rest } = options || {}
+    const properties = Array.from(
+      new Set<string>([
+        'openFile',
+        'multiSelections',
+        ...(Array.isArray(extraProperties) ? extraProperties : [])
+      ])
+    ) as Electron.OpenDialogOptions['properties']
+    const result = await dialog.showOpenDialog({
+      filters: rest?.filters || [],
+      ...rest,
+      properties
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+
+    return result.filePaths
+  })
+
   // Save file dialog
   ipcMain.handle('dialog:saveFile', async (_event, options) => {
     const result = await dialog.showSaveDialog({

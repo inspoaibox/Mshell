@@ -1,5 +1,9 @@
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow } from 'electron'
 import { commandHistoryManager } from '../managers/CommandHistoryManager'
+
+const notifyHistoryChanged = () => {
+  BrowserWindow.getAllWindows().forEach(window => window.webContents.send('commandHistory:changed'))
+}
 
 /**
  * 注册命令历史 IPC 处理器
@@ -12,6 +16,7 @@ export function registerCommandHistoryHandlers() {
   ipcMain.handle('commandHistory:add', async (_event, data: any) => {
     try {
       const history = await commandHistoryManager.addCommand(data)
+      notifyHistoryChanged()
       return { success: true, data: history }
     } catch (error: any) {
       return { success: false, error: error.message }
@@ -135,6 +140,7 @@ export function registerCommandHistoryHandlers() {
   ipcMain.handle('commandHistory:clearSession', async (_event, sessionId: string) => {
     try {
       await commandHistoryManager.clearSessionHistory(sessionId)
+      notifyHistoryChanged()
       return { success: true }
     } catch (error: any) {
       return { success: false, error: error.message }
@@ -145,6 +151,7 @@ export function registerCommandHistoryHandlers() {
   ipcMain.handle('commandHistory:clearAll', async (_event, keepFavorites: boolean = true) => {
     try {
       await commandHistoryManager.clearAllHistory(keepFavorites)
+      notifyHistoryChanged()
       return { success: true }
     } catch (error: any) {
       return { success: false, error: error.message }
@@ -165,6 +172,7 @@ export function registerCommandHistoryHandlers() {
   ipcMain.handle('commandHistory:delete', async (_event, id: string) => {
     try {
       await commandHistoryManager.delete(id)
+      notifyHistoryChanged()
       return { success: true }
     } catch (error: any) {
       return { success: false, error: error.message }

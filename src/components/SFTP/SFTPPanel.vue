@@ -48,7 +48,14 @@
             <el-button :icon="Back" size="small" @click="goBackLocal" :disabled="!canGoBackLocal">
               返回
             </el-button>
-            <el-button :icon="FolderAdd" size="small" @click="createLocalFolder"> 新建 </el-button>
+            <el-button
+              :icon="FolderAdd"
+              size="small"
+              :disabled="!localPath"
+              @click="createLocalFolder"
+            >
+              新建
+            </el-button>
             <el-button :icon="Refresh" size="small" @click="refreshLocalDirectory">
               刷新
             </el-button>
@@ -65,6 +72,8 @@
             selected-key="path"
             resizable
             storage-key="sftp-local-files"
+            default-sort-key="name"
+            :row-rank="entryRank"
             @row-click="handleLocalClick"
             @row-dblclick="handleLocalDoubleClick"
             @row-contextmenu="handleLocalContextMenu"
@@ -101,7 +110,7 @@
           <button
             class="transfer-btn upload-btn"
             @click="uploadSelected"
-            :disabled="selectedLocalFiles.length === 0 || !currentSession"
+            :disabled="selectedLocalFiles.length === 0 || !currentSession || Boolean(remoteDirectoryError)"
           >
             <el-icon><Top /></el-icon>
           </button>
@@ -110,7 +119,7 @@
           <button
             class="transfer-btn download-btn"
             @click="downloadSelected"
-            :disabled="selectedRemoteFiles.length === 0 || !currentSession"
+            :disabled="selectedRemoteFiles.length === 0 || !currentSession || !localPath"
           >
             <el-icon><Bottom /></el-icon>
           </button>
@@ -139,7 +148,7 @@
                 style="flex: 1"
               >
                 <el-option
-                  v-for="session in sessions"
+                  v-for="session in sshSessions"
                   :key="session.id"
                   :label="session.name"
                   :value="session.id"
@@ -151,7 +160,7 @@
                 </el-option>
               </el-select>
               <el-tooltip content="刷新会话列表" placement="top">
-                <el-button :icon="Refresh" size="small" @click="loadSessions" />
+                <el-button :icon="Refresh" size="small" @click="loadSessions(true)" />
               </el-tooltip>
             </div>
           </div>
@@ -229,6 +238,8 @@
               selected-key="path"
               resizable
               storage-key="sftp-remote-files"
+              default-sort-key="name"
+              :row-rank="entryRank"
               @row-click="handleRemoteClick"
               @row-dblclick="handleRemoteDoubleClick"
               @row-contextmenu="handleRemoteContextMenu"
@@ -237,11 +248,19 @@
               <template #name="{ row }">
                 <div class="file-name-cell">
                   <el-icon :size="18" class="file-icon">
-                    <Folder v-if="row.type === 'directory'" />
-                    <Document v-else-if="row.type === 'file'" />
+                    <Folder v-if="isDirectoryLike(row)" />
+                    <Document v-else-if="isFileLike(row)" />
                     <Link v-else />
                   </el-icon>
                   <span>{{ row.name }}</span>
+                  <el-icon
+                    v-if="row.type === 'symlink' && row.targetType"
+                    :size="12"
+                    class="symlink-badge"
+                    :title="row.targetType === 'directory' ? '指向目录的符号链接' : '指向文件的符号链接'"
+                  >
+                    <Link />
+                  </el-icon>
                 </div>
               </template>
               <template #size="{ row }">
@@ -251,7 +270,9 @@
                 {{ formatTime({ modifyTime: row.modifyTime }) }}
               </template>
               <template #permissions="{ row }">
-                <span class="permissions">{{ formatPermissions(row.permissions) }}</span>
+                <span class="permissions">{{
+                  formatPermissions(row.permissions, row.specialBits)
+                }}</span>
               </template>
               <template #empty>
                 <div class="directory-empty">
@@ -370,28 +391,8 @@
               }}</span>
             </div>
             <div class="transfer-actions">
-              <el-tooltip content="提高优先级" placement="top">
-                <el-button
-                  v-if="transfer.status === 'pending' || transfer.status === 'active'"
-                  text
-                  size="small"
-                  @click="increasePriority(transfer.id)"
-                  :icon="Top"
-                  :disabled="(transfer.priority || 3) >= 5"
-                />
-              </el-tooltip>
-              <el-tooltip content="降低优先级" placement="top">
-                <el-button
-                  v-if="transfer.status === 'pending' || transfer.status === 'active'"
-                  text
-                  size="small"
-                  @click="decreasePriority(transfer.id)"
-                  :icon="Bottom"
-                  :disabled="(transfer.priority || 3) <= 1"
-                />
-              </el-tooltip>
               <el-button
-                v-if="transfer.status === 'active'"
+                v-if="transfer.status === 'active' || transfer.status === 'pending'"
                 text
                 size="small"
                 @click="pauseTransfer(transfer.id)"
@@ -410,7 +411,7 @@
                 继续
               </el-button>
               <el-button
-                v-if="transfer.status === 'failed'"
+                v-if="transfer.status === 'failed' || transfer.status === 'cancelled'"
                 text
                 size="small"
                 type="warning"
@@ -420,6 +421,7 @@
                 重试
               </el-button>
               <el-button
+                v-if="isTransferUnfinished(transfer)"
                 text
                 size="small"
                 type="danger"
@@ -427,6 +429,15 @@
                 :icon="Close"
               >
                 取消
+              </el-button>
+              <el-button
+                v-else
+                text
+                size="small"
+                @click="removeTransferRow(transfer.id)"
+                :icon="Delete"
+              >
+                移除
               </el-button>
             </div>
           </div>
@@ -482,7 +493,17 @@
                   >已传输: {{ formatSize({ size: record.transferred }) }} /
                   {{ formatSize({ size: record.totalSize }) }}</span
                 >
-                <span>进度: {{ ((record.transferred / record.totalSize) * 100).toFixed(1) }}%</span>
+                <span
+                  >进度:
+                  {{
+                    formatProgressText(
+                      calculateProgressPercentage(
+                        normalizeByteCount(record.transferred),
+                        normalizeByteCount(record.totalSize)
+                      )
+                    )
+                  }}</span
+                >
                 <span>时间: {{ formatTime({ modifyTime: getTransferRecordTime(record) }) }}</span>
               </div>
             </div>
@@ -668,6 +689,16 @@
           </div>
         </div>
 
+        <!-- 特殊权限（setuid/setgid/sticky），仅在服务器返回时显示；未修改时原样保留 -->
+        <div v-if="editingSpecialBits !== undefined" class="permission-group">
+          <h4>特殊权限</h4>
+          <div class="permission-checkboxes">
+            <el-checkbox v-model="specialPermissionBits.setuid">SUID</el-checkbox>
+            <el-checkbox v-model="specialPermissionBits.setgid">SGID</el-checkbox>
+            <el-checkbox v-model="specialPermissionBits.sticky">Sticky</el-checkbox>
+          </div>
+        </div>
+
         <!-- 八进制表示 -->
         <div class="permission-octal">
           <strong>八进制表示：</strong>
@@ -723,6 +754,13 @@
       </div>
 
       <template #footer>
+        <el-checkbox
+          v-if="transferConflictDialog?.allowApplyAll"
+          v-model="transferConflictApplyAll"
+          class="conflict-apply-all"
+        >
+          全部应用（应用到剩余所有冲突）
+        </el-checkbox>
         <el-button @click="resolveTransferConflictAction('skip')">跳过</el-button>
         <el-button @click="resolveTransferConflictAction('rename')">重命名</el-button>
         <el-button
@@ -745,7 +783,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import {
   createSSHConnectOptions,
@@ -780,6 +818,34 @@ import VirtualTable from '../Common/VirtualTable.vue'
 import type { Column } from '../Common/virtual-table.types'
 import { useLocale } from '@/composables/useLocale'
 import { formatSftpOperationError } from '@/utils/sftp-errors'
+import {
+  invalidEntryNameReason,
+  isLocalRoot,
+  joinLocalPath,
+  joinRemotePath,
+  localDriveOf,
+  normalizeLocalPath,
+  parentLocalPath,
+  parentRemotePath,
+  unsafeLocalFileNameReason
+} from '@/utils/transfer-path'
+import {
+  entryRank,
+  isArchiveName,
+  isDialogDismissed,
+  isDirectoryLike,
+  isFileLike,
+  LOCAL_ARCHIVE_EXTENSIONS,
+  REMOTE_ARCHIVE_EXTENSIONS,
+  upsertHistoryItem
+} from './sftp-panel-helpers'
+
+const props = withDefaults(defineProps<{ visible?: boolean }>(), { visible: true })
+
+const emit = defineEmits<{
+  /** 进行中 + 排队中的传输数量（状态栏显示） */
+  transferCountChange: [count: number]
+}>()
 
 // 国际化和格式化
 const { formatBytes: formatBytesLocale, formatDateTime } = useLocale()
@@ -788,9 +854,13 @@ interface FileInfo {
   name: string
   path: string
   type: 'file' | 'directory' | 'symlink'
+  /** 符号链接目标的类型（目标不存在时缺省） */
+  targetType?: 'file' | 'directory'
   size: number
   modifyTime: Date
   permissions?: number
+  /** setuid/setgid/sticky 位（0o7000） */
+  specialBits?: number
 }
 
 interface Transfer {
@@ -808,7 +878,11 @@ interface Transfer {
   targetPath: string
   localPath?: string
   remotePath?: string
-  priority?: number // 优先级：1-5，数字越大优先级越高
+  /** 任务所属的连接（会话 ID），重试/恢复只能在该连接上进行 */
+  connectionId: string
+  sessionName?: string
+  /** 通过“恢复”启动的任务：IPC 立即返回，完成时需要刷新对应目录 */
+  refreshOnComplete?: boolean
   startTime?: Date
   endTime?: Date
   error?: string
@@ -847,7 +921,10 @@ interface TransferBatchResult {
   success: string[]
   failed: Array<{ path: string; error: string }>
   paused: string[]
+  cancelled: string[]
 }
+
+type TransferResult = Awaited<ReturnType<Window['electronAPI']['sftp']['uploadFile']>>
 
 interface TransferBatchItem {
   path: string
@@ -869,11 +946,20 @@ interface TransferConflictContext {
   canResume: boolean
   existingNames: string[]
   caseSensitive: boolean
+  /** 批量传输时显示“全部应用” */
+  allowApplyAll?: boolean
 }
 
 interface TransferConflictChoice {
   action: TransferConflictAction
   fileName?: string
+  applyAll?: boolean
+}
+
+/** 一次批量传输中的冲突处理状态（“全部应用”记住的动作） */
+interface TransferConflictBatch {
+  total: number
+  applyAll: TransferConflictAction | null
 }
 
 interface UploadTransferPlan {
@@ -895,6 +981,10 @@ interface DownloadTransferPlan {
 }
 
 const sessions = ref<SessionConfig[]>([])
+// 文件传输只支持 SSH 会话（type 缺省视为 ssh）
+const sshSessions = computed(() =>
+  sessions.value.filter((session) => !session.type || session.type === 'ssh')
+)
 const selectedSessionId = ref('')
 const currentSession = ref<SessionConfig | null>(null)
 const sftpSettings = ref({
@@ -935,8 +1025,9 @@ const remoteFileColumns: Column[] = [
 // 本地文件
 const localPath = ref('')
 const localPathInput = ref('')
+const DEFAULT_WINDOWS_DRIVES = ['C:', 'D:', 'E:', 'F:', 'G:']
 const currentDrive = ref('C:')
-const availableDrives = ref<string[]>(['C:', 'D:', 'E:', 'F:', 'G:'])
+const availableDrives = ref<string[]>([...DEFAULT_WINDOWS_DRIVES])
 const localFiles = ref<FileInfo[]>([])
 const selectedLocalFiles = ref<FileInfo[]>([])
 const loadingLocal = ref(false)
@@ -949,21 +1040,34 @@ const selectedRemoteFiles = ref<FileInfo[]>([])
 const loadingRemote = ref(false)
 const remoteDirectoryError = ref('')
 
+// 目录加载请求序号：只有最新的请求能更新列表和 loading 状态
+let localLoadSeq = 0
+let remoteLoadSeq = 0
+
 // 传输
 const transfers = ref<Transfer[]>([])
 const incompleteTransfers = ref<TransferRecord[]>([])
 const transferHistory = ref<TransferHistoryItem[]>([])
 const activeQueueTab = ref<'current' | 'incomplete' | 'history'>('current')
 const transferConflictDialog = ref<TransferConflictContext | null>(null)
+const transferConflictApplyAll = ref(false)
 let transferConflictResolver: ((choice: TransferConflictChoice) => void) | null = null
+// 用户主动取消的任务：迟到的 started/记录同步不能让它们重新出现
+const userCancelledTransferIds = new Set<string>()
 
 const normalizeTransferBatchResult = (
   result?: Partial<TransferBatchResult>
 ): TransferBatchResult => ({
   success: result?.success || [],
   failed: result?.failed || [],
-  paused: result?.paused || []
+  paused: result?.paused || [],
+  cancelled: result?.cancelled || []
 })
+
+const isTransferFinished = (transfer: Transfer) =>
+  transfer.status === 'completed' || transfer.status === 'failed' || transfer.status === 'cancelled'
+
+const isTransferUnfinished = (transfer: Transfer) => !isTransferFinished(transfer)
 
 const resetTransferRuntimeState = (transfer: Transfer) => {
   transfer.speed = 0
@@ -977,28 +1081,102 @@ const markTransferCompleted = (transfer: Transfer) => {
   transfer.status = 'completed'
   transfer.progress = 100
   transfer.transferred = transfer.total || transfer.transferred
+  transfer.error = undefined
   resetTransferRuntimeState(transfer)
   transfer.endTime = new Date()
   addToHistory(transfer)
 }
 
 const markTransferFailed = (transfer: Transfer, error?: string) => {
-  if (transfer.status === 'failed' || transfer.status === 'cancelled') return
+  if (isTransferFinished(transfer)) return
 
   transfer.status = 'failed'
-  transfer.error = error
+  transfer.error = error || '传输失败'
+  resetTransferRuntimeState(transfer)
+  transfer.endTime = new Date()
+  addToHistory(transfer)
+}
+
+const markTransferCancelled = (transfer: Transfer) => {
+  if (isTransferFinished(transfer)) return
+
+  transfer.status = 'cancelled'
+  transfer.error = undefined
   resetTransferRuntimeState(transfer)
   transfer.endTime = new Date()
   addToHistory(transfer)
 }
 
 const markTransferPaused = (transfer: Transfer) => {
-  if (transfer.status === 'completed' || transfer.status === 'failed' || transfer.status === 'cancelled') {
+  if (isTransferFinished(transfer)) {
     return
   }
 
   transfer.status = 'paused'
   resetTransferRuntimeState(transfer)
+}
+
+/** 排队中的任务真正开始传输（收到 started 或第一次进度） */
+const markTransferStarted = (transfer: Transfer) => {
+  if (transfer.status !== 'pending') return
+  transfer.status = 'active'
+  transfer.lastProgressAt = Date.now()
+  transfer.stalled = false
+}
+
+/** 单文件上传/下载结果：区分完成、暂停、取消和失败 */
+const applySingleTransferResult = (transfer: Transfer, result?: TransferResult) => {
+  if (result?.success) {
+    markTransferCompleted(transfer)
+  } else if (result?.paused) {
+    markTransferPaused(transfer)
+  } else if (result?.cancelled) {
+    markTransferCancelled(transfer)
+  } else {
+    markTransferFailed(transfer, result?.error)
+  }
+}
+
+const getSessionName = (connectionId?: string) =>
+  sessions.value.find((session) => session.id === connectionId)?.name
+
+const createTransferRow = (
+  plan: UploadTransferPlan | DownloadTransferPlan,
+  type: 'upload' | 'download',
+  session: SessionConfig
+): Transfer => ({
+  id: plan.taskId,
+  name: plan.name,
+  type,
+  // 后端在全局并发上限下排队，真正开始时才会发送 sftp:started
+  status: 'pending',
+  progress: 0,
+  speed: 0,
+  eta: 0,
+  transferred: 0,
+  total: plan.total,
+  lastProgressAt: Date.now(),
+  stalled: false,
+  targetPath: type === 'upload' ? plan.remotePath : plan.localPath,
+  localPath: plan.localPath,
+  remotePath: plan.remotePath,
+  connectionId: session.id,
+  sessionName: session.name,
+  startTime: new Date()
+})
+
+/** 任务只能在它所属的连接上重试/恢复 */
+const ensureTransferConnection = (connectionId: string | undefined, sessionName?: string) => {
+  if (currentSession.value && (!connectionId || connectionId === currentSession.value.id)) {
+    return true
+  }
+  const name = sessionName || getSessionName(connectionId) || connectionId || '未知会话'
+  ElMessage.warning(
+    currentSession.value || connectionId
+      ? `该任务属于会话 ${name}，请先连接该会话`
+      : '请先连接到服务器'
+  )
+  return false
 }
 
 const findTransferFromBatchPath = (path: string, items: TransferBatchItem[]) => {
@@ -1010,7 +1188,7 @@ const findTransferFromBatchPath = (path: string, items: TransferBatchItem[]) => 
 const markTransfersFailedByIds = (transferIds: string[], error?: string) => {
   transferIds.forEach((id) => {
     const transfer = transfers.value.find((item) => item.id === id)
-    if (!transfer || transfer.status === 'paused' || transfer.status === 'completed') return
+    if (!transfer || transfer.status === 'paused') return
     markTransferFailed(transfer, error)
   })
 }
@@ -1021,6 +1199,10 @@ const ensureTransferFromRecord = (taskId: string, record: TransferRecord) => {
   if (!record || !taskId) return
 
   const existing = transfers.value.find((transfer) => transfer.id === taskId)
+  // 用户已取消（或已结束）的任务不能被迟到的事件/记录同步“复活”
+  if (!existing && userCancelledTransferIds.has(taskId)) return
+  if (existing && existing.status !== 'pending' && existing.status !== 'active') return
+
   const transferred = normalizeByteCount(record.transferred)
   const total = normalizeByteCount(record.totalSize)
   const progress = normalizeProgressPercentage(calculateProgressPercentage(transferred, total))
@@ -1030,7 +1212,7 @@ const ensureTransferFromRecord = (taskId: string, record: TransferRecord) => {
       : getPathFileName(record.remotePath)
 
   if (existing) {
-    existing.status = record.status as Transfer['status']
+    existing.status = record.status === 'pending' ? existing.status : 'active'
     existing.transferred = transferred
     existing.total = total
     existing.progress = progress
@@ -1057,7 +1239,8 @@ const ensureTransferFromRecord = (taskId: string, record: TransferRecord) => {
     targetPath: record.type === 'upload' ? record.remotePath : record.localPath,
     localPath: record.localPath,
     remotePath: record.remotePath,
-    priority: 3,
+    connectionId: record.connectionId || '',
+    sessionName: getSessionName(record.connectionId),
     startTime: record.createdAt ? new Date(record.createdAt) : new Date()
   })
 }
@@ -1090,11 +1273,21 @@ const applyTransferBatchResults = (
     }
   })
 
+  batchResult.cancelled.forEach((path) => {
+    const transfer = findTransferFromBatchPath(path, items)
+    if (transfer) {
+      markTransferCancelled(transfer)
+    }
+  })
+
   if (batchResult.success.length > 0) {
     ElMessage.success(`成功${actionLabel} ${batchResult.success.length} 个文件`)
   }
   if (batchResult.paused.length > 0) {
     ElMessage.info(`已暂停 ${batchResult.paused.length} 个传输`)
+  }
+  if (batchResult.cancelled.length > 0) {
+    ElMessage.info(`已取消 ${batchResult.cancelled.length} 个传输`)
   }
   if (batchResult.failed.length > 0) {
     ElMessage.error(`${batchResult.failed.length} 个文件${actionLabel}失败`)
@@ -1126,6 +1319,9 @@ const copyTargetPath = ref('')
 // 权限编辑相关
 const showPermissionsDialog = ref(false)
 const editingPermissions = ref<FileInfo | null>(null)
+// undefined 表示服务器没有返回特殊权限位（此时不显示、也不写入）
+const editingSpecialBits = ref<number | undefined>(undefined)
+const specialPermissionBits = ref({ setuid: false, setgid: false, sticky: false })
 const permissionBits = ref({
   ownerRead: false,
   ownerWrite: false,
@@ -1140,8 +1336,7 @@ const permissionBits = ref({
 
 const canGoBackLocal = computed(() => {
   if (!localPath.value) return false
-  const isRoot = localPath.value.match(/^[A-Z]:\\?$/i) || localPath.value === '/'
-  return !isRoot
+  return !isLocalRoot(localPath.value)
 })
 
 const canGoBackRemote = computed(() => {
@@ -1151,6 +1346,26 @@ const canGoBackRemote = computed(() => {
 const activeTransfers = computed(() => {
   return transfers.value.filter((t) => t.status === 'active' || t.status === 'pending').length
 })
+
+watch(activeTransfers, (count) => emit('transferCountChange', count), { immediate: true })
+
+// 盘符下拉框跟随当前本地路径
+watch(localPath, (path) => {
+  if (!path) return
+  const drive = localDriveOf(path) || (path.startsWith('/') ? '/' : '')
+  currentDrive.value = drive
+  if (drive && !availableDrives.value.includes(drive)) {
+    availableDrives.value = [...availableDrives.value, drive].sort()
+  }
+})
+
+// 面板通过 v-show 常驻，切换到文件传输页时静默刷新会话列表
+watch(
+  () => props.visible,
+  (visible) => {
+    if (visible) loadSessions()
+  }
+)
 
 const queueAttentionCount = computed(() => activeTransfers.value + incompleteTransfers.value.length)
 
@@ -1182,6 +1397,17 @@ const visibleRemoteFiles = computed(() =>
     ? remoteFiles.value
     : remoteFiles.value.filter((file) => !isHiddenFile(file))
 )
+
+// 多选操作只作用于当前列表中仍然存在的项目（防止目录切换后误操作上一个目录的文件）
+const filterToListing = (selection: FileInfo[], listing: FileInfo[]) => {
+  const paths = new Set(listing.map((file) => file.path))
+  return selection.filter((file) => paths.has(file.path))
+}
+
+const currentLocalSelection = () => filterToListing(selectedLocalFiles.value, visibleLocalFiles.value)
+
+const currentRemoteSelection = () =>
+  filterToListing(selectedRemoteFiles.value, visibleRemoteFiles.value)
 
 const confirmDeleteIfNeeded = async (message: string, title = '确认删除') => {
   if (!sftpSettings.value.confirmBeforeDelete) return
@@ -1236,14 +1462,44 @@ const formatConflictTargetType = (type: TransferConflictTargetType) => {
   return '文件'
 }
 
+const createConflictBatch = (total: number): TransferConflictBatch => ({ total, applyAll: null })
+
+/** “全部应用”记住的动作能否用于当前冲突；不适用时（例如目标是目录不能覆盖）仍弹窗询问 */
+const resolveConflictFromBatch = (
+  context: TransferConflictContext,
+  batch?: TransferConflictBatch
+): TransferConflictChoice | null => {
+  const action = batch?.applyAll
+  if (!action) return null
+  if (action === 'skip') return { action }
+  if (action === 'rename') {
+    return {
+      action,
+      fileName: generateConflictRename(context.fileName, context.existingNames, context.caseSensitive)
+    }
+  }
+  if (action === 'overwrite' && context.canOverwrite) return { action }
+  if (action === 'resume' && context.canResume) return { action }
+  return null
+}
+
 const showTransferConflictDialog = async (
-  context: TransferConflictContext
+  context: TransferConflictContext,
+  batch?: TransferConflictBatch
 ): Promise<TransferConflictChoice> => {
-  transferConflictDialog.value = context
+  const remembered = resolveConflictFromBatch(context, batch)
+  if (remembered) return remembered
+
+  transferConflictApplyAll.value = false
+  transferConflictDialog.value = { ...context, allowApplyAll: Boolean(batch && batch.total > 1) }
 
   const choice = await new Promise<TransferConflictChoice>((resolve) => {
     transferConflictResolver = resolve
   })
+
+  if (choice.applyAll && batch) {
+    batch.applyAll = choice.action
+  }
 
   if (choice.action === 'rename' && !choice.fileName) {
     const generatedName = generateConflictRename(
@@ -1252,21 +1508,31 @@ const showTransferConflictDialog = async (
       context.caseSensitive
     )
 
+    // 选择了“全部应用”时直接使用自动生成的名称，不再逐个询问
+    if (choice.applyAll) {
+      return { action: 'rename', fileName: generatedName }
+    }
+
     while (true) {
       const { value } = await ElMessageBox.prompt('请输入新的文件名', '重命名传输', {
         inputValue: generatedName,
-        inputPattern: /^(?!\s*$)[^/\\]+$/,
-        inputErrorMessage: '文件名不能为空，且不能包含 / 或 \\',
+        inputValidator: (input: string) => {
+          const reason =
+            invalidEntryNameReason(input) ||
+            (context.direction === 'download' ? unsafeLocalFileNameReason(input.trim()) : undefined)
+          return reason ? reason : true
+        },
         closeOnClickModal: false,
         closeOnPressEscape: false
       }).catch(() => ({ value: '' }))
 
-      if (!value) {
+      const nextName = value.trim()
+      if (!nextName) {
         return { action: 'skip' }
       }
 
-      if (!hasNameConflict(value, context.existingNames, context.caseSensitive)) {
-        return { action: 'rename', fileName: value }
+      if (!hasNameConflict(nextName, context.existingNames, context.caseSensitive)) {
+        return { action: 'rename', fileName: nextName }
       }
 
       ElMessage.warning('该名称仍然冲突，请重新输入')
@@ -1276,16 +1542,21 @@ const showTransferConflictDialog = async (
   return choice
 }
 
-const resolveTransferConflictAction = (action: TransferConflictAction) => {
+const resolveTransferConflictAction = (
+  action: TransferConflictAction,
+  applyAll = transferConflictApplyAll.value
+) => {
   const resolver = transferConflictResolver
   transferConflictResolver = null
   transferConflictDialog.value = null
-  resolver?.({ action })
+  transferConflictApplyAll.value = false
+  resolver?.({ action, applyAll })
 }
 
 const handleTransferConflictClosed = () => {
   if (!transferConflictResolver) return
-  resolveTransferConflictAction('skip')
+  // 关闭对话框只跳过当前文件，不应用到其它冲突
+  resolveTransferConflictAction('skip', false)
 }
 
 const loadSftpSettings = async () => {
@@ -1346,18 +1617,23 @@ const resolveInitialLocalPath = async () => {
     return downloadsPath
   }
 
-  return 'C:\\'
+  return normalizeLocalPath(availableDrives.value[0] || 'C:')
 }
 
 const setLocalDirectory = async (path: string, silent = false) => {
-  localPath.value = path
-  localPathInput.value = path
+  await loadLocalDirectory(silent, path)
+}
 
-  if (path.match(/^[A-Z]:/i)) {
-    currentDrive.value = path.substring(0, 2).toUpperCase()
+const loadAvailableDrives = async () => {
+  try {
+    const result = await window.electronAPI.fs.listDrives()
+    if (result.success && result.drives && result.drives.length > 0) {
+      availableDrives.value = result.drives
+    }
+  } catch (error) {
+    // 旧版本后端没有 listDrives，保留默认盘符列表
+    console.warn('[SFTPPanel] Failed to list local drives:', error)
   }
-
-  await loadLocalDirectory(silent)
 }
 
 const applyDefaultLocalPath = async (silent = false) => {
@@ -1407,12 +1683,23 @@ const computedOctalPermission = computed(() => {
     (permissionBits.value.otherRead ? 4 : 0) +
     (permissionBits.value.otherWrite ? 2 : 0) +
     (permissionBits.value.otherExecute ? 1 : 0)
-  return `${owner}${group}${other}`
+  const special = computeSpecialBitsFromForm() >> 9
+  return special ? `${special}${owner}${group}${other}` : `${owner}${group}${other}`
 })
+
+function computeSpecialBitsFromForm() {
+  if (editingSpecialBits.value === undefined) return 0
+  return (
+    (specialPermissionBits.value.setuid ? 0o4000 : 0) |
+    (specialPermissionBits.value.setgid ? 0o2000 : 0) |
+    (specialPermissionBits.value.sticky ? 0o1000 : 0)
+  )
+}
 
 onMounted(async () => {
   try {
     await loadSftpSettings()
+    await loadAvailableDrives()
     await applyDefaultLocalPath(true)
 
     await loadSessions()
@@ -1431,6 +1718,9 @@ onMounted(async () => {
 
   const unsubProgress = window.electronAPI.sftp.onProgress((taskId: string, progress: any) => {
     const transfer = transfers.value.find((t) => t.id === taskId)
+    if (transfer) {
+      markTransferStarted(transfer)
+    }
     if (transfer && transfer.status === 'active') {
       transfer.transferred = normalizeByteCount(progress.transferred, transfer.transferred)
       transfer.total = normalizeByteCount(progress.total, transfer.total)
@@ -1448,6 +1738,10 @@ onMounted(async () => {
     const transfer = transfers.value.find((t) => t.id === taskId)
     if (transfer && transfer.status !== 'cancelled') {
       markTransferCompleted(transfer)
+      if (transfer.refreshOnComplete) {
+        transfer.refreshOnComplete = false
+        refreshListingForTransfer(transfer)
+      }
     }
   })
 
@@ -1458,8 +1752,24 @@ onMounted(async () => {
     }
   })
 
+  const unsubPaused = window.electronAPI.sftp.onPaused?.((taskId: string) => {
+    const transfer = transfers.value.find((t) => t.id === taskId)
+    if (transfer) {
+      markTransferPaused(transfer)
+    }
+  })
+
+  const unsubCancelled = window.electronAPI.sftp.onCancelled?.((taskId: string) => {
+    const transfer = transfers.value.find((t) => t.id === taskId)
+    if (transfer) {
+      markTransferCancelled(transfer)
+    }
+  })
+
   // 保存清理函数
   sftpListenerCleanups.push(unsubStarted, unsubProgress, unsubComplete, unsubError)
+  if (unsubPaused) sftpListenerCleanups.push(unsubPaused)
+  if (unsubCancelled) sftpListenerCleanups.push(unsubCancelled)
   loadActiveTransferRecords().catch((error) => {
     console.error('[SFTPPanel] Failed to refresh active transfers after listener setup:', error)
   })
@@ -1492,26 +1802,46 @@ onMounted(async () => {
   }
 })
 
-const loadSessions = async () => {
+/** manual：用户点击刷新按钮时才提示加载结果；自动加载（挂载、切换到页面）静默进行 */
+const loadSessions = async (manual = false) => {
   try {
-    console.log('Loading sessions for SFTP...')
     sessions.value = await window.electronAPI.session.getAll()
-    console.log('Loaded sessions:', sessions.value.length, sessions.value)
-    ElMessage.success(`已加载 ${sessions.value.length} 个会话`)
+    if (manual) {
+      ElMessage.success(`已加载 ${sshSessions.value.length} 个会话`)
+    }
   } catch (error) {
     console.error('Failed to load sessions:', error)
-    ElMessage.error('加载会话列表失败')
+    if (manual) {
+      ElMessage.error('加载会话列表失败')
+    }
   }
 }
 
 const connectToSession = async () => {
-  const session = sessions.value.find((s) => s.id === selectedSessionId.value)
+  const session = sshSessions.value.find((s) => s.id === selectedSessionId.value)
   if (!session) return
 
   await connectSession(session)
 }
 
+/** 清空远程浏览状态（断开连接、切换会话、连接失败时） */
+const resetRemoteState = () => {
+  remoteLoadSeq++
+  currentSession.value = null
+  selectedSessionId.value = ''
+  remotePath.value = '/'
+  remotePathInput.value = ''
+  remoteFiles.value = []
+  selectedRemoteFiles.value = []
+  remoteDirectoryError.value = ''
+  incompleteTransfers.value = []
+  loadingRemote.value = false
+}
+
 const connectSession = async (session: SessionConfig) => {
+  resetRemoteState()
+  // 保留下拉框的选择直到连接结束；失败时清空，以便再次选择同一会话可以重试
+  selectedSessionId.value = session.id
   loadingRemote.value = true
   const loadingMsg = ElMessage({
     message: `正在连接到 ${session.name}...`,
@@ -1537,16 +1867,15 @@ const connectSession = async (session: SessionConfig) => {
 
     if (!sftpConnectResult.success) {
       loadingMsg.close()
+      selectedSessionId.value = ''
       ElMessage.error(`SFTP 连接失败: ${sftpConnectResult.error}`)
       return
     }
 
     currentSession.value = session
 
-    remotePath.value = await getRemoteHomePath(session)
-
-    remotePathInput.value = remotePath.value
-    await loadFirstAccessibleRemoteDirectory([remotePath.value, '/', '/tmp'])
+    const homePath = await getRemoteHomePath(session)
+    await loadFirstAccessibleRemoteDirectory([homePath, '/', '/tmp'])
 
     // 加载未完成的传输
     await loadActiveTransferRecords()
@@ -1566,6 +1895,9 @@ const connectSession = async (session: SessionConfig) => {
     ElMessage.success(`已连接到 ${session.name}`)
   } catch (error: any) {
     loadingMsg.close()
+    if (!currentSession.value) {
+      selectedSessionId.value = ''
+    }
     ElMessage.error(`连接失败: ${error.message}`)
   } finally {
     loadingRemote.value = false
@@ -1575,11 +1907,28 @@ const connectSession = async (session: SessionConfig) => {
 const disconnectSession = async () => {
   if (!currentSession.value) return
 
+  const connectionId = currentSession.value.id
+  const runningCount = transfers.value.filter(
+    (transfer) =>
+      transfer.connectionId === connectionId &&
+      (transfer.status === 'active' || transfer.status === 'pending')
+  ).length
+
+  if (runningCount > 0) {
+    try {
+      await ElMessageBox.confirm(
+        `当前会话还有 ${runningCount} 个传输未完成，断开连接会中断这些传输。确定要断开吗？`,
+        '确认断开',
+        { type: 'warning', confirmButtonText: '断开', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
+  }
+
   try {
-    await window.electronAPI.ssh.disconnect(currentSession.value.id)
-    currentSession.value = null
-    selectedSessionId.value = ''
-    remoteFiles.value = []
+    await window.electronAPI.ssh.disconnect(connectionId)
+    resetRemoteState()
     ElMessage.success('已断开连接')
   } catch (error: any) {
     ElMessage.error(`断开连接失败: ${error.message}`)
@@ -1587,59 +1936,77 @@ const disconnectSession = async () => {
 }
 
 // 本地文件操作
-const loadLocalDirectory = async (silent = false) => {
+/**
+ * 加载本地目录。只有成功后才切换 localPath，失败时提示错误并保持在原目录，
+ * 避免路径已经改变而列表仍是旧目录的不一致状态。
+ */
+const loadLocalDirectory = async (silent = false, targetPath = localPath.value) => {
+  const path = normalizeLocalPath(targetPath)
+  if (!path) return false
+
+  const requestId = ++localLoadSeq
   if (!silent) {
     loadingLocal.value = true
   }
+  selectedLocalFiles.value = []
   try {
-    const result = await window.electronAPI.fs.readDirectory(localPath.value)
-    if (result.success && result.files) {
-      localFiles.value = result.files.map((file: any) => ({
-        name: file.name,
-        path:
-          localPath.value +
-          (localPath.value.endsWith('\\') || localPath.value.endsWith('/') ? '' : '\\') +
-          file.name,
-        type: file.isDirectory ? 'directory' : 'file',
-        size: file.size || 0,
-        modifyTime: new Date(file.mtime)
-      }))
+    const result = await window.electronAPI.fs.readDirectory(path)
+    if (requestId !== localLoadSeq) return false
+
+    if (!result.success || !result.files) {
+      throw new Error(result.error || '无法读取目录')
     }
+
+    localPath.value = path
+    localPathInput.value = path
+    localFiles.value = result.files.map((file: any) => ({
+      name: file.name,
+      path: joinLocalPath(path, file.name),
+      type: file.isDirectory ? 'directory' : 'file',
+      size: file.size || 0,
+      modifyTime: new Date(file.mtime)
+    }))
+    return true
   } catch (error: any) {
-    ElMessage.error(`加载本地目录失败: ${error.message}`)
+    if (requestId !== localLoadSeq) return false
+    ElMessage.error(`加载本地目录失败: ${error?.message || error}`)
+    // 当前目录本身已不可读（例如被删除）时清空列表，避免对旧列表操作
+    if (path === normalizeLocalPath(localPath.value)) {
+      localFiles.value = []
+    }
+    localPathInput.value = localPath.value
+    return false
   } finally {
-    loadingLocal.value = false
+    if (requestId === localLoadSeq) {
+      loadingLocal.value = false
+    }
   }
 }
 
 const goBackLocal = () => {
-  const parts = localPath.value.split('\\').filter((p) => p)
-  if (parts.length > 1) {
-    parts.pop()
-    localPath.value = parts.join('\\')
-  } else if (parts.length === 1) {
-    localPath.value = parts[0] + '\\'
-  }
-  localPathInput.value = localPath.value
-  loadLocalDirectory()
+  if (!localPath.value || isLocalRoot(localPath.value)) return
+  loadLocalDirectory(false, parentLocalPath(localPath.value))
 }
 
-const changeDrive = () => {
-  localPath.value = currentDrive.value + '\\'
-  localPathInput.value = localPath.value
-  loadLocalDirectory()
+const changeDrive = async () => {
+  const drive = currentDrive.value
+  if (!drive) return
+  const loaded = await loadLocalDirectory(false, drive === '/' ? '/' : normalizeLocalPath(drive))
+  if (!loaded) {
+    // 回到当前路径所在的盘符
+    currentDrive.value = localDriveOf(localPath.value) || (localPath.value.startsWith('/') ? '/' : '')
+  }
 }
 
 const navigateToLocalPathInput = async () => {
-  const inputPath = localPathInput.value.trim()
+  const inputPath = normalizeLocalPath(localPathInput.value)
   if (!inputPath) return
 
   try {
     // 检查路径是否存在
     const result = await window.electronAPI.fs.stat(inputPath)
-    if (result.success && result.stats.isDirectory) {
-      localPath.value = inputPath
-      await loadLocalDirectory()
+    if (result.success && result.stats?.isDirectory) {
+      await loadLocalDirectory(false, inputPath)
     } else {
       ElMessage.error('路径不存在或不是目录')
       localPathInput.value = localPath.value
@@ -1651,20 +2018,21 @@ const navigateToLocalPathInput = async () => {
 }
 
 const refreshLocalDirectory = async () => {
-  console.log('[SFTP] Refreshing local directory:', localPath.value)
   await loadLocalDirectory()
-  console.log('[SFTP] Local directory refreshed, files:', localFiles.value.length)
 }
 
 const createLocalFolder = async () => {
+  if (!localPath.value) return
+  const parentPath = localPath.value
+
   try {
     const { value: folderName } = await ElMessageBox.prompt('输入文件夹名称', '新建本地文件夹', {
-      inputPattern: /.+/,
-      inputErrorMessage: '请输入文件夹名称'
+      inputValidator: (input: string) => invalidEntryNameReason(input) || true
     })
 
-    if (folderName) {
-      const newPath = localPath.value + (localPath.value.endsWith('\\') ? '' : '\\') + folderName
+    const name = folderName?.trim()
+    if (name) {
+      const newPath = joinLocalPath(parentPath, name)
       const result = await window.electronAPI.fs.createDirectory(newPath)
       if (result.success) {
         ElMessage.success('文件夹创建成功')
@@ -1674,8 +2042,8 @@ const createLocalFolder = async () => {
       }
     }
   } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(`创建失败: ${error.message}`)
+    if (!isDialogDismissed(error)) {
+      ElMessage.error(`创建失败: ${error?.message || error}`)
     }
   }
 }
@@ -1693,8 +2061,7 @@ const handleLocalClick = (_row: FileInfo) => {
 // 本地文件双击 - 打开文件夹
 const handleLocalDoubleClick = (row: FileInfo) => {
   if (row.type === 'directory') {
-    localPath.value = row.path
-    loadLocalDirectory(true)
+    loadLocalDirectory(true, row.path)
   }
 }
 
@@ -1703,15 +2070,17 @@ const handleLocalContextMenu = async (row: FileInfo, _column: any, event: MouseE
 
   const menuItems = []
 
-  // 检查是否有多选
-  const hasMultipleSelection = selectedLocalFiles.value.length > 1
+  // 检查是否有多选（右键的行必须在选中项里，否则按单选处理）
+  const selection = currentLocalSelection()
+  const hasMultipleSelection =
+    selection.length > 1 && selection.some((file) => file.path === row.path)
 
   if (hasMultipleSelection) {
     // 多选菜单
     menuItems.push(
-      { label: `上传 ${selectedLocalFiles.value.length} 个文件`, action: 'upload-multiple' },
-      { label: `压缩 ${selectedLocalFiles.value.length} 个项目`, action: 'compress-multiple' },
-      { label: `删除 ${selectedLocalFiles.value.length} 个项目`, action: 'delete-multiple' }
+      { label: `上传 ${selection.length} 个文件`, action: 'upload-multiple' },
+      { label: `压缩 ${selection.length} 个项目`, action: 'compress-multiple' },
+      { label: `删除 ${selection.length} 个项目`, action: 'delete-multiple' }
     )
   } else {
     // 单选菜单
@@ -1722,14 +2091,7 @@ const handleLocalContextMenu = async (row: FileInfo, _column: any, event: MouseE
     menuItems.push({ label: '上传到远程', action: 'upload' })
 
     // 压缩/解压选项
-    const ext = row.name.toLowerCase()
-    if (
-      ext.endsWith('.zip') ||
-      ext.endsWith('.tar') ||
-      ext.endsWith('.tar.gz') ||
-      ext.endsWith('.tgz') ||
-      ext.endsWith('.7z')
-    ) {
+    if (row.type !== 'directory' && isArchiveName(row.name, LOCAL_ARCHIVE_EXTENSIONS)) {
       menuItems.push({ label: '解压到当前目录', action: 'extract' })
       menuItems.push({ label: '解压到...', action: 'extract-to' })
     } else {
@@ -1743,17 +2105,13 @@ const handleLocalContextMenu = async (row: FileInfo, _column: any, event: MouseE
     const result = await window.electronAPI.dialog.showContextMenu(menuItems)
 
     if (result === 'open' && row.type === 'directory') {
-      localPath.value = row.path
-      await loadLocalDirectory()
+      await loadLocalDirectory(false, row.path)
     } else if (result === 'upload' || result === 'upload-multiple') {
       if (!currentSession.value) {
         ElMessage.warning('请先连接到远程服务器')
         return
       }
-      if (result === 'upload') {
-        selectedLocalFiles.value = [row]
-      }
-      await uploadSelected()
+      await uploadLocalEntries(result === 'upload' ? [row] : selection)
     } else if (result === 'rename') {
       renamingFile.value = { file: row, isRemote: false }
       renameValue.value = row.name
@@ -1761,18 +2119,20 @@ const handleLocalContextMenu = async (row: FileInfo, _column: any, event: MouseE
     } else if (result === 'delete') {
       await deleteLocalFile(row)
     } else if (result === 'delete-multiple') {
-      await deleteLocalFilesMultiple()
+      await deleteLocalFilesMultiple(selection)
     } else if (result === 'compress') {
       await compressLocalFile(row)
     } else if (result === 'compress-multiple') {
-      await compressLocalFilesMultiple()
+      await compressLocalFilesMultiple(selection)
     } else if (result === 'extract') {
       await extractLocalFile(row, localPath.value)
     } else if (result === 'extract-to') {
       await extractLocalFileTo(row)
     }
-  } catch (error) {
-    // 用户取消
+  } catch (error: any) {
+    if (!isDialogDismissed(error)) {
+      ElMessage.error(`操作失败: ${error?.message || error}`)
+    }
   }
 }
 
@@ -1787,24 +2147,23 @@ const deleteLocalFile = async (file: FileInfo) => {
     } else {
       ElMessage.error(`删除失败: ${result.error}`)
     }
-  } catch (error) {
-    // 用户取消
+  } catch (error: any) {
+    if (!isDialogDismissed(error)) {
+      ElMessage.error(`删除失败: ${error?.message || error}`)
+    }
   }
 }
 
-const deleteLocalFilesMultiple = async () => {
-  if (selectedLocalFiles.value.length === 0) return
+const deleteLocalFilesMultiple = async (targets: FileInfo[]) => {
+  if (targets.length === 0) return
 
   try {
-    await confirmDeleteIfNeeded(
-      `确定要删除选中的 ${selectedLocalFiles.value.length} 个项目吗？`,
-      '批量删除'
-    )
+    await confirmDeleteIfNeeded(`确定要删除选中的 ${targets.length} 个项目吗？`, '批量删除')
 
     let successCount = 0
     let failCount = 0
 
-    for (const file of selectedLocalFiles.value) {
+    for (const file of targets) {
       try {
         const result = await window.electronAPI.fs.deleteFile(file.path)
         if (result.success) {
@@ -1825,52 +2184,80 @@ const deleteLocalFilesMultiple = async () => {
     }
 
     await loadLocalDirectory()
-  } catch (error) {
-    // 用户取消
+  } catch (error: any) {
+    if (!isDialogDismissed(error)) {
+      ElMessage.error(`删除失败: ${error?.message || error}`)
+    }
   }
 }
 
 // 远程文件操作
-const loadRemoteDirectory = async (silent = false): Promise<boolean> => {
+const mapRemoteEntry = (file: any, dirPath: string): FileInfo => ({
+  name: file.name,
+  path: joinRemotePath(dirPath, file.name),
+  type: file.type,
+  targetType: file.targetType,
+  size: file.size,
+  modifyTime: new Date(file.modifyTime),
+  permissions: typeof file.permissions === 'number' ? file.permissions & 0o777 : undefined,
+  specialBits: typeof file.specialBits === 'number' ? file.specialBits & 0o7000 : undefined
+})
+
+/**
+ * 加载远程目录。只有最新的请求会更新列表。
+ * keepCurrentOnError：用户导航到无法访问的目录时保留当前目录和列表，只提示错误。
+ */
+const loadRemoteDirectory = async (
+  silent = false,
+  path = remotePath.value,
+  keepCurrentOnError = false
+): Promise<boolean> => {
   if (!currentSession.value) return false
+
+  const connectionId = currentSession.value.id
+  const targetPath = normalizeRemotePath(path)
+  const requestId = ++remoteLoadSeq
+  const hadListing = !remoteDirectoryError.value
 
   if (!silent) {
     loadingRemote.value = true
   }
-  remoteDirectoryError.value = ''
+  selectedRemoteFiles.value = []
+
+  const handleFailure = (error?: string) => {
+    const message = formatSftpOperationError('加载远程目录', error, targetPath)
+    if (keepCurrentOnError && hadListing && targetPath !== remotePath.value) {
+      remotePathInput.value = remotePath.value
+      ElMessage.error(message)
+      return false
+    }
+    remotePath.value = targetPath
+    remotePathInput.value = targetPath
+    remoteFiles.value = []
+    remoteDirectoryError.value = message
+    if (!silent) ElMessage.error(message)
+    return false
+  }
+
   try {
-    const targetPath = normalizeRemotePath(remotePath.value)
-    const result = await window.electronAPI.sftp.listDirectory(currentSession.value.id, targetPath)
+    const result = await window.electronAPI.sftp.listDirectory(connectionId, targetPath)
+    if (requestId !== remoteLoadSeq || currentSession.value?.id !== connectionId) return false
 
     if (result.success && result.files) {
       remotePath.value = targetPath
       remotePathInput.value = targetPath
-      remoteFiles.value = result.files.map((file: any) => ({
-        name: file.name,
-        path: `${targetPath}/${file.name}`.replace(/\/+/g, '/'),
-        type: file.type,
-        size: file.size,
-        modifyTime: new Date(file.modifyTime),
-        permissions: file.permissions
-      }))
+      remoteDirectoryError.value = ''
+      remoteFiles.value = result.files.map((file: any) => mapRemoteEntry(file, targetPath))
       return true
-    } else {
-      const message = formatSftpOperationError('加载远程目录', result.error, targetPath)
-      remoteFiles.value = []
-      selectedRemoteFiles.value = []
-      remoteDirectoryError.value = message
-      if (!silent) ElMessage.error(message)
-      return false
     }
+    return handleFailure(result.error)
   } catch (error: any) {
-    const message = formatSftpOperationError('加载远程目录', error.message, remotePath.value)
-    remoteFiles.value = []
-    selectedRemoteFiles.value = []
-    remoteDirectoryError.value = message
-    if (!silent) ElMessage.error(message)
-    return false
+    if (requestId !== remoteLoadSeq || currentSession.value?.id !== connectionId) return false
+    return handleFailure(error?.message)
   } finally {
-    loadingRemote.value = false
+    if (requestId === remoteLoadSeq) {
+      loadingRemote.value = false
+    }
   }
 }
 
@@ -1879,15 +2266,14 @@ const loadFirstAccessibleRemoteDirectory = async (paths: string[]) => {
   let lastError = ''
 
   for (const path of normalizedPaths) {
-    remotePath.value = path
-    remotePathInput.value = path
-    const loaded = await loadRemoteDirectory(true)
+    const loaded = await loadRemoteDirectory(true, path)
     if (loaded) {
       if (path !== normalizedPaths[0]) {
         ElMessage.warning(`默认目录不可访问，已切换到 ${path}`)
       }
       return
     }
+    if (!currentSession.value) return
     lastError = remoteDirectoryError.value
   }
 
@@ -1901,7 +2287,11 @@ const getRemoteDirectoryFiles = async (targetPath: string): Promise<FileInfo[]> 
   if (!currentSession.value) return []
 
   const normalizedPath = normalizeRemotePath(targetPath)
-  if (normalizedPath === remotePath.value && remoteFiles.value.length > 0) {
+  if (
+    normalizedPath === remotePath.value &&
+    !remoteDirectoryError.value &&
+    remoteFiles.value.length > 0
+  ) {
     return remoteFiles.value
   }
 
@@ -1910,14 +2300,26 @@ const getRemoteDirectoryFiles = async (targetPath: string): Promise<FileInfo[]> 
     throw new Error(result.error || '无法读取远程目录')
   }
 
-  return result.files.map((file: any) => ({
-    name: file.name,
-    path: `${normalizedPath}/${file.name}`.replace(/\/+/g, '/'),
-    type: file.type,
-    size: file.size,
-    modifyTime: new Date(file.modifyTime),
-    permissions: file.permissions
-  }))
+  return result.files.map((file: any) => mapRemoteEntry(file, normalizedPath))
+}
+
+/** 传输完成后刷新受影响的列表（上传刷新远程，下载刷新本地），仅当仍停留在该目录 */
+const refreshListingForTransfer = (transfer: Transfer) => {
+  if (transfer.type === 'upload') {
+    const targetDir = transfer.remotePath ? parentRemotePath(transfer.remotePath) : ''
+    if (
+      currentSession.value?.id === transfer.connectionId &&
+      targetDir &&
+      normalizeRemotePath(targetDir) === remotePath.value
+    ) {
+      loadRemoteDirectory(true)
+    }
+  } else {
+    const targetDir = transfer.localPath ? parentLocalPath(transfer.localPath) : ''
+    if (targetDir && normalizeLocalPath(targetDir) === normalizeLocalPath(localPath.value)) {
+      loadLocalDirectory(true)
+    }
+  }
 }
 
 const resolveUploadConflict = async (
@@ -1926,7 +2328,8 @@ const resolveUploadConflict = async (
   sourceSize: number,
   remoteFilePath: string,
   existingFiles: FileInfo[],
-  plannedRemoteNames: string[]
+  plannedRemoteNames: string[],
+  batch?: TransferConflictBatch
 ) => {
   const existingFile = existingFiles.find((file) => file.name === fileName)
   const queuedConflict = plannedRemoteNames.includes(fileName)
@@ -1940,10 +2343,10 @@ const resolveUploadConflict = async (
 
   const targetType = queuedConflict
     ? 'queued'
-    : existingFile?.type === 'directory'
+    : existingFile && isDirectoryLike(existingFile)
       ? 'directory'
       : 'file'
-  const targetSize = existingFile?.type === 'file' ? existingFile.size : undefined
+  const targetSize = existingFile && isFileLike(existingFile) ? existingFile.size : undefined
   const canOverwrite = targetType === 'file'
   const canResume = canOverwrite && targetSize !== undefined && targetSize > 0 && targetSize < sourceSize
 
@@ -1959,7 +2362,7 @@ const resolveUploadConflict = async (
     canResume,
     existingNames: [...existingFiles.map((file) => file.name), ...plannedRemoteNames],
     caseSensitive: true
-  })
+  }, batch)
 
   if (choice.action === 'skip') {
     return { action: choice.action, remotePath: remoteFilePath, resumeFromExisting: false }
@@ -1984,7 +2387,8 @@ const resolveDownloadConflict = async (
   file: FileInfo,
   localFilePath: string,
   existingLocalNames: string[],
-  plannedLocalNames: string[]
+  plannedLocalNames: string[],
+  batch?: TransferConflictBatch
 ) => {
   const existingFile = localFiles.value.find(
     (item) => item.name.toLocaleLowerCase() === file.name.toLocaleLowerCase()
@@ -2002,10 +2406,10 @@ const resolveDownloadConflict = async (
 
   const targetType = queuedConflict
     ? 'queued'
-    : existingFile?.type === 'directory'
+    : existingFile && isDirectoryLike(existingFile)
       ? 'directory'
       : 'file'
-  const targetSize = existingFile?.type === 'file' ? existingFile.size : undefined
+  const targetSize = existingFile && isFileLike(existingFile) ? existingFile.size : undefined
   const canOverwrite = targetType === 'file'
   const canResume = canOverwrite && targetSize !== undefined && targetSize > 0 && targetSize < file.size
 
@@ -2021,7 +2425,7 @@ const resolveDownloadConflict = async (
     canResume,
     existingNames: [...existingLocalNames, ...plannedLocalNames],
     caseSensitive: false
-  })
+  }, batch)
 
   if (choice.action === 'skip') {
     return { action: choice.action, localPath: localFilePath, resumeFromExisting: false }
@@ -2043,32 +2447,31 @@ const resolveDownloadConflict = async (
 }
 
 const goBackRemote = () => {
-  const parts = remotePath.value.split('/').filter((p) => p)
-  parts.pop()
-  remotePath.value = '/' + parts.join('/')
-  remotePathInput.value = remotePath.value
-  loadRemoteDirectory()
+  loadRemoteDirectory(false, parentRemotePath(remotePath.value), true)
 }
 
 const navigateToRemotePathInput = async () => {
   const inputPath = remotePathInput.value.trim()
   if (!inputPath) return
 
-  remotePath.value = normalizeRemotePath(inputPath)
-  await loadRemoteDirectory()
+  await loadRemoteDirectory(false, normalizeRemotePath(inputPath), true)
 }
 
 const refreshRemoteDirectory = async () => {
-  console.log('[SFTP] Refreshing remote directory:', remotePath.value)
   await loadRemoteDirectory()
-  console.log('[SFTP] Remote directory refreshed, files:', remoteFiles.value.length)
 }
 
 const createRemoteFolder = async () => {
-  if (!newRemoteFolderName.value.trim() || !currentSession.value) return
+  if (!currentSession.value) return
+  const name = newRemoteFolderName.value.trim()
+  const invalidReason = invalidEntryNameReason(name)
+  if (invalidReason) {
+    ElMessage.warning(invalidReason)
+    return
+  }
 
   try {
-    const newPath = `${remotePath.value}/${newRemoteFolderName.value}`.replace(/\/+/g, '/')
+    const newPath = joinRemotePath(remotePath.value, name)
     const result = await window.electronAPI.sftp.createDirectory(currentSession.value.id, newPath)
 
     if (result.success) {
@@ -2095,10 +2498,16 @@ const handleCreateCommand = (command: string) => {
 
 // 新建远程文件
 const createRemoteFile = async () => {
-  if (!newRemoteFileName.value.trim() || !currentSession.value) return
+  if (!currentSession.value) return
+  const name = newRemoteFileName.value.trim()
+  const invalidReason = invalidEntryNameReason(name)
+  if (invalidReason) {
+    ElMessage.warning(invalidReason)
+    return
+  }
 
   try {
-    const newPath = `${remotePath.value}/${newRemoteFileName.value}`.replace(/\/+/g, '/')
+    const newPath = joinRemotePath(remotePath.value, name)
     const result = await window.electronAPI.sftp.createFile(currentSession.value.id, newPath)
 
     if (result.success) {
@@ -2126,9 +2535,9 @@ const handleRemoteClick = (_row: FileInfo) => {
 
 // 远程文件双击 - 打开文件夹
 const handleRemoteDoubleClick = (row: FileInfo) => {
-  if (row.type === 'directory') {
-    remotePath.value = row.path
-    loadRemoteDirectory(true)
+  // 目录和指向目录的符号链接可以进入
+  if (isDirectoryLike(row)) {
+    loadRemoteDirectory(true, row.path, true)
   }
 }
 
@@ -2137,30 +2546,26 @@ const handleRemoteContextMenu = async (row: FileInfo, _column: any, event: Mouse
 
   if (!currentSession.value) return
 
-  // 检查是否有多选
-  const hasMultipleSelection = selectedRemoteFiles.value.length > 1
+  // 检查是否有多选（右键的行必须在选中项里，否则按单选处理）
+  const selection = currentRemoteSelection()
+  const hasMultipleSelection =
+    selection.length > 1 && selection.some((file) => file.path === row.path)
 
   let menuItems: any[] = []
 
   if (hasMultipleSelection) {
     // 多选菜单
     menuItems = [
-      { label: `下载 ${selectedRemoteFiles.value.length} 个文件`, action: 'download-multiple' },
-      { label: `压缩 ${selectedRemoteFiles.value.length} 个项目`, action: 'compress-multiple' },
-      { label: `删除 ${selectedRemoteFiles.value.length} 个项目`, action: 'delete-multiple' }
+      { label: `下载 ${selection.length} 个文件`, action: 'download-multiple' },
+      { label: `压缩 ${selection.length} 个项目`, action: 'compress-multiple' },
+      { label: `删除 ${selection.length} 个项目`, action: 'delete-multiple' }
     ]
   } else {
     // 单选菜单 - 检查是否是压缩文件
-    const ext = row.name.toLowerCase()
-    const isArchive =
-      ext.endsWith('.zip') ||
-      ext.endsWith('.tar') ||
-      ext.endsWith('.tar.gz') ||
-      ext.endsWith('.tgz') ||
-      ext.endsWith('.gz')
+    const isArchive = isFileLike(row) && isArchiveName(row.name, REMOTE_ARCHIVE_EXTENSIONS)
 
     menuItems =
-      row.type === 'directory'
+      isDirectoryLike(row)
         ? [
             { label: '打开', action: 'open' },
             { label: '压缩', action: 'compress' },
@@ -2198,9 +2603,8 @@ const handleRemoteContextMenu = async (row: FileInfo, _column: any, event: Mouse
   try {
     const result = await window.electronAPI.dialog.showContextMenu(menuItems)
 
-    if (result === 'open' && row.type === 'directory') {
-      remotePath.value = row.path
-      await loadRemoteDirectory()
+    if (result === 'open' && isDirectoryLike(row)) {
+      await loadRemoteDirectory(false, row.path, true)
     } else if (result === 'preview') {
       previewFile.value = row
       showPreview.value = true
@@ -2209,10 +2613,7 @@ const handleRemoteContextMenu = async (row: FileInfo, _column: any, event: Mouse
       showPreview.value = true
       // 预览组件会自动切换到编辑模式
     } else if (result === 'download' || result === 'download-multiple') {
-      if (result === 'download') {
-        selectedRemoteFiles.value = [row]
-      }
-      await downloadSelected()
+      await downloadRemoteEntries(result === 'download' ? [row] : selection)
     } else if (result === 'rename') {
       renamingFile.value = { file: row, isRemote: true }
       renameValue.value = row.name
@@ -2227,8 +2628,14 @@ const handleRemoteContextMenu = async (row: FileInfo, _column: any, event: Mouse
       showCopyDialog.value = true
     } else if (result === 'permissions') {
       editingPermissions.value = row
-      // 将八进制权限转换为复选框状态
-      const perms = row.permissions || 0o644
+      // 将八进制权限转换为复选框状态（000 是真实权限，不能当作缺省值）
+      const perms = row.permissions ?? 0o644
+      editingSpecialBits.value = row.specialBits
+      specialPermissionBits.value = {
+        setuid: !!((row.specialBits ?? 0) & 0o4000),
+        setgid: !!((row.specialBits ?? 0) & 0o2000),
+        sticky: !!((row.specialBits ?? 0) & 0o1000)
+      }
       permissionBits.value = {
         ownerRead: !!(perms & 0o400),
         ownerWrite: !!(perms & 0o200),
@@ -2244,18 +2651,20 @@ const handleRemoteContextMenu = async (row: FileInfo, _column: any, event: Mouse
     } else if (result === 'delete') {
       await deleteRemoteFile(row)
     } else if (result === 'delete-multiple') {
-      await deleteRemoteFilesMultiple()
+      await deleteRemoteFilesMultiple(selection)
     } else if (result === 'compress') {
       await compressRemoteFile(row)
     } else if (result === 'compress-multiple') {
-      await compressRemoteFilesMultiple()
+      await compressRemoteFilesMultiple(selection)
     } else if (result === 'extract') {
       await extractRemoteFile(row, remotePath.value)
     } else if (result === 'extract-to') {
       await extractRemoteFileTo(row)
     }
-  } catch (error) {
-    // 用户取消
+  } catch (error: any) {
+    if (!isDialogDismissed(error)) {
+      ElMessage.error(`操作失败: ${error?.message || error}`)
+    }
   }
 }
 
@@ -2273,23 +2682,22 @@ const deleteRemoteFile = async (file: FileInfo) => {
     } else {
       ElMessage.error(`删除失败: ${result.error}`)
     }
-  } catch (error) {
-    // 用户取消
+  } catch (error: any) {
+    if (!isDialogDismissed(error)) {
+      ElMessage.error(`删除失败: ${error?.message || error}`)
+    }
   }
 }
 
-const deleteRemoteFilesMultiple = async () => {
-  if (!currentSession.value || selectedRemoteFiles.value.length === 0) return
+const deleteRemoteFilesMultiple = async (targets: FileInfo[]) => {
+  if (!currentSession.value || targets.length === 0) return
 
   try {
-    await confirmDeleteIfNeeded(
-      `确定要删除选中的 ${selectedRemoteFiles.value.length} 个项目吗？`,
-      '批量删除'
-    )
+    await confirmDeleteIfNeeded(`确定要删除选中的 ${targets.length} 个项目吗？`, '批量删除')
 
-    // 分离文件和目录
-    const files = selectedRemoteFiles.value.filter((f) => f.type !== 'directory')
-    const directories = selectedRemoteFiles.value.filter((f) => f.type === 'directory')
+    // 分离文件和目录（符号链接本身按文件删除，不会删除链接目标）
+    const files = targets.filter((f) => f.type !== 'directory')
+    const directories = targets.filter((f) => f.type === 'directory')
 
     let successCount = 0
     let failCount = 0
@@ -2332,20 +2740,35 @@ const deleteRemoteFilesMultiple = async () => {
     }
 
     await loadRemoteDirectory()
-  } catch (error) {
-    // 用户取消
+  } catch (error: any) {
+    if (!isDialogDismissed(error)) {
+      ElMessage.error(`删除失败: ${error?.message || error}`)
+    }
   }
 }
 
 const confirmRename = async () => {
-  if (!renameValue.value.trim() || !renamingFile.value) return
+  if (!renamingFile.value) return
+
+  const newName = renameValue.value.trim()
+  const invalidReason = invalidEntryNameReason(newName)
+  if (invalidReason) {
+    ElMessage.warning(invalidReason)
+    return
+  }
+  if (newName === renamingFile.value.file.name) {
+    showRenameDialog.value = false
+    renamingFile.value = null
+    renameValue.value = ''
+    return
+  }
 
   try {
     if (renamingFile.value.isRemote) {
       if (!currentSession.value) return
 
       const oldPath = renamingFile.value.file.path
-      const newPath = oldPath.replace(/[^/]+$/, renameValue.value)
+      const newPath = joinRemotePath(parentRemotePath(oldPath), newName)
 
       const result = await window.electronAPI.sftp.renameFile(
         currentSession.value.id,
@@ -2361,9 +2784,7 @@ const confirmRename = async () => {
       }
     } else {
       const oldPath = renamingFile.value.file.path
-      const parts = oldPath.split('\\')
-      parts[parts.length - 1] = renameValue.value
-      const newPath = parts.join('\\')
+      const newPath = joinLocalPath(parentLocalPath(oldPath), newName)
 
       const result = await window.electronAPI.fs.rename(oldPath, newPath)
 
@@ -2389,9 +2810,10 @@ const confirmMove = async () => {
 
   try {
     const sourcePath = movingFile.value.path
-    const targetPath = moveTargetPath.value.endsWith('/')
-      ? moveTargetPath.value + movingFile.value.name
-      : moveTargetPath.value + '/' + movingFile.value.name
+    const targetPath = joinRemotePath(
+      moveTargetPath.value.trim(),
+      movingFile.value.name
+    )
 
     const result = await window.electronAPI.sftp.renameFile(
       currentSession.value.id,
@@ -2418,9 +2840,10 @@ const confirmCopy = async () => {
 
   try {
     const sourcePath = copyingFile.value.path
-    const targetPath = copyTargetPath.value.endsWith('/')
-      ? copyTargetPath.value + copyingFile.value.name
-      : copyTargetPath.value + '/' + copyingFile.value.name
+    const targetPath = joinRemotePath(
+      copyTargetPath.value.trim(),
+      copyingFile.value.name
+    )
 
     ElMessage.info('正在复制文件...')
 
@@ -2465,7 +2888,8 @@ const confirmPermissions = async () => {
       (permissionBits.value.otherWrite ? 2 : 0) +
       (permissionBits.value.otherExecute ? 1 : 0)
 
-    const mode = parseInt(`${owner}${group}${other}`, 8)
+    // 保留 setuid/setgid/sticky（复选框初始值来自服务器，用户未修改时原样写回）
+    const mode = computeSpecialBitsFromForm() | parseInt(`${owner}${group}${other}`, 8)
 
     const result = await window.electronAPI.sftp.chmod(currentSession.value.id, filePath, mode)
 
@@ -2486,33 +2910,27 @@ const confirmPermissions = async () => {
 }
 
 // 传输操作
-// 处理文件拖拽上传
-const handleFilesDrop = async (files: File[], targetPath: string) => {
-  if (!currentSession.value) {
-    ElMessage.warning('请先连接到远程服务器')
-    return
-  }
-
-  if (files.length === 0) return
-
-  ElMessage.info(`准备上传 ${files.length} 个文件...`)
-
-  const uploadBasePath = targetPath && targetPath !== '.' ? targetPath : remotePath.value
+/** 把本地文件加入上传计划（处理同名冲突），返回计划和跳过数量 */
+const planUploads = async (
+  sources: Array<{ name: string; localPath: string; size: number }>,
+  uploadBasePath: string
+) => {
   const existingFiles = await getRemoteDirectoryFiles(uploadBasePath)
   const plannedRemoteNames: string[] = []
   const uploadPlans: UploadTransferPlan[] = []
+  const conflictBatch = createConflictBatch(sources.length)
   let skippedCount = 0
 
-  for (const file of files) {
-    const localFilePath = file.path || file.name
-    const initialRemotePath = `${uploadBasePath}/${file.name}`.replace(/\/+/g, '/')
+  for (const source of sources) {
+    const initialRemotePath = joinRemotePath(uploadBasePath, source.name)
     const conflict = await resolveUploadConflict(
-      file.name,
-      localFilePath,
-      file.size || 0,
+      source.name,
+      source.localPath,
+      source.size,
       initialRemotePath,
       existingFiles,
-      plannedRemoteNames
+      plannedRemoteNames,
+      conflictBatch
     )
 
     if (conflict.action === 'skip') {
@@ -2521,154 +2939,28 @@ const handleFilesDrop = async (files: File[], targetPath: string) => {
     }
 
     const transferId = Date.now().toString() + Math.random()
-    const remoteName = conflict.remotePath.split('/').pop() || file.name
+    const remoteName = conflict.remotePath.split('/').pop() || source.name
     plannedRemoteNames.push(remoteName)
 
     uploadPlans.push({
       name: remoteName,
-      localPath: localFilePath,
+      localPath: source.localPath,
       remotePath: conflict.remotePath,
       taskId: transferId,
-      total: file.size || 0,
+      total: source.size,
       resumeFromExisting: conflict.resumeFromExisting
     })
   }
 
-  if (uploadPlans.length === 0) {
-    if (skippedCount > 0) ElMessage.info(`已跳过 ${skippedCount} 个文件`)
-    return
-  }
-
-  for (const plan of uploadPlans) {
-    transfers.value.push({
-      id: plan.taskId,
-      name: plan.name,
-      type: 'upload',
-      status: 'active',
-      progress: 0,
-      speed: 0,
-      eta: 0,
-      transferred: 0,
-      total: plan.total,
-      lastProgressAt: Date.now(),
-      stalled: false,
-      targetPath: plan.remotePath,
-      localPath: plan.localPath,
-      remotePath: plan.remotePath,
-      priority: 3,
-      startTime: new Date()
-    })
-  }
-
-  const transferIds = uploadPlans.map((plan) => plan.taskId)
-  const uploadFiles = uploadPlans.map((plan) => ({
-    localPath: plan.localPath,
-    remotePath: plan.remotePath,
-    taskId: plan.taskId,
-    resumeFromExisting: plan.resumeFromExisting
-  }))
-
-  try {
-    const result = await window.electronAPI.sftp.uploadFiles(currentSession.value.id, uploadFiles)
-
-    if (result.success) {
-      applyTransferBatchResults(
-        result.results,
-        uploadFiles.map((file) => ({ path: file.localPath, transferId: file.taskId })),
-        '上传'
-      )
-      if (skippedCount > 0) ElMessage.info(`已跳过 ${skippedCount} 个文件`)
-    } else {
-      markTransfersFailedByIds(transferIds, result.error)
-      ElMessage.error(`上传失败: ${result.error}`)
-    }
-  } catch (error: any) {
-    markTransfersFailedByIds(transferIds, error.message)
-    ElMessage.error(`上传失败: ${error.message}`)
-  }
-
-  await loadRemoteDirectory()
+  return { uploadPlans, skippedCount }
 }
 
-const uploadSelected = async () => {
-  if (selectedLocalFiles.value.length === 0 || !currentSession.value) return
-
-  // 过滤掉文件夹
-  const filesToUpload = selectedLocalFiles.value.filter((f) => f.type !== 'directory')
-
-  if (filesToUpload.length === 0) {
-    ElMessage.warning('请选择文件进行上传（暂不支持文件夹）')
-    return
-  }
-
-  // 跳过的文件夹
-  const skippedFolders = selectedLocalFiles.value.filter((f) => f.type === 'directory')
-  if (skippedFolders.length > 0) {
-    ElMessage.warning(`已跳过 ${skippedFolders.length} 个文件夹`)
-  }
-
-  const existingFiles = await getRemoteDirectoryFiles(remotePath.value)
-  const plannedRemoteNames: string[] = []
-  const uploadPlans: UploadTransferPlan[] = []
-  let skippedCount = skippedFolders.length
-
-  for (const file of filesToUpload) {
-    const initialRemotePath = `${remotePath.value}/${file.name}`.replace(/\/+/g, '/')
-    const conflict = await resolveUploadConflict(
-      file.name,
-      file.path,
-      file.size || 0,
-      initialRemotePath,
-      existingFiles,
-      plannedRemoteNames
-    )
-
-    if (conflict.action === 'skip') {
-      skippedCount += 1
-      continue
-    }
-
-    const transferId = Date.now().toString() + Math.random()
-    const remoteName = conflict.remotePath.split('/').pop() || file.name
-    plannedRemoteNames.push(remoteName)
-
-    uploadPlans.push({
-      name: remoteName,
-      localPath: file.path,
-      remotePath: conflict.remotePath,
-      taskId: transferId,
-      total: file.size || 0,
-      resumeFromExisting: conflict.resumeFromExisting
-    })
-  }
-
-  if (uploadPlans.length === 0) {
-    if (skippedCount > 0) ElMessage.info(`已跳过 ${skippedCount} 个项目`)
-    return
-  }
-
+/** 提交上传计划：创建“排队中”的任务行并调用批量上传 */
+const runUploadPlans = async (session: SessionConfig, uploadPlans: UploadTransferPlan[]) => {
   for (const plan of uploadPlans) {
-    transfers.value.push({
-      id: plan.taskId,
-      name: plan.name,
-      type: 'upload',
-      status: 'active',
-      progress: 0,
-      speed: 0,
-      eta: 0,
-      transferred: 0,
-      total: plan.total,
-      lastProgressAt: Date.now(),
-      stalled: false,
-      targetPath: plan.remotePath,
-      localPath: plan.localPath,
-      remotePath: plan.remotePath,
-      priority: 3,
-      startTime: new Date()
-    })
+    transfers.value.push(createTransferRow(plan, 'upload', session))
   }
 
-  // 准备批量上传的文件列表（携带前端生成的 taskId）
   const transferIds = uploadPlans.map((plan) => plan.taskId)
   const files = uploadPlans.map((plan) => ({
     localPath: plan.localPath,
@@ -2678,8 +2970,7 @@ const uploadSelected = async () => {
   }))
 
   try {
-    // 使用批量上传 API
-    const result = await window.electronAPI.sftp.uploadFiles(currentSession.value.id, files)
+    const result = await window.electronAPI.sftp.uploadFiles(session.id, files)
 
     if (result.success) {
       applyTransferBatchResults(
@@ -2687,54 +2978,201 @@ const uploadSelected = async () => {
         files.map((file) => ({ path: file.localPath, transferId: file.taskId })),
         '上传'
       )
-      if (skippedCount > skippedFolders.length) {
-        ElMessage.info(`已跳过 ${skippedCount - skippedFolders.length} 个同名文件`)
-      }
     } else {
       // 全部失败
       markTransfersFailedByIds(transferIds, result.error)
-      ElMessage.error(`批量上传失败: ${result.error}`)
+      ElMessage.error(`上传失败: ${result.error}`)
     }
   } catch (error: any) {
     // 异常情况
     markTransfersFailedByIds(transferIds, error.message)
     ElMessage.error(`上传失败: ${error.message || '未知错误'}`)
   }
-
-  await loadRemoteDirectory()
 }
 
-const downloadSelected = async () => {
-  if (selectedRemoteFiles.value.length === 0 || !currentSession.value) return
+// 处理文件拖拽上传
+const handleFilesDrop = async (
+  files: File[],
+  targetPath: string,
+  skippedDirectories: string[] = []
+) => {
+  const session = currentSession.value
+  if (!session) {
+    ElMessage.warning('请先连接到远程服务器')
+    return
+  }
+
+  // 没有 webkitGetAsEntry 的环境里，拖入的文件夹也会出现在 files 中，用 fs.stat 兜底识别
+  let skippedFolderCount = skippedDirectories.length
+  const sources: Array<{ name: string; localPath: string; size: number }> = []
+  for (const file of files) {
+    const localFilePath = (file as File & { path?: string }).path || ''
+    if (!localFilePath) {
+      ElMessage.warning(`无法获取 "${file.name}" 的本地路径，已跳过`)
+      continue
+    }
+    if (await isExistingDirectory(localFilePath)) {
+      skippedFolderCount += 1
+      continue
+    }
+    sources.push({ name: file.name, localPath: localFilePath, size: file.size || 0 })
+  }
+
+  if (sources.length === 0) {
+    if (skippedFolderCount > 0) {
+      ElMessage.warning('请选择文件进行上传（暂不支持文件夹）')
+    }
+    return
+  }
+
+  if (skippedFolderCount > 0) {
+    ElMessage.warning(`已跳过 ${skippedFolderCount} 个文件夹（暂不支持文件夹）`)
+  }
+
+  ElMessage.info(`准备上传 ${sources.length} 个文件...`)
+
+  const uploadBasePath = targetPath && targetPath !== '.' ? targetPath : remotePath.value
+
+  let planned: Awaited<ReturnType<typeof planUploads>>
+  try {
+    planned = await planUploads(sources, uploadBasePath)
+  } catch (error: any) {
+    ElMessage.error(formatSftpOperationError('读取远程目录', error?.message, uploadBasePath))
+    return
+  }
+
+  const { uploadPlans, skippedCount } = planned
+  if (uploadPlans.length === 0) {
+    if (skippedCount > 0) ElMessage.info(`已跳过 ${skippedCount} 个文件`)
+    return
+  }
+
+  await runUploadPlans(session, uploadPlans)
+  if (skippedCount > 0) ElMessage.info(`已跳过 ${skippedCount} 个文件`)
+
+  if (currentSession.value?.id === session.id) {
+    await loadRemoteDirectory(true)
+  }
+}
+
+const uploadSelected = async () => {
+  await uploadLocalEntries(currentLocalSelection())
+}
+
+const uploadLocalEntries = async (entries: FileInfo[]) => {
+  const session = currentSession.value
+  if (entries.length === 0 || !session) return
 
   // 过滤掉文件夹
-  const filesToDownload = selectedRemoteFiles.value.filter((f) => f.type !== 'directory')
+  const filesToUpload = entries.filter((f) => f.type !== 'directory')
 
-  if (filesToDownload.length === 0) {
-    ElMessage.warning('请选择文件进行下载（暂不支持文件夹）')
+  if (filesToUpload.length === 0) {
+    ElMessage.warning('请选择文件进行上传（暂不支持文件夹）')
     return
   }
 
   // 跳过的文件夹
-  const skippedFolders = selectedRemoteFiles.value.filter((f) => f.type === 'directory')
+  const skippedFolders = entries.filter((f) => f.type === 'directory')
   if (skippedFolders.length > 0) {
     ElMessage.warning(`已跳过 ${skippedFolders.length} 个文件夹`)
   }
 
-  const separator = localPath.value.endsWith('\\') ? '' : '\\'
+  const uploadBasePath = remotePath.value
+  let planned: Awaited<ReturnType<typeof planUploads>>
+  try {
+    planned = await planUploads(
+      filesToUpload.map((file) => ({ name: file.name, localPath: file.path, size: file.size || 0 })),
+      uploadBasePath
+    )
+  } catch (error: any) {
+    ElMessage.error(formatSftpOperationError('读取远程目录', error?.message, uploadBasePath))
+    return
+  }
+
+  const { uploadPlans, skippedCount } = planned
+  if (uploadPlans.length === 0) {
+    if (skippedCount + skippedFolders.length > 0) {
+      ElMessage.info(`已跳过 ${skippedCount + skippedFolders.length} 个项目`)
+    }
+    return
+  }
+
+  await runUploadPlans(session, uploadPlans)
+  if (skippedCount > 0) {
+    ElMessage.info(`已跳过 ${skippedCount} 个同名文件`)
+  }
+
+  if (currentSession.value?.id === session.id) {
+    await loadRemoteDirectory(true)
+  }
+}
+
+const downloadSelected = async () => {
+  await downloadRemoteEntries(currentRemoteSelection())
+}
+
+const downloadRemoteEntries = async (entries: FileInfo[]) => {
+  const session = currentSession.value
+  if (entries.length === 0 || !session) return
+
+  const targetDir = localPath.value
+  if (!targetDir) {
+    ElMessage.warning('请先选择本地目录')
+    return
+  }
+
+  // 只下载文件（含指向文件的符号链接），跳过文件夹和无效链接
+  const fileEntries = entries.filter((f) => isFileLike(f))
+  const skippedFolders = entries.filter((f) => !isFileLike(f))
+
+  // 远程文件名可能包含 Windows 不允许的字符或路径分隔符，直接作为本地文件名会写到目标目录之外
+  const unsafeEntries = fileEntries
+    .map((file) => ({ file, reason: unsafeLocalFileNameReason(file.name) }))
+    .filter((item): item is { file: FileInfo; reason: string } => Boolean(item.reason))
+  const filesToDownload = fileEntries.filter(
+    (file) => !unsafeEntries.some((item) => item.file === file)
+  )
+
+  if (unsafeEntries.length > 0) {
+    const listed = unsafeEntries
+      .slice(0, 5)
+      .map((item) => `"${item.file.name}"：${item.reason}`)
+      .join('\n')
+    const more = unsafeEntries.length > 5 ? `\n等 ${unsafeEntries.length} 个文件` : ''
+    ElNotification({
+      title: `已跳过 ${unsafeEntries.length} 个无法安全保存到本地的文件`,
+      message: `${listed}${more}\n可以先在远程重命名后再下载。`,
+      type: 'warning',
+      duration: 8000,
+      customClass: 'sftp-unsafe-name-notification'
+    })
+  }
+
+  if (filesToDownload.length === 0) {
+    if (unsafeEntries.length === 0) {
+      ElMessage.warning('请选择文件进行下载（暂不支持文件夹）')
+    }
+    return
+  }
+
+  if (skippedFolders.length > 0) {
+    ElMessage.warning(`已跳过 ${skippedFolders.length} 个文件夹`)
+  }
 
   const existingLocalNames = localFiles.value.map((file) => file.name)
   const plannedLocalNames: string[] = []
   const downloadPlans: DownloadTransferPlan[] = []
-  let skippedCount = skippedFolders.length
+  const conflictBatch = createConflictBatch(filesToDownload.length)
+  let skippedCount = 0
 
   for (const file of filesToDownload) {
-    const localFilePath = localPath.value + separator + file.name
+    const localFilePath = joinLocalPath(targetDir, file.name)
     const conflict = await resolveDownloadConflict(
       file,
       localFilePath,
       existingLocalNames,
-      plannedLocalNames
+      plannedLocalNames,
+      conflictBatch
     )
 
     if (conflict.action === 'skip') {
@@ -2757,30 +3195,15 @@ const downloadSelected = async () => {
   }
 
   if (downloadPlans.length === 0) {
-    if (skippedCount > 0) ElMessage.info(`已跳过 ${skippedCount} 个项目`)
+    if (skippedCount + skippedFolders.length > 0) {
+      ElMessage.info(`已跳过 ${skippedCount + skippedFolders.length} 个项目`)
+    }
     return
   }
 
-  // 为每个文件创建传输记录
+  // 为每个文件创建传输记录（排队中，后端真正开始时切换为传输中）
   for (const plan of downloadPlans) {
-    transfers.value.push({
-      id: plan.taskId,
-      name: plan.name,
-      type: 'download',
-      status: 'active',
-      progress: 0,
-      speed: 0,
-      eta: 0,
-      transferred: 0,
-      total: plan.total,
-      lastProgressAt: Date.now(),
-      stalled: false,
-      targetPath: plan.localPath,
-      localPath: plan.localPath,
-      remotePath: plan.remotePath,
-      priority: 3,
-      startTime: new Date()
-    })
+    transfers.value.push(createTransferRow(plan, 'download', session))
   }
 
   // 准备批量下载的文件列表（携带前端生成的 taskId）
@@ -2794,7 +3217,7 @@ const downloadSelected = async () => {
 
   try {
     // 使用批量下载 API
-    const result = await window.electronAPI.sftp.downloadFiles(currentSession.value.id, files)
+    const result = await window.electronAPI.sftp.downloadFiles(session.id, files)
 
     if (result.success) {
       applyTransferBatchResults(
@@ -2802,8 +3225,8 @@ const downloadSelected = async () => {
         files.map((file) => ({ path: file.remotePath, transferId: file.taskId })),
         '下载'
       )
-      if (skippedCount > skippedFolders.length) {
-        ElMessage.info(`已跳过 ${skippedCount - skippedFolders.length} 个同名文件`)
+      if (skippedCount > 0) {
+        ElMessage.info(`已跳过 ${skippedCount} 个同名文件`)
       }
     } else {
       // 全部失败
@@ -2816,28 +3239,27 @@ const downloadSelected = async () => {
     ElMessage.error(`下载失败: ${error.message || '未知错误'}`)
   }
 
-  await loadLocalDirectory()
+  if (normalizeLocalPath(localPath.value) === normalizeLocalPath(targetDir)) {
+    await loadLocalDirectory(true)
+  }
 }
 
 // 处理预览对话框中的下载
 const handlePreviewDownload = async (file: FileInfo) => {
   if (!currentSession.value) return
 
-  selectedRemoteFiles.value = [file]
-  await downloadSelected()
+  await downloadRemoteEntries([file])
 }
 
+/** 只从列表中移除已结束的任务（历史记录在任务结束时已经写入） */
 const clearCompleted = () => {
-  // 将已完成的传输添加到历史记录
-  const completedTransfers = transfers.value.filter(
-    (t) => t.status === 'completed' || t.status === 'failed'
-  )
-  completedTransfers.forEach((transfer) => {
-    addToHistory(transfer)
-  })
+  transfers.value = transfers.value.filter((t) => !isTransferFinished(t))
+}
 
-  // 从当前列表中移除
-  transfers.value = transfers.value.filter((t) => t.status !== 'completed' && t.status !== 'failed')
+const removeTransferRow = (transferId: string) => {
+  transfers.value = transfers.value.filter(
+    (t) => t.id !== transferId || !isTransferFinished(t)
+  )
 }
 
 const clearAll = () => {
@@ -2869,7 +3291,7 @@ const loadActiveTransferRecords = async () => {
   }
 }
 
-// 暂停传输
+// 暂停传输（排队中的任务也可以暂停）
 const pauseTransfer = async (transferId: string) => {
   try {
     const result = await window.electronAPI.sftp.pauseTransfer(transferId)
@@ -2889,110 +3311,111 @@ const pauseTransfer = async (transferId: string) => {
 
 // 恢复传输
 const resumeTransfer = async (transferId: string) => {
-  if (!currentSession.value) return
   const transfer = transfers.value.find((t) => t.id === transferId)
+  if (!transfer) return
+  if (!ensureTransferConnection(transfer.connectionId, transfer.sessionName)) return
+
+  // 后端重新排队，真正开始时会再次发送 started
+  transfer.status = 'pending'
+  transfer.lastProgressAt = Date.now()
+  transfer.refreshOnComplete = true
+  resetTransferRuntimeState(transfer)
 
   try {
-    const result = await window.electronAPI.sftp.resumeTransfer(currentSession.value.id, transferId)
+    const result = await window.electronAPI.sftp.resumeTransfer(
+      transfer.connectionId || currentSession.value!.id,
+      transferId
+    )
     if (result.success) {
-      if (transfer) {
-        transfer.status = 'active'
-        transfer.lastProgressAt = Date.now()
-        transfer.stalled = false
-        transfer.speed = 0
-        transfer.eta = 0
-        ElMessage.success('传输已恢复')
-      }
+      ElMessage.success('传输已恢复')
     } else {
-      if (transfer) {
-        markTransferPaused(transfer)
-      }
+      markTransferPaused(transfer)
       ElMessage.error(`恢复失败: ${result.error}`)
     }
   } catch (error: any) {
-    if (transfer) {
-      markTransferPaused(transfer)
-    }
+    markTransferPaused(transfer)
     ElMessage.error(`恢复失败: ${error.message}`)
   }
 }
 
-// 取消传输
+// 取消传输：排队中、传输中、已暂停的任务都交给后端取消，并保留为“已取消”状态
 const cancelTransfer = async (transferId: string) => {
-  try {
-    const transfer = transfers.value.find((t) => t.id === transferId)
+  const transfer = transfers.value.find((t) => t.id === transferId)
+  if (transfer && isTransferFinished(transfer)) return
 
+  userCancelledTransferIds.add(transferId)
+  try {
     const result = await window.electronAPI.sftp.cancelTask(transferId)
     if (result.success) {
       if (transfer) {
-        transfer.status = 'cancelled'
-        transfer.endTime = new Date()
-        addToHistory(transfer)
+        markTransferCancelled(transfer)
       }
-      transfers.value = transfers.value.filter((t) => t.id !== transferId)
       ElMessage.success('传输已取消')
     } else {
+      userCancelledTransferIds.delete(transferId)
       ElMessage.error(`取消失败: ${result.error}`)
     }
   } catch (error: any) {
+    userCancelledTransferIds.delete(transferId)
     ElMessage.error(`取消失败: ${error.message}`)
   }
 }
 
-// 重试传输
+// 重试传输：沿用原任务 ID 和所属连接，在原行上更新状态
 const retryTransfer = async (transferId: string) => {
   const transfer = transfers.value.find((t) => t.id === transferId)
-  if (!transfer || !currentSession.value) return
+  if (!transfer) return
+  if (!ensureTransferConnection(transfer.connectionId, transfer.sessionName)) return
 
-  transfer.status = 'active'
+  const connectionId = transfer.connectionId || currentSession.value!.id
+  userCancelledTransferIds.delete(transferId)
+  transfer.status = 'pending'
   transfer.progress = 0
   transfer.transferred = 0
-  transfer.speed = 0
-  transfer.eta = 0
+  transfer.error = undefined
+  transfer.endTime = undefined
   transfer.lastProgressAt = Date.now()
-  transfer.stalled = false
   transfer.startTime = new Date() // 重新开始计时
+  resetTransferRuntimeState(transfer)
 
   try {
-    let result
+    let result: TransferResult | undefined
     if (transfer.type === 'upload' && transfer.localPath) {
       result = await window.electronAPI.sftp.uploadFile(
-        currentSession.value.id,
+        connectionId,
         transfer.localPath,
-        transfer.remotePath || transfer.targetPath
+        transfer.remotePath || transfer.targetPath,
+        { taskId: transfer.id }
       )
     } else if (transfer.type === 'download' && transfer.remotePath) {
       result = await window.electronAPI.sftp.downloadFile(
-        currentSession.value.id,
+        connectionId,
         transfer.remotePath,
-        transfer.localPath || transfer.targetPath
+        transfer.localPath || transfer.targetPath,
+        { taskId: transfer.id }
       )
+    } else {
+      result = { success: false, error: '任务缺少路径信息，无法重试' }
     }
 
-    if (result?.success) {
-      transfer.status = 'completed'
-      transfer.progress = 100
-      transfer.transferred = transfer.total || transfer.transferred
-      transfer.endTime = new Date()
-      addToHistory(transfer)
+    applySingleTransferResult(transfer, result)
+    if (result.success) {
       ElMessage.success('传输成功')
-    } else {
-      transfer.status = 'failed'
-      transfer.endTime = new Date()
-      addToHistory(transfer)
-      ElMessage.error(`传输失败: ${result?.error}`)
+      refreshListingForTransfer(transfer)
+    } else if (!result.paused && !result.cancelled) {
+      ElMessage.error(`传输失败: ${result.error}`)
     }
   } catch (error: any) {
-    transfer.status = 'failed'
-    transfer.endTime = new Date()
-    addToHistory(transfer)
+    markTransferFailed(transfer, error.message)
     ElMessage.error(`传输失败: ${error.message}`)
   }
 }
 
 // 暂停所有传输
 const pauseAllTransfers = async () => {
-  const activeTransfersList = transfers.value.filter((t) => t.status === 'active')
+  const activeTransfersList = transfers.value.filter(
+    (t) => t.status === 'active' || t.status === 'pending'
+  )
   for (const transfer of activeTransfersList) {
     await pauseTransfer(transfer.id)
   }
@@ -3011,50 +3434,62 @@ const resumeIncompleteTransfer = async (record: TransferRecord) => {
     return
   }
 
-  // 添加到当前传输列表
-  transfers.value.push({
-    id: transferId,
-    name: getFileName(record.remotePath),
-    type: record.type,
-    status: 'active',
-    progress: normalizeProgressPercentage(
-      calculateProgressPercentage(record.transferred, record.totalSize)
-    ),
+  const connectionId = record.connectionId || currentSession.value.id
+  if (!ensureTransferConnection(connectionId)) return
+
+  const transferred = normalizeByteCount(record.transferred)
+  const total = normalizeByteCount(record.totalSize)
+  const rowState: Partial<Transfer> = {
+    status: 'pending',
+    progress: normalizeProgressPercentage(calculateProgressPercentage(transferred, total)),
     speed: 0,
     eta: 0,
-    transferred: normalizeByteCount(record.transferred),
-    total: normalizeByteCount(record.totalSize),
+    transferred,
+    total,
     lastProgressAt: Date.now(),
     stalled: false,
     targetPath: record.type === 'upload' ? record.remotePath : record.localPath,
     localPath: record.localPath,
-    remotePath: record.remotePath
-  })
+    remotePath: record.remotePath,
+    connectionId,
+    sessionName: getSessionName(connectionId),
+    refreshOnComplete: true,
+    error: undefined,
+    endTime: undefined
+  }
+
+  // 已有同 ID 的行时原地更新，不重复添加
+  userCancelledTransferIds.delete(transferId)
+  let transfer = transfers.value.find((t) => t.id === transferId)
+  if (transfer) {
+    Object.assign(transfer, rowState)
+  } else {
+    transfers.value.push({
+      id: transferId,
+      name: getFileName(record.type === 'upload' ? record.localPath : record.remotePath),
+      type: record.type,
+      startTime: new Date(),
+      ...(rowState as Omit<Transfer, 'id' | 'name' | 'type'>)
+    })
+    transfer = transfers.value[transfers.value.length - 1]
+  }
 
   // 切换到当前传输标签
   activeQueueTab.value = 'current'
 
   try {
-    const result = await window.electronAPI.sftp.resumeTransfer(currentSession.value.id, transferId)
-
-    const transfer = transfers.value.find((t) => t.id === transferId)
-    if (transfer) {
-      if (result.success) {
-        transfer.status = 'active'
-        transfer.lastProgressAt = Date.now()
-        transfer.stalled = false
-        ElMessage.success('传输已恢复')
-        await loadIncompleteTransfers()
-      } else {
-        markTransferFailed(transfer, result.error)
-        ElMessage.error(`传输失败: ${result.error}`)
-      }
+    const result = await window.electronAPI.sftp.resumeTransfer(connectionId, transferId)
+    const current = transfers.value.find((t) => t.id === transferId)
+    if (result.success) {
+      ElMessage.success('传输已恢复')
+      await loadIncompleteTransfers()
+    } else {
+      if (current) markTransferFailed(current, result.error)
+      ElMessage.error(`传输失败: ${result.error}`)
     }
   } catch (error: any) {
-    const transfer = transfers.value.find((t) => t.id === transferId)
-    if (transfer) {
-      markTransferFailed(transfer, error.message)
-    }
+    const current = transfers.value.find((t) => t.id === transferId)
+    if (current) markTransferFailed(current, error.message)
     ElMessage.error(`传输失败: ${error.message}`)
   }
 }
@@ -3073,8 +3508,10 @@ const deleteTransferRecord = async (taskId: string) => {
     } else {
       ElMessage.error(`删除失败: ${result.error}`)
     }
-  } catch (error) {
-    // 用户取消
+  } catch (error: any) {
+    if (!isDialogDismissed(error)) {
+      ElMessage.error(`删除失败: ${error?.message || error}`)
+    }
   }
 }
 
@@ -3094,43 +3531,9 @@ const cleanupCompletedRecords = async () => {
 }
 
 // 获取文件名
-const getFileName = (path: string) => {
-  return path.split('/').pop() || path
-}
+const getFileName = (path: string) => getPathFileName(path)
 
-// 优先级调整
-const increasePriority = (transferId: string) => {
-  const transfer = transfers.value.find((t) => t.id === transferId)
-  if (transfer) {
-    transfer.priority = Math.min((transfer.priority || 3) + 1, 5)
-    // 重新排序传输队列
-    sortTransfersByPriority()
-  }
-}
-
-const decreasePriority = (transferId: string) => {
-  const transfer = transfers.value.find((t) => t.id === transferId)
-  if (transfer) {
-    transfer.priority = Math.max((transfer.priority || 3) - 1, 1)
-    // 重新排序传输队列
-    sortTransfersByPriority()
-  }
-}
-
-const sortTransfersByPriority = () => {
-  transfers.value.sort((a, b) => {
-    // 优先级高的排前面
-    const priorityA = a.priority || 3
-    const priorityB = b.priority || 3
-    if (priorityA !== priorityB) {
-      return priorityB - priorityA
-    }
-    // 优先级相同，按创建时间排序
-    return (a.startTime?.getTime() || 0) - (b.startTime?.getTime() || 0)
-  })
-}
-
-// 传输历史记录
+// 传输历史记录：每个任务的每种终态只记录一次，并保存真实的错误信息
 const addToHistory = (transfer: Transfer) => {
   if (
     transfer.status === 'completed' ||
@@ -3167,18 +3570,14 @@ const addToHistory = (transfer: Transfer) => {
       remotePath: transfer.remotePath || (transfer.type === 'upload' ? transfer.targetPath : ''),
       error:
         transfer.status === 'failed'
-          ? '传输失败'
+          ? transfer.error || '传输失败'
           : transfer.status === 'cancelled'
             ? '已取消'
             : undefined
     }
 
-    transferHistory.value.unshift(historyItem)
-
     // 只保留最近100条历史记录
-    if (transferHistory.value.length > 100) {
-      transferHistory.value = transferHistory.value.slice(0, 100)
-    }
+    transferHistory.value = upsertHistoryItem(transferHistory.value, historyItem, 100)
 
     // 保存到 localStorage
     saveTransferHistory()
@@ -3289,22 +3688,28 @@ const formatTime = ({ modifyTime }: { modifyTime: Date }) => {
   return formatDateTime(d)
 }
 
-const formatPermissions = (permissions: number | undefined) => {
+const formatPermissions = (permissions: number | undefined, specialBits = 0) => {
   if (permissions === undefined) return '-'
   const perms = ['---', '--x', '-w-', '-wx', 'r--', 'r-x', 'rw-', 'rwx']
-  const owner = perms[(permissions >> 6) & 7]
-  const group = perms[(permissions >> 3) & 7]
-  const other = perms[permissions & 7]
+  // 与 ls 一致：setuid/setgid 显示为 s/S，sticky 显示为 t/T
+  const withSpecial = (triplet: string, enabled: boolean, mark: string) =>
+    enabled
+      ? triplet.slice(0, 2) + (triplet[2] === 'x' ? mark : mark.toUpperCase())
+      : triplet
+  const owner = withSpecial(perms[(permissions >> 6) & 7], Boolean(specialBits & 0o4000), 's')
+  const group = withSpecial(perms[(permissions >> 3) & 7], Boolean(specialBits & 0o2000), 's')
+  const other = withSpecial(perms[permissions & 7], Boolean(specialBits & 0o1000), 't')
   return owner + group + other
 }
 
 const getStatusText = (status: string) => {
   const map: Record<string, string> = {
-    pending: '等待中',
+    pending: '排队中',
     active: '传输中',
     paused: '已暂停',
     completed: '已完成',
-    failed: '失败'
+    failed: '失败',
+    cancelled: '已取消'
   }
   return map[status] || status
 }
@@ -3371,16 +3776,17 @@ const formatEta = (seconds: number) => {
 
 // 本地文件压缩
 const compressLocalFile = async (file: FileInfo) => {
+  const targetDir = localPath.value
   try {
     const { value: archiveName } = await ElMessageBox.prompt('请输入压缩文件名', '压缩文件', {
       inputValue: `${file.name}.zip`,
-      inputPattern: /^.+\.(zip|tar|tar\.gz|tgz)$/,
+      inputPattern: /^[^/\\]+\.(zip|tar|tar\.gz|tgz)$/,
       inputErrorMessage: '请输入有效的压缩文件名 (.zip, .tar, .tar.gz, .tgz)'
     })
 
     if (!archiveName) return
 
-    const archivePath = `${localPath.value}/${archiveName}`.replace(/\\/g, '/')
+    const archivePath = joinLocalPath(targetDir, archiveName.trim())
 
     ElMessage.info('正在压缩...')
 
@@ -3393,31 +3799,32 @@ const compressLocalFile = async (file: FileInfo) => {
       ElMessage.error(`压缩失败: ${result.error}`)
     }
   } catch (error: any) {
-    if (error !== 'cancel') {
+    if (!isDialogDismissed(error)) {
       ElMessage.error(`压缩失败: ${error.message || error}`)
     }
   }
 }
 
 // 本地多文件压缩
-const compressLocalFilesMultiple = async () => {
-  if (selectedLocalFiles.value.length === 0) return
+const compressLocalFilesMultiple = async (targets: FileInfo[]) => {
+  if (targets.length === 0) return
+  const targetDir = localPath.value
 
   try {
     const { value: archiveName } = await ElMessageBox.prompt(
-      `将压缩 ${selectedLocalFiles.value.length} 个项目`,
+      `将压缩 ${targets.length} 个项目`,
       '批量压缩',
       {
         inputValue: 'archive.zip',
-        inputPattern: /^.+\.(zip|tar|tar\.gz|tgz)$/,
+        inputPattern: /^[^/\\]+\.(zip|tar|tar\.gz|tgz)$/,
         inputErrorMessage: '请输入有效的压缩文件名 (.zip, .tar, .tar.gz, .tgz)'
       }
     )
 
     if (!archiveName) return
 
-    const archivePath = `${localPath.value}/${archiveName}`.replace(/\\/g, '/')
-    const filePaths = selectedLocalFiles.value.map((f) => f.path)
+    const archivePath = joinLocalPath(targetDir, archiveName.trim())
+    const filePaths = targets.map((f) => f.path)
 
     ElMessage.info('正在压缩...')
 
@@ -3430,7 +3837,7 @@ const compressLocalFilesMultiple = async () => {
       ElMessage.error(`压缩失败: ${result.error}`)
     }
   } catch (error: any) {
-    if (error !== 'cancel') {
+    if (!isDialogDismissed(error)) {
       ElMessage.error(`压缩失败: ${error.message || error}`)
     }
   }
@@ -3469,17 +3876,18 @@ const extractLocalFileTo = async (file: FileInfo) => {
 // 远程文件压缩
 const compressRemoteFile = async (file: FileInfo) => {
   if (!currentSession.value) return
+  const targetDir = remotePath.value
 
   try {
     const { value: archiveName } = await ElMessageBox.prompt('请输入压缩文件名', '压缩文件', {
       inputValue: `${file.name}.tar.gz`,
-      inputPattern: /^.+\.(zip|tar|tar\.gz|tgz|gz)$/,
+      inputPattern: /^[^/\\]+\.(zip|tar|tar\.gz|tgz|gz)$/,
       inputErrorMessage: '请输入有效的压缩文件名 (.zip, .tar, .tar.gz, .tgz, .gz)'
     })
 
     if (!archiveName) return
 
-    const archivePath = `${remotePath.value}/${archiveName}`.replace(/\/+/g, '/')
+    const archivePath = joinRemotePath(targetDir, archiveName.trim())
 
     ElMessage.info('正在压缩...')
 
@@ -3496,31 +3904,32 @@ const compressRemoteFile = async (file: FileInfo) => {
       ElMessage.error(`压缩失败: ${result.error}`)
     }
   } catch (error: any) {
-    if (error !== 'cancel') {
+    if (!isDialogDismissed(error)) {
       ElMessage.error(`压缩失败: ${error.message || error}`)
     }
   }
 }
 
 // 远程多文件压缩
-const compressRemoteFilesMultiple = async () => {
-  if (!currentSession.value || selectedRemoteFiles.value.length === 0) return
+const compressRemoteFilesMultiple = async (targets: FileInfo[]) => {
+  if (!currentSession.value || targets.length === 0) return
+  const targetDir = remotePath.value
 
   try {
     const { value: archiveName } = await ElMessageBox.prompt(
-      `将压缩 ${selectedRemoteFiles.value.length} 个项目`,
+      `将压缩 ${targets.length} 个项目`,
       '批量压缩',
       {
         inputValue: 'archive.tar.gz',
-        inputPattern: /^.+\.(zip|tar|tar\.gz|tgz|gz)$/,
+        inputPattern: /^[^/\\]+\.(zip|tar|tar\.gz|tgz|gz)$/,
         inputErrorMessage: '请输入有效的压缩文件名 (.zip, .tar, .tar.gz, .tgz, .gz)'
       }
     )
 
     if (!archiveName) return
 
-    const archivePath = `${remotePath.value}/${archiveName}`.replace(/\/+/g, '/')
-    const filePaths = selectedRemoteFiles.value.map((f) => f.path)
+    const archivePath = joinRemotePath(targetDir, archiveName.trim())
+    const filePaths = targets.map((f) => f.path)
 
     ElMessage.info('正在压缩...')
 
@@ -3537,7 +3946,7 @@ const compressRemoteFilesMultiple = async () => {
       ElMessage.error(`压缩失败: ${result.error}`)
     }
   } catch (error: any) {
-    if (error !== 'cancel') {
+    if (!isDialogDismissed(error)) {
       ElMessage.error(`压缩失败: ${error.message || error}`)
     }
   }
@@ -3582,7 +3991,7 @@ const extractRemoteFileTo = async (file: FileInfo) => {
 
     await extractRemoteFile(file, targetDir)
   } catch (error: any) {
-    if (error !== 'cancel') {
+    if (!isDialogDismissed(error)) {
       ElMessage.error(`解压失败: ${error.message || error}`)
     }
   }
@@ -3610,7 +4019,7 @@ const extractRemoteFileTo = async (file: FileInfo) => {
   gap: 12px;
   overflow: hidden;
   position: relative;
-  padding: 14px 16px 16px;
+  padding: 14px 16px 10px;
 }
 
 .file-browser {
@@ -3929,11 +4338,27 @@ const extractRemoteFileTo = async (file: FileInfo) => {
   flex-shrink: 0;
 }
 
+/* 传输队列入口放在面板底部的独立一行，不再浮在远程列表上遮挡最后几行 */
 .transfer-queue-entry {
-  position: absolute;
-  right: 28px;
-  bottom: 26px;
-  z-index: 40;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 16px 12px;
+}
+
+.symlink-badge {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.conflict-apply-all {
+  float: left;
+  margin-top: 4px;
+}
+
+:global(.sftp-unsafe-name-notification .el-notification__content) {
+  white-space: pre-line;
+  word-break: break-all;
 }
 
 .queue-entry-button {
@@ -4220,6 +4645,10 @@ const extractRemoteFileTo = async (file: FileInfo) => {
 }
 .status-text.failed {
   color: var(--error-color);
+}
+.status-text.pending,
+.status-text.cancelled {
+  color: var(--text-tertiary);
 }
 
 /* Empty States */

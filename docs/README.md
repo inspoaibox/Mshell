@@ -2,7 +2,7 @@
 
 这是 MShell 的静态 GitHub Pages 介绍页面，用于展示当前产品定位、核心功能、客户端形态、截图、下载入口和快速开始说明。
 
-当前页面对应产品版本：`v0.2.16`
+当前页面对应产品版本：`v0.2.22`
 
 ## 文件结构
 
@@ -10,7 +10,7 @@
 - `styles.css`：页面视觉、布局、响应式和截图预览样式。
 - `script.js`：导航菜单、平滑滚动、终端演示、截图放大和外链安全处理。
 - `logo.png` / `favicon.png`：品牌图标。
-- `upgrade-v0.2.16.md`：本次升级说明与功能修复摘要。
+- `upgrade-v0.2.22.md`：本次升级说明与功能修复摘要。
 - `mcp-readonly.md`：本机 Agent / MCP 读取、查询与开关控制写入说明。
 - `security-manual.md`：完整安全产品使用说明书，包含 MCP 接入、凭据、备份、同步、日志和事件响应。
 - `screenshots/`：当前页面实际引用的产品截图。
@@ -81,12 +81,16 @@ http://localhost:8000
 版本号需要同步修改：
 
 - `package.json` 中的 `version`。
+- `package-lock.json` 顶层及根包的 `version`。
+- `src/components/Common/SettingsPanel.vue` 中的版本显示默认值。
+- `android/app/build.gradle` 中的 `versionName`，同时递增 `versionCode`。
 - `docs/index.html` 中的 hero 版本。
 - `docs/index.html` 中 Windows 下载卡片版本。
 - `docs/index.html` 中 Android 下载卡片版本。
 - `docs/index.html` footer 版本。
 - `docs/README.md` 当前页面对应版本。
-- `docs/upgrade-v0.2.16.md` 中的升级标题和版本说明。
+- 新建对应版本的升级说明（本次为 `docs/upgrade-v0.2.22.md`），保留历史版本文件。
+- `docs/index.html` 中的升级说明链接及项目根目录 `README.md` 的最新更新日志。
 
 当前下载入口：
 

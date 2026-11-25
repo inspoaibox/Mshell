@@ -43,6 +43,7 @@
               <div class="group-info">
                 <el-icon class="group-icon"><Folder /></el-icon>
                 <span class="group-name">{{ group.name }}</span>
+                <el-icon v-if="group.isPinned" class="group-pin" title="已置顶" aria-label="已置顶"><Top /></el-icon>
               </div>
               <el-tag size="small" round>{{ getGroupSessions(group.id).length }}</el-tag>
             </div>
@@ -70,7 +71,7 @@
                     :session-id="session.id"
                     :session-data="session"
                     :index="index"
-                    @reorder="(from, to) => handleSessionReorder(group.id, from, to)"
+                    @reorder="handleSessionReorder"
                     @move-to-group="handleSessionDropToGroup"
                   >
                     <div
@@ -108,7 +109,15 @@
                             effect="plain"
                             class="session-type-tag"
                           >VNC</el-tag>
+                          <el-tag
+                            v-else-if="session.type === 'ipmi'"
+                            size="small"
+                            type="danger"
+                            effect="plain"
+                            class="session-type-tag"
+                          >IPMI</el-tag>
                           <span class="session-name">{{ session.name }}</span>
+                          <el-icon v-if="session.isPinned" class="session-pin" title="已置顶" aria-label="会话已置顶"><Top /></el-icon>
                         </div>
                         <div class="session-details">
                           <span class="detail-item">
@@ -176,7 +185,7 @@
                   :session-id="session.id"
                   :session-data="session"
                   :index="index"
-                  @reorder="(from, to) => handleSessionReorder('ungrouped', from, to)"
+                  @reorder="handleSessionReorder"
                   @move-to-group="handleSessionDropToGroup"
                 >
                   <div
@@ -214,7 +223,15 @@
                           effect="plain"
                           class="session-type-tag"
                         >VNC</el-tag>
+                        <el-tag
+                          v-else-if="session.type === 'ipmi'"
+                          size="small"
+                          type="danger"
+                          effect="plain"
+                          class="session-type-tag"
+                        >IPMI</el-tag>
                         <span class="session-name">{{ session.name }}</span>
+                        <el-icon v-if="session.isPinned" class="session-pin" title="已置顶" aria-label="会话已置顶"><Top /></el-icon>
                       </div>
                       <div class="session-details">
                         <span class="detail-item">
@@ -335,9 +352,9 @@
 
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, toRaw } from 'vue'
 import { 
-  Search, Connection, FolderAdd, Folder, Files, User, Monitor 
+  Search, Connection, FolderAdd, Folder, Files, User, Monitor, Top
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAppStore } from '@/stores/app'
@@ -346,6 +363,8 @@ import * as FlagIcons from 'country-flag-icons/string/3x2'
 import VirtualList from '../Common/VirtualList.vue'
 import DraggableSessionItem from './DraggableSessionItem.vue'
 import DroppableGroup from './DroppableGroup.vue'
+import { sortSessionGroups } from '@/utils/session-groups'
+import { sortSessions } from '@/utils/session-order'
 
 // 使用 store - 不需要 props!
 const appStore = useAppStore()
@@ -369,6 +388,8 @@ const moveGroupId = ref('')
 const movingSession = ref<SessionConfig | null>(null)
 const renameGroupName = ref('')
 const currentGroup = ref<SessionGroup | null>(null)
+const isUpdatingGroupOrder = ref(false)
+const isUpdatingSessionOrder = ref(false)
 const groupForm = ref({
   name: '',
   description: ''
@@ -391,15 +412,18 @@ const filteredSessions = computed(() => {
 })
 
 const filteredGroups = computed(() => {
-  return appStore.groups
+  return sortSessionGroups(appStore.groups)
 })
+
+const visibleSessionIds = computed(() => new Set(filteredSessions.value.map(session => session.id)))
 
 const ungroupedSessions = computed(() => {
   const groupedSessionIds = new Set<string>()
   appStore.groups.forEach(group => {
     group.sessions.forEach(sid => groupedSessionIds.add(sid))
   })
-  return filteredSessions.value.filter((session) => !groupedSessionIds.has(session.id))
+  return sortSessions(appStore.sessions.filter(session => !groupedSessionIds.has(session.id)))
+    .filter(session => visibleSessionIds.value.has(session.id))
 })
 
 const getGroupSessions = (groupId: string) => {
@@ -407,7 +431,8 @@ const getGroupSessions = (groupId: string) => {
   if (!group) return []
   
   const sessionIds = new Set(group.sessions)
-  return filteredSessions.value.filter((session) => sessionIds.has(session.id))
+  return sortSessions(appStore.sessions.filter(session => sessionIds.has(session.id)))
+    .filter(session => visibleSessionIds.value.has(session.id))
 }
 
 const sessionItemHeight = computed(() =>
@@ -451,8 +476,8 @@ const handleSessionClick = (session: SessionConfig) => {
   if (session.type === 'rdp') {
     // RDP 连接 - 调用外部 mstsc
     connectRDP(session)
-  } else if (session.type === 'vnc') {
-    // VNC 连接 - 内嵌 noVNC
+  } else if (session.type === 'vnc' || session.type === 'ipmi') {
+    // VNC / IPMI 连接 - 由 App 创建对应标签页
     emit('connect', session)
   } else {
     // SSH 连接（默认）
@@ -515,9 +540,11 @@ const handleDelete = async (session: SessionConfig) => {
 const handleContextMenu = async (session: SessionConfig, event: MouseEvent) => {
   event.preventDefault()
   event.stopPropagation()
+  if (isUpdatingSessionOrder.value) return
   
   const items = [
     { label: '连接', action: 'connect' },
+    { label: session.isPinned ? '取消置顶' : '置顶', action: session.isPinned ? 'unpin' : 'pin' },
     { type: 'separator' },
     { label: '编辑', action: 'edit' },
     { label: '复制会话', action: 'copy' },
@@ -528,19 +555,57 @@ const handleContextMenu = async (session: SessionConfig, event: MouseEvent) => {
   
   try {
     const action = await window.electronAPI.dialog.showContextMenu(items)
+    if (action === 'pin' || action === 'unpin') {
+      isUpdatingSessionOrder.value = true
+      try {
+        await appStore.updateSessionOrder(session.id, { type: action })
+      } finally {
+        isUpdatingSessionOrder.value = false
+      }
+    }
     if (action === 'connect') emit('connect', session)
     if (action === 'edit') emit('edit', session)
-    if (action === 'copy') handleCopy(session)
+    if (action === 'copy') await handleCopy(session)
     if (action === 'move') handleMove(session)
     if (action === 'delete') handleDelete(session)
   } catch (error) {
-    // Ignore cancelled
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error instanceof Error ? error.message : '会话操作失败，请重试')
+    }
   }
+}
+
+const cloneForIpc = (value: unknown, seen = new WeakMap<object, unknown>()): unknown => {
+  const rawValue = toRaw(value)
+
+  if (rawValue === null || typeof rawValue !== 'object') return rawValue
+  if (rawValue instanceof Date) return new Date(rawValue.getTime())
+
+  const cached = seen.get(rawValue)
+  if (cached) return cached
+
+  if (Array.isArray(rawValue)) {
+    const result: unknown[] = []
+    seen.set(rawValue, result)
+    rawValue.forEach(item => result.push(cloneForIpc(item, seen)))
+    return result
+  }
+
+  const result: Record<string, unknown> = {}
+  seen.set(rawValue, result)
+  Object.entries(rawValue).forEach(([key, nestedValue]) => {
+    result[key] = cloneForIpc(nestedValue, seen)
+  })
+  return result
 }
 
 const handleCopy = async (session: SessionConfig) => {
   try {
-    const { id, createdAt, updatedAt, ...rest } = session
+    // 会话来自 Pinia 的响应式数组，直接浅拷贝会把嵌套配置（跳板机、代理、终端背景等）
+    // 的 Vue Proxy 一起传给 Electron。IPC 在进入主进程前会执行结构化克隆，因此会抛出
+    // "An object could not be cloned"。先解除响应式代理并深拷贝，确保传输的是普通对象。
+    const clonedSession = structuredClone(cloneForIpc(session)) as SessionConfig
+    const { id, createdAt, updatedAt, ...rest } = clonedSession
     // 检查名称唯一性，避免重名
     const baseName = `${session.name} (副本)`
     let finalName = baseName
@@ -662,8 +727,15 @@ const handleCreateGroup = async () => {
 
 const handleGroupContextMenu = async (group: SessionGroup, event: MouseEvent) => {
   event.stopPropagation()
+  if (isUpdatingGroupOrder.value) return
+  const peers = filteredGroups.value.filter(item => Boolean(item.isPinned) === Boolean(group.isPinned))
+  const index = peers.findIndex(item => item.id === group.id)
   
   const menuItems = [
+    { label: group.isPinned ? '取消置顶' : '置顶', action: group.isPinned ? 'unpin' : 'pin' },
+    { label: '上移', action: 'up', enabled: index > 0 },
+    { label: '下移', action: 'down', enabled: index >= 0 && index < peers.length - 1 },
+    { type: 'separator' },
     { label: '重命名', action: 'rename' },
     { label: '删除', action: 'delete' }
   ]
@@ -671,7 +743,14 @@ const handleGroupContextMenu = async (group: SessionGroup, event: MouseEvent) =>
   try {
     const result = await window.electronAPI.dialog.showContextMenu(menuItems)
     
-    if (result === 'rename') {
+    if (result === 'pin' || result === 'unpin' || result === 'up' || result === 'down') {
+      isUpdatingGroupOrder.value = true
+      try {
+        await appStore.updateGroupOrder(group.id, result)
+      } finally {
+        isUpdatingGroupOrder.value = false
+      }
+    } else if (result === 'rename') {
       currentGroup.value = group
       renameGroupName.value = group.name
       showRenameDialog.value = true
@@ -686,7 +765,9 @@ const handleGroupContextMenu = async (group: SessionGroup, event: MouseEvent) =>
       ElMessage.success('分组已删除')
     }
   } catch (error) {
-    // 用户取消
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error instanceof Error ? error.message : '分组操作失败，请重试')
+    }
   }
 }
 
@@ -708,34 +789,18 @@ const handleRenameGroup = async () => {
 }
 
 // 处理会话拖拽排序
-const handleSessionReorder = async (groupId: string, fromIndex: number, toIndex: number) => {
-  console.log('[SessionList] Reordering sessions in group:', groupId, fromIndex, '->', toIndex)
-  
+const handleSessionReorder = async (sessionId: string, targetId: string) => {
+  if (isUpdatingSessionOrder.value) return
+  isUpdatingSessionOrder.value = true
   try {
-    // 获取该分组的所有会话
-    const sessions = getGroupSessions(groupId)
-    
-    if (fromIndex < 0 || fromIndex >= sessions.length || toIndex < 0 || toIndex >= sessions.length) {
-      console.error('Invalid index for reordering')
-      return
-    }
-    
-    // 重新排序
-    const [movedSession] = sessions.splice(fromIndex, 1)
-    sessions.splice(toIndex, 0, movedSession)
-    
-    // 更新每个会话的 sortOrder（并行执行，提升性能）
-    await Promise.all(
-      sessions.map((session, i) => appStore.updateSession(session.id, { sortOrder: i }))
-    )
-    
-    // 重新加载会话列表以反映更新
-    await appStore.loadSessions()
-    
+    // Resolve by ID against the complete group, including search-hidden sessions.
+    await appStore.updateSessionOrder(sessionId, { type: 'move', targetId })
     ElMessage.success('会话已重新排序')
   } catch (error: any) {
     console.error('Failed to reorder sessions:', error)
     ElMessage.error(`排序失败: ${error.message}`)
+  } finally {
+    isUpdatingSessionOrder.value = false
   }
 }
 
@@ -857,6 +922,15 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
   align-items: center;
   gap: 6px;
   color: var(--text-primary);
+  min-width: 0;
+  margin-right: 6px;
+}
+
+.group-pin,
+.session-pin {
+  flex-shrink: 0;
+  color: var(--primary-color);
+  font-size: 13px;
 }
 
 .group-icon {
@@ -867,6 +941,9 @@ const handleSessionDropToGroup = async (sessionId: string, groupId: string) => {
 .group-name {
   font-weight: 600;
   font-size: var(--text-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-items {

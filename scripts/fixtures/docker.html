@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Docker 管理 · 本地验证</title>
+  </head>
+  <body>
+    <main>
+      <section id="preview"></section>
+      <aside>
+        <h1>Docker 管理 · 本地验证</h1>
+        <p>此页面使用模拟数据，不连接服务器。可搜索 web 后验证项目操作包含 db 和 worker。</p>
+        <button id="partial">模拟部分失败</button>
+        <button id="read-failed">模拟读取失败</button>
+        <button id="recover">恢复正常</button>
+        <button id="theme">切换深浅色</button>
+        <p id="calls">尚未操作</p>
+      </aside>
+    </main>
+    <script type="module">
+      import { createApp } from 'vue'
+      import ElementPlus from 'element-plus'
+      import 'element-plus/dist/index.css'
+      import '/src/styles/main.css'
+      import Panel from '/src/components/Docker/DockerPanel.vue'
+      let partial = false,
+        readFailed = false,
+        sample = 0
+      const row = (letter, name, state, project = 'commerce') => ({
+        id: letter.repeat(64),
+        name,
+        image: name === 'db' ? 'postgres:16' : 'app:latest',
+        state,
+        status: state,
+        ports: name === 'web' ? '0.0.0.0:8080->80/tcp' : '',
+        createdAt: '',
+        cpu: '1.2%',
+        memory: '85MiB / 2GiB',
+        netIO: '1MiB / 2MiB',
+        composeProject: project,
+        composeService: name,
+        composeWorkingDir: '',
+        composeConfigFiles: ''
+      })
+      const containers = [
+        row('a', 'web', 'running'),
+        row('b', 'db', 'running'),
+        row('c', 'worker', 'restarting'),
+        row('d', 'archive', 'exited', '')
+      ]
+      const getOverview = async () => {
+        sample++
+        return readFailed
+          ? { success: false, error: '模拟容器列表读取失败，保留上次数据' }
+          : {
+              success: true,
+              data: {
+                environment: {
+                  installed: true,
+                  dockerVersion: 'Docker 27.0.0',
+                  composeInstalled: true,
+                  composeVersion: 'Compose v2.28',
+                  serviceStatus: 'active',
+                  socketAccessible: true,
+                  needsSudo: true,
+                  accessStatus: 'ready',
+                  accessError: '',
+                  os: {
+                    id: 'debian',
+                    versionId: '12',
+                    prettyName: 'Debian 12 · 模拟服务器',
+                    packageManager: 'apt-get'
+                  }
+                },
+                containers: containers.map((c) => ({ ...c, cpu: (sample % 8) + 1 + '.2%' })),
+                warnings: []
+              }
+            }
+      }
+      const action = async (_id, action, ids) => {
+        const names = containers.filter((c) => ids.includes(c.id)).map((c) => c.name)
+        document.querySelector('#calls').textContent = action + ' 实际目标：' + names.join('、')
+        const items = ids.map((target, i) => ({
+          kind: 'container',
+          target,
+          status: partial && i === 1 ? 'failed' : 'success',
+          message: partial && i === 1 ? '模拟容器操作失败' : '操作完成'
+        }))
+        return {
+          success: !partial,
+          data: {
+            status: partial ? 'partial' : 'success',
+            items,
+            output: items
+              .map((i) => '[' + i.status + '] ' + i.target.slice(0, 12) + ' ' + i.message)
+              .join('\n')
+          }
+        }
+      }
+      window.electronAPI = {
+        docker: {
+          getOverview,
+          containerBatchAction: action,
+          containerAction: (id, act, target) => action(id, act, [target]),
+          install: (id) => action(id, 'install', ['a'.repeat(64)]),
+          cleanupUnused: (id) => action(id, 'cleanup', ['a'.repeat(64), 'b'.repeat(64)])
+        },
+        ssh: { onClose: () => () => {}, onReconnected: () => () => {} }
+      }
+      createApp(Panel, { connectionId: 'fixture' }).use(ElementPlus).mount('#preview')
+      document.querySelector('#partial').onclick = () => {
+        partial = true
+      }
+      document.querySelector('#read-failed').onclick = () => {
+        readFailed = true
+      }
+      document.querySelector('#recover').onclick = () => {
+        partial = false
+        readFailed = false
+      }
+      document.querySelector('#theme').onclick = () => {
+        const light = document.documentElement.classList.toggle('light-theme')
+        document.documentElement.classList.toggle('dark', !light)
+      }
+    </script>
+    <style>
+      body {
+        margin: 0;
+        background: #101724;
+        color: #d8e3f4;
+        font-family: 'Segoe UI', sans-serif;
+      }
+      main {
+        display: flex;
+        gap: 28px;
+        padding: 24px;
+      }
+      #preview {
+        width: 500px;
+        height: calc(100vh - 48px);
+        min-height: 600px;
+        border: 1px solid #344053;
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      aside {
+        max-width: 360px;
+        line-height: 1.8;
+      }
+      aside button {
+        padding: 8px 10px;
+        margin: 4px;
+        cursor: pointer;
+      }
+    </style>
+  </body>
+</html>

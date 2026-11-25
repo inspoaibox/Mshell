@@ -42,8 +42,10 @@ export function registerSettingsHandlers() {
       lastStartWithSystem = updates.general.startWithSystem
       // 异步执行，不阻塞返回
       setImmediate(() => {
+        // 开发环境不注册开机启动，避免产生 electron.app.Electron
+        // 并在系统启动时拉起一个空的 Electron 壳子。
         app.setLoginItemSettings({
-          openAtLogin: updates.general!.startWithSystem
+          openAtLogin: app.isPackaged && updates.general!.startWithSystem
         })
       })
     }

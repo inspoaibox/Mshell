@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { SessionConfig, SessionGroup } from '@/types/session'
+import type { SessionConfig, SessionGroup, SessionGroupOrderAction, SessionOrderAction } from '@/types/session'
 import type { TerminalBackgroundConfig } from '@/types/terminal-background'
 import { terminalShortcutsManager } from '@/utils/terminal-shortcuts'
 import { applyAppShellTheme, type AppColorTheme } from '@/utils/app-appearance'
@@ -74,7 +74,16 @@ export const useAppStore = defineStore('app', () => {
 
       // 先断开连接，清理资源
       try {
-        await window.electronAPI.ssh.disconnect(tabId)
+        const sessionType = tabs.value[index].session.type
+        if (sessionType === 'ipmi') {
+          await window.electronAPI.ipmi.disconnect(tabId)
+        } else if (sessionType === 'vnc') {
+          await window.electronAPI.vnc.disconnect(tabId)
+        } else if (sessionType === 'rdp') {
+          await window.electronAPI.rdp.disconnect(tabId)
+        } else {
+          await window.electronAPI.ssh.disconnect(tabId)
+        }
         console.log(`[Store] Disconnected ${tabId}`)
       } catch (error) {
         console.error(`[Store] Error disconnecting ${tabId}:`, error)
@@ -179,6 +188,12 @@ export const useAppStore = defineStore('app', () => {
     await loadSessions() // 重新加载
   }
 
+  async function updateSessionOrder(id: string, action: SessionOrderAction) {
+    const result = await window.electronAPI.session.updateOrder(id, action)
+    if (!result.success || !result.data) throw new Error(result.error || '保存会话排序失败')
+    sessions.value = result.data
+  }
+
   // 删除会话
   async function deleteSession(id: string) {
     await window.electronAPI.session.delete(id)
@@ -195,14 +210,22 @@ export const useAppStore = defineStore('app', () => {
 
   // 重命名分组
   async function renameGroup(groupId: string, newName: string) {
-    await window.electronAPI.session.renameGroup(groupId, newName)
+    const result = await window.electronAPI.session.renameGroup(groupId, newName)
+    if (!result.success) throw new Error(result.error || '重命名分组失败')
     await loadSessions()
   }
 
   // 删除分组
   async function deleteGroup(groupId: string) {
-    await window.electronAPI.session.deleteGroup(groupId)
+    const result = await window.electronAPI.session.deleteGroup(groupId)
+    if (!result.success) throw new Error(result.error || '删除分组失败')
     await loadSessions()
+  }
+
+  async function updateGroupOrder(groupId: string, action: SessionGroupOrderAction) {
+    const result = await window.electronAPI.session.updateGroupOrder(groupId, action)
+    if (!result.success || !result.data) throw new Error(result.error || '保存分组排序失败')
+    groups.value = result.data
   }
 
   // ============ 对话框状态 ============
@@ -328,6 +351,8 @@ export const useAppStore = defineStore('app', () => {
     createGroup,
     renameGroup,
     deleteGroup,
+    updateGroupOrder,
+    updateSessionOrder,
 
     // 对话框
     showSessionForm,

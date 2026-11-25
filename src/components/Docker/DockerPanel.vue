@@ -6,11 +6,29 @@
         <p>{{ subtitle }}</p>
       </div>
       <div class="header-actions">
-        <el-button :icon="Refresh" :loading="loading" @click="loadOverview">刷新</el-button>
+        <el-button
+          :icon="Refresh"
+          :loading="refreshing"
+          :disabled="busy || !connected"
+          @click="loadOverview"
+          >刷新</el-button
+        >
         <el-button :icon="Close" link @click="$emit('close')" />
       </div>
     </div>
 
+    <div class="refresh-toolbar">
+      <label
+        >自动刷新
+        <select v-model.number="refreshInterval" aria-label="Docker 自动刷新间隔">
+          <option :value="5000">5 秒</option>
+          <option :value="10000">10 秒</option>
+          <option :value="30000">30 秒</option>
+          <option :value="0">关闭</option>
+        </select>
+      </label>
+      <span role="status">{{ refreshStatus }}</span>
+    </div>
     <div v-loading="loading || installing || cleaning || actionLoading" class="docker-content">
       <el-alert
         v-if="errorMessage"
@@ -29,7 +47,10 @@
               <strong>{{ overview.environment.installed ? '已安装' : '未安装' }}</strong>
             </div>
           </div>
-          <div class="env-status-card" :class="{ 'is-ready': overview.environment.composeInstalled }">
+          <div
+            class="env-status-card"
+            :class="{ 'is-ready': overview.environment.composeInstalled }"
+          >
             <span class="env-status-dot" />
             <div>
               <span class="label">Compose</span>
@@ -48,28 +69,52 @@
 
         <div v-if="overview.environment.dockerVersion" class="version-line">
           {{ overview.environment.dockerVersion }}
-          <span v-if="overview.environment.composeVersion"> / {{ overview.environment.composeVersion }}</span>
+          <span v-if="overview.environment.composeVersion">
+            / {{ overview.environment.composeVersion }}</span
+          >
         </div>
 
         <el-alert
           v-if="overview.environment.installed && !overview.environment.socketAccessible"
           type="warning"
-          title="已检测到 Docker，但当前用户无法访问 Docker Socket。请使用 root、配置 docker 用户组，或允许免密 sudo docker。"
+          :title="accessMessage"
           show-icon
           :closable="false"
         />
 
-        <div v-if="!overview.environment.installed" class="install-box">
+        <el-alert
+          v-for="warning in overview.warnings"
+          :key="warning"
+          :title="warning"
+          type="warning"
+          :closable="false"
+        />
+        <div
+          v-if="!overview.environment.installed || !overview.environment.composeInstalled"
+          class="install-box"
+        >
           <div>
-            <h4>当前服务器未检测到 Docker</h4>
+            <h4>
+              {{
+                overview.environment.installed
+                  ? 'Docker Compose 未就绪'
+                  : '当前服务器未检测到 Docker'
+              }}
+            </h4>
             <p>可尝试使用当前系统包管理器安装 Docker 与 Docker Compose 插件。</p>
           </div>
-          <el-button type="primary" :icon="Download" :loading="installing" @click="installDocker">
-            一键安装
+          <el-button
+            type="primary"
+            :icon="Download"
+            :loading="installing"
+            :disabled="busy || !connected || stale"
+            @click="installDocker"
+          >
+            {{ overview.environment.installed ? '补全安装' : '一键安装' }}
           </el-button>
         </div>
 
-        <template v-else>
+        <template v-if="overview.environment.installed && overview.environment.socketAccessible">
           <div class="container-toolbar">
             <div class="container-title">
               <strong>容器</strong>
@@ -82,16 +127,12 @@
                 plain
                 :icon="Delete"
                 :loading="cleaning"
+                :disabled="!canOperate"
                 @click="cleanupUnused"
               >
                 清理未使用
               </el-button>
-              <el-input
-                v-model="keyword"
-                size="small"
-                clearable
-                placeholder="搜索容器 / 镜像"
-              />
+              <el-input v-model="keyword" size="small" clearable placeholder="搜索容器 / 镜像" />
             </div>
           </div>
 
@@ -128,13 +169,18 @@
             >
               停止 {{ stoppedCount }}
             </button>
+            <button
+              type="button"
+              class="stat-item"
+              :class="{ 'is-active': stateFilter === 'other' }"
+              @click="setStateFilter('other')"
+            >
+              重启中 / 其他 {{ otherCount }}
+            </button>
           </div>
 
           <el-scrollbar class="container-list">
-            <el-empty
-              v-if="containerGroups.length === 0"
-              description="暂无匹配容器"
-            />
+            <el-empty v-if="containerGroups.length === 0" description="暂无匹配容器" />
             <div
               v-for="group in containerGroups"
               :key="group.key"
@@ -167,7 +213,11 @@
                   </span>
                   <strong :title="group.name">{{ group.name }}</strong>
                   <span>
-                    {{ group.containers.length }} 个容器 · 运行 {{ group.runningCount }} · 暂停 {{ group.pausedCount }} · 停止 {{ group.stoppedCount }}
+                    {{ group.containers.length }} 个容器 · 运行 {{ group.runningCount }} · 暂停
+                    {{ group.pausedCount }} · 停止 {{ group.stoppedCount }}
+                    <template v-if="group.visibleContainers.length !== group.containers.length">
+                      · 匹配 {{ group.visibleContainers.length }}</template
+                    >
                   </span>
                 </div>
                 <div class="group-actions" @click.stop>
@@ -183,6 +233,7 @@
                       :icon="MoreFilled"
                       circle
                       aria-label="项目操作"
+                      :disabled="!canOperate"
                     />
                     <template #dropdown>
                       <el-dropdown-menu>
@@ -207,7 +258,11 @@
                         >
                           恢复项目
                         </el-dropdown-item>
-                        <el-dropdown-item command="restart" :icon="Refresh">
+                        <el-dropdown-item
+                          v-if="groupActionCount('restart', group) > 0"
+                          command="restart"
+                          :icon="Refresh"
+                        >
                           重启项目
                         </el-dropdown-item>
                         <el-dropdown-item
@@ -228,7 +283,7 @@
 
               <div v-if="isGroupExpanded(group)" class="group-containers">
                 <div
-                  v-for="container in group.containers"
+                  v-for="container in group.visibleContainers"
                   :key="container.id"
                   class="container-card"
                 >
@@ -282,11 +337,12 @@
                         :icon="MoreFilled"
                         circle
                         aria-label="容器操作"
+                        :disabled="!canOperate"
                       />
                       <template #dropdown>
                         <el-dropdown-menu>
                           <el-dropdown-item
-                            v-if="container.state !== 'running' && container.state !== 'paused'"
+                            v-if="isActionTarget('start', container)"
                             command="start"
                             :icon="VideoPlay"
                           >
@@ -306,11 +362,15 @@
                           >
                             恢复
                           </el-dropdown-item>
-                          <el-dropdown-item command="restart" :icon="Refresh">
+                          <el-dropdown-item
+                            v-if="isActionTarget('restart', container)"
+                            command="restart"
+                            :icon="Refresh"
+                          >
                             重启
                           </el-dropdown-item>
                           <el-dropdown-item
-                            v-if="container.state === 'running' || container.state === 'paused'"
+                            v-if="isActionTarget('stop', container)"
                             command="stop"
                             :icon="SwitchButton"
                           >
@@ -333,7 +393,7 @@
       <el-empty v-else-if="!loading" description="暂无 Docker 检测信息" />
 
       <div v-if="lastOutput" class="output-box">
-        <div class="output-title">执行输出</div>
+        <div class="output-title">{{ operationSummary || '执行输出' }}</div>
         <pre>{{ lastOutput }}</pre>
       </div>
     </div>
@@ -341,7 +401,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElCheckbox, ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowDown,
@@ -355,346 +415,363 @@ import {
   VideoPause,
   VideoPlay
 } from '@element-plus/icons-vue'
+import { isDockerActionTarget as isActionTarget } from '@/types/docker'
+import type {
+  DockerContainer,
+  DockerContainerAction,
+  DockerContainerActionOptions,
+  DockerOverview,
+  DockerOperationResult
+} from '@/types/docker'
 
-type DockerContainerAction = 'start' | 'pause' | 'unpause' | 'restart' | 'stop' | 'remove'
-
-type DockerStateFilter = 'all' | 'running' | 'paused' | 'stopped'
-
-type DockerContainerActionOptions = {
-  removeImage?: boolean
-  removeNetworks?: boolean
-}
-
-interface DockerContainer {
-  id: string
-  name: string
-  image: string
-  status: string
-  state: string
-  ports: string
-  createdAt: string
-  size: string
-  cpu: string
-  memory: string
-  netIO: string
-  composeProject: string
-  composeService: string
-  composeWorkingDir: string
-  composeConfigFiles: string
-}
-
+type DockerStateFilter = 'all' | 'running' | 'paused' | 'stopped' | 'other'
 interface DockerContainerGroup {
   key: string
   name: string
   type: 'compose' | 'standalone'
   containers: DockerContainer[]
+  visibleContainers: DockerContainer[]
   runningCount: number
   pausedCount: number
   stoppedCount: number
 }
-
-interface DockerOverview {
-  environment: {
-    installed: boolean
-    dockerVersion: string
-    composeInstalled: boolean
-    composeVersion: string
-    serviceStatus: string
-    socketAccessible: boolean
-    needsSudo: boolean
-    os: {
-      id: string
-      versionId: string
-      prettyName: string
-      packageManager: string
-    }
-  }
-  containers: DockerContainer[]
-}
-
-const props = defineProps<{
-  connectionId: string
-}>()
-
-defineEmits<{
-  close: []
-}>()
-
+const props = withDefaults(defineProps<{ connectionId: string; active?: boolean }>(), {
+  active: true
+})
+defineEmits<{ close: [] }>()
 const overview = ref<DockerOverview | null>(null)
-const loading = ref(false)
+const refreshing = ref(false)
 const installing = ref(false)
 const cleaning = ref(false)
 const actionLoading = ref(false)
+const confirming = ref(false)
+const busy = computed(
+  () => installing.value || cleaning.value || actionLoading.value || confirming.value
+)
+const loading = computed(() => refreshing.value && !overview.value)
+const connected = ref(true)
+const visible = ref(!document.hidden)
+const stale = ref(true)
 const keyword = ref('')
 const errorMessage = ref('')
 const lastOutput = ref('')
+const operationSummary = ref('')
+const lastUpdated = ref('')
+const refreshInterval = ref(5000)
 const expandedProjectKeys = ref<Set<string>>(new Set())
 const stateFilter = ref<DockerStateFilter>('all')
-
+let disposed = false
+let generation = 0
+let timer: ReturnType<typeof setTimeout> | undefined
+let pending: Promise<void> | undefined
+let refreshRequested = false
+const cleanups: Array<() => void> = []
+const canRefresh = computed(() => props.active && visible.value && connected.value && !busy.value)
+const canOperate = computed(
+  () =>
+    props.active &&
+    connected.value &&
+    !busy.value &&
+    !stale.value &&
+    !!overview.value?.environment.socketAccessible
+)
+const refreshStatus = computed(() => {
+  if (!connected.value) return '连接已断开 · 数据未更新'
+  if (busy.value) return '操作中 · 自动刷新暂停'
+  if (!props.active || !visible.value) return '页面隐藏 · 自动刷新暂停'
+  if (refreshing.value) return '正在刷新…'
+  if (stale.value && overview.value) return '刷新失败 · 显示上次数据'
+  return lastUpdated.value ? '更新于 ' + lastUpdated.value : '等待检测'
+})
+const accessMessage = computed(() => {
+  const env = overview.value?.environment
+  if (!env) return ''
+  const reason =
+    env.accessStatus === 'permission-denied'
+      ? '当前用户没有 Docker 访问权限，请检查用户组或免密 sudo docker 配置。'
+      : 'Docker 服务不可访问，请检查服务是否启动以及 Docker 连接配置。'
+  return reason + (env.accessError ? '\n' + env.accessError : '')
+})
 const subtitle = computed(() => {
   if (!overview.value) return '检测 Docker 环境与容器状态'
   if (!overview.value.environment.installed) return '未安装 Docker'
-  return overview.value.environment.socketAccessible ? 'Docker 可用' : 'Docker 权限受限'
+  return overview.value.environment.socketAccessible ? 'Docker 可用' : 'Docker 不可访问'
 })
-
 const osLabel = computed(() => {
   const os = overview.value?.environment.os
-  if (!os) return '-'
-  return os.prettyName || [os.id, os.versionId].filter(Boolean).join(' ') || os.packageManager
+  return os
+    ? os.prettyName || [os.id, os.versionId].filter(Boolean).join(' ') || os.packageManager
+    : '-'
 })
-
-const filteredContainers = computed(() => {
-  const list = overview.value?.containers || []
+const isStopped = (container: DockerContainer) => ['exited', 'created'].includes(container.state)
+const matchesFilter = (container: DockerContainer) => {
+  const filter = stateFilter.value
+  if (filter === 'running' || filter === 'paused') {
+    if (container.state !== filter) return false
+  } else if (filter === 'stopped' && !isStopped(container)) return false
+  else if (
+    filter === 'other' &&
+    (isStopped(container) || ['running', 'paused'].includes(container.state))
+  )
+    return false
   const query = keyword.value.trim().toLowerCase()
-  return list.filter((container) => {
-    if (!matchesStateFilter(container)) return false
-    if (!query) return true
-    return [
+  return (
+    !query ||
+    [
       container.name,
       container.image,
       container.status,
       container.id,
       container.composeProject,
       container.composeService
-    ]
-      .some(value => String(value || '').toLowerCase().includes(query))
-  })
-})
-
-const matchesStateFilter = (container: DockerContainer) => {
-  if (stateFilter.value === 'all') return true
-  if (stateFilter.value === 'running') return container.state === 'running'
-  if (stateFilter.value === 'paused') return container.state === 'paused'
-  return container.state !== 'running' && container.state !== 'paused'
+    ].some((value) => value.toLowerCase().includes(query))
+  )
 }
-
 const setStateFilter = (filter: DockerStateFilter) => {
   stateFilter.value = stateFilter.value === filter && filter !== 'all' ? 'all' : filter
 }
-
 const containerGroups = computed<DockerContainerGroup[]>(() => {
   const groups = new Map<string, DockerContainerGroup>()
-
-  for (const container of filteredContainers.value) {
-    const project = (container.composeProject || '').trim()
-    const key = project ? `compose:${project}` : `standalone:${container.id}`
+  // Filtering changes only the displayed children, never a project's operation targets.
+  for (const container of overview.value?.containers || []) {
+    const project = container.composeProject.trim()
+    const key = project ? 'compose:' + project : 'standalone:' + container.id
     const group = groups.get(key) || {
       key,
       name: project || container.name,
-      type: project ? 'compose' as const : 'standalone' as const,
+      type: project ? ('compose' as const) : ('standalone' as const),
       containers: [],
+      visibleContainers: [],
       runningCount: 0,
       pausedCount: 0,
       stoppedCount: 0
     }
-
     group.containers.push(container)
     groups.set(key, group)
   }
-
-  const sortedGroups = Array.from(groups.values())
-  for (const group of sortedGroups) {
-    group.containers.sort((first, second) => {
-      const firstName = first.composeService || first.name
-      const secondName = second.composeService || second.name
-      return firstName.localeCompare(secondName)
-    })
-    group.runningCount = group.containers.filter(container => container.state === 'running').length
-    group.pausedCount = group.containers.filter(container => container.state === 'paused').length
-    group.stoppedCount = group.containers.length - group.runningCount - group.pausedCount
+  for (const group of groups.values()) {
+    group.containers.sort((a, b) =>
+      (a.composeService || a.name).localeCompare(b.composeService || b.name)
+    )
+    group.visibleContainers = group.containers.filter(matchesFilter)
+    group.runningCount = group.containers.filter((c) => c.state === 'running').length
+    group.pausedCount = group.containers.filter((c) => c.state === 'paused').length
+    group.stoppedCount = group.containers.filter(isStopped).length
   }
-
-  return sortedGroups.sort((first, second) => {
-    if (first.type !== second.type) {
-      return first.type === 'compose' ? -1 : 1
-    }
-    return first.name.localeCompare(second.name)
-  })
+  return [...groups.values()]
+    .filter((group) => group.visibleContainers.length)
+    .sort((a, b) =>
+      a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'compose' ? -1 : 1
+    )
 })
-
-const hasActiveKeyword = computed(() => keyword.value.trim().length > 0)
-
-const isGroupExpanded = (group: DockerContainerGroup) => {
-  if (group.type !== 'compose') return true
-  if (hasActiveKeyword.value) return true
-  return expandedProjectKeys.value.has(group.key)
-}
-
+const isGroupExpanded = (group: DockerContainerGroup) =>
+  group.type !== 'compose' ||
+  !!keyword.value.trim() ||
+  stateFilter.value !== 'all' ||
+  expandedProjectKeys.value.has(group.key)
 const toggleGroup = (group: DockerContainerGroup) => {
-  if (group.type !== 'compose') return
-
-  const nextKeys = new Set(expandedProjectKeys.value)
-  if (nextKeys.has(group.key)) {
-    nextKeys.delete(group.key)
-  } else {
-    nextKeys.add(group.key)
-  }
-  expandedProjectKeys.value = nextKeys
+  const keys = new Set(expandedProjectKeys.value)
+  if (keys.has(group.key)) keys.delete(group.key)
+  else keys.add(group.key)
+  expandedProjectKeys.value = keys
 }
-
-const runningCount = computed(() =>
-  (overview.value?.containers || []).filter(container => container.state === 'running').length
+const runningCount = computed(
+  () => overview.value?.containers.filter((c) => c.state === 'running').length || 0
 )
-
-const pausedCount = computed(() =>
-  (overview.value?.containers || []).filter(container => container.state === 'paused').length
+const pausedCount = computed(
+  () => overview.value?.containers.filter((c) => c.state === 'paused').length || 0
 )
-
-const stoppedCount = computed(() =>
-  (overview.value?.containers || []).filter(container =>
-    container.state !== 'running' && container.state !== 'paused'
-  ).length
+const stoppedCount = computed(() => overview.value?.containers.filter(isStopped).length || 0)
+const otherCount = computed(
+  () =>
+    (overview.value?.containers.length || 0) -
+    runningCount.value -
+    pausedCount.value -
+    stoppedCount.value
 )
-
-onMounted(() => {
-  loadOverview()
-})
-
-const loadOverview = async () => {
-  loading.value = true
-  errorMessage.value = ''
-  try {
-    const result = await window.electronAPI.docker.getOverview(props.connectionId)
-    if (result.success && result.data) {
+const stopTimer = () => {
+  if (timer) clearTimeout(timer)
+  timer = undefined
+}
+const schedule = () => {
+  stopTimer()
+  if (!disposed && canRefresh.value && refreshInterval.value > 0 && !pending)
+    timer = setTimeout(() => {
+      void loadOverview()
+    }, refreshInterval.value)
+}
+const loadOverview = (): Promise<void> => {
+  if (disposed || !canRefresh.value) return Promise.resolve()
+  stopTimer()
+  if (pending) {
+    refreshRequested = true
+    return pending
+  }
+  const version = generation
+  const id = props.connectionId
+  refreshing.value = true
+  pending = Promise.resolve().then(async () => {
+    try {
+      const result = await window.electronAPI.docker.getOverview(id)
+      if (
+        disposed ||
+        version !== generation ||
+        id !== props.connectionId ||
+        !connected.value ||
+        !props.active ||
+        !visible.value
+      )
+        return
+      if (!result.success || !result.data) throw new Error(result.error || 'Docker 检测失败')
       overview.value = result.data
-    } else {
-      errorMessage.value = result.error || 'Docker 检测失败'
+      stale.value = false
+      errorMessage.value = ''
+      lastUpdated.value = new Date().toLocaleTimeString()
+    } catch (error) {
+      if (disposed || version !== generation || id !== props.connectionId) return
+      stale.value = true
+      errorMessage.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      pending = undefined
+      refreshing.value = false
+      if (refreshRequested) {
+        refreshRequested = false
+        void loadOverview()
+      } else schedule()
     }
-  } catch (error: any) {
-    errorMessage.value = error.message
+  })
+  return pending
+}
+type ApiOperation = { success: boolean; data?: DockerOperationResult; error?: string }
+const runOperation = async (
+  label: string,
+  kind: 'install' | 'cleanup' | 'container',
+  confirm: () => Promise<unknown>,
+  execute: (id: string) => Promise<ApiOperation>
+) => {
+  if (busy.value || !connected.value || stale.value || !props.active) return
+  const id = props.connectionId
+  const version = generation
+  const flag = kind === 'install' ? installing : kind === 'cleanup' ? cleaning : actionLoading
+  confirming.value = true
+  stopTimer()
+  let started = false
+  try {
+    await confirm()
+    if (
+      disposed ||
+      id !== props.connectionId ||
+      version !== generation ||
+      !connected.value ||
+      !props.active
+    )
+      return
+    confirming.value = false
+    flag.value = true
+    started = true
+    generation++
+    stale.value = true
+    lastOutput.value = ''
+    operationSummary.value = ''
+    const result = await execute(id)
+    if (disposed || id !== props.connectionId) return
+    lastOutput.value = result.data?.output || result.error || '未收到操作结果'
+    if (result.data) {
+      const ok = result.data.items.filter((item) => item.status === 'success').length
+      const failed = result.data.items.filter((item) => item.status === 'failed').length
+      const skipped = result.data.items.filter((item) => item.status === 'skipped').length
+      operationSummary.value =
+        label + '：成功 ' + ok + ' 项，失败 ' + failed + ' 项，跳过 ' + skipped + ' 项'
+      if (result.data.status === 'success') ElMessage.success(label + '成功')
+      else if (result.data.status === 'partial')
+        ElMessage.warning(label + '部分成功，请查看逐项结果')
+      else ElMessage.error(label + '失败，请查看逐项结果')
+    } else {
+      operationSummary.value = label + '结果未确认'
+      ElMessage.error(result.error || label + '失败')
+    }
+  } catch (error) {
+    if (disposed || id !== props.connectionId || error === 'cancel' || error === 'close') return
+    lastOutput.value = error instanceof Error ? error.message : String(error)
+    operationSummary.value = label + (started ? '结果未确认' : '未执行')
+    ElMessage.error(lastOutput.value)
   } finally {
-    loading.value = false
+    if (!disposed && id === props.connectionId) {
+      confirming.value = false
+      flag.value = false
+      // Failures and timeouts can follow partial remote changes, so always re-read.
+      if (started) await loadOverview()
+      else schedule()
+    }
   }
 }
-
-const installDocker = async () => {
-  await ElMessageBox.confirm(
-    '将在当前 SSH 服务器上安装 Docker 和 Docker Compose 插件。安装需要 root 或 sudo 权限，确认继续吗？',
+const installDocker = () =>
+  runOperation(
     '安装 Docker',
-    { type: 'warning' }
+    'install',
+    () =>
+      ElMessageBox.confirm(
+        '将在当前 SSH 服务器安装或补全 Docker 和 Compose，并验证服务可用性。需要 root 或免密 sudo 权限，确认继续吗？',
+        '安装 Docker',
+        { type: 'warning' }
+      ),
+    (id) => window.electronAPI.docker.install(id)
   )
-
-  installing.value = true
-  lastOutput.value = ''
-  try {
-    const result = await window.electronAPI.docker.install(props.connectionId)
-    if (result.success) {
-      lastOutput.value = result.data || ''
-      ElMessage.success('Docker 安装命令已完成')
-      await loadOverview()
-    } else {
-      lastOutput.value = result.error || ''
-      ElMessage.error(`Docker 安装失败: ${result.error || '未知错误'}`)
-    }
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(`Docker 安装失败: ${error.message}`)
-    }
-  } finally {
-    installing.value = false
-  }
-}
-
-const cleanupUnused = async () => {
-  await ElMessageBox.confirm(
-    '将清理当前服务器上未使用的 Docker 镜像、卷和构建缓存。正在使用的容器资源不会被删除，确认继续吗？',
-    '清理未使用资源',
-    {
-      type: 'warning',
-      confirmButtonText: '开始清理',
-      cancelButtonText: '取消'
-    }
+const cleanupUnused = () =>
+  runOperation(
+    '清理资源',
+    'cleanup',
+    () =>
+      ElMessageBox.confirm(
+        '将清理当前服务器所有项目的未使用镜像、未使用卷和构建缓存。未被容器引用的卷可能仍有重要数据，删除后无法恢复。确认继续吗？',
+        '清理未使用资源',
+        { type: 'warning', confirmButtonText: '开始清理', cancelButtonText: '取消' }
+      ),
+    (id) => window.electronAPI.docker.cleanupUnused(id)
   )
-
-  cleaning.value = true
-  lastOutput.value = ''
-  try {
-    const result = await window.electronAPI.docker.cleanupUnused(props.connectionId)
-    if (result.success) {
-      lastOutput.value = result.data || ''
-      ElMessage.success('清理完成')
-      await loadOverview()
-    } else {
-      lastOutput.value = result.error || ''
-      ElMessage.error(`清理失败: ${result.error || '未知错误'}`)
-    }
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(`清理失败: ${error.message}`)
-    }
-  } finally {
-    cleaning.value = false
-  }
-}
 
 const confirmRemoveContainers = async (
   title: string,
   containers: DockerContainer[]
 ): Promise<DockerContainerActionOptions> => {
-  const removeOptions = reactive<DockerContainerActionOptions>({
-    removeImage: false,
-    removeNetworks: false
-  })
-  const imageText = Array.from(new Set(containers.map(container => container.image).filter(Boolean)))
-    .slice(0, 3)
-    .join('、')
-
-  const message = h({
-    name: 'DockerRemoveOptionsMessage',
-    setup() {
-      return () =>
-        h('div', { style: 'display:flex;flex-direction:column;gap:10px;line-height:1.5;' }, [
-          h('div', [
-            `确认删除 ${title} 吗？`,
-            h(
-              'div',
-              { style: 'margin-top:4px;color:var(--text-tertiary);font-size:12px;' },
-              `容器：${containers.length} 个；镜像：${imageText || '-'}`
-            )
-          ]),
+  const options = reactive({ removeImage: false, removeNetworks: false })
+  await ElMessageBox({
+    title: '删除容器',
+    message: h({
+      setup: () => () =>
+        h('div', { style: 'line-height:1.7' }, [
+          h('p', '确认删除' + title + '？运行中的容器会被强制停止，容器可写层会丢失，数据卷保留。'),
+          h('p', containers.map((c) => c.name).join('、')),
           h(
             ElCheckbox,
             {
-              modelValue: removeOptions.removeImage,
-              'onUpdate:modelValue': (value: boolean | string | number) => {
-                removeOptions.removeImage = Boolean(value)
+              modelValue: options.removeImage,
+              'onUpdate:modelValue': (value: unknown) => {
+                options.removeImage = value === true
               }
             },
-            () => '同时删除镜像文件'
+            () => '同时删除容器实际使用的镜像（仍被引用时保留并报告失败）'
           ),
           h(
             ElCheckbox,
             {
-              modelValue: removeOptions.removeNetworks,
-              'onUpdate:modelValue': (value: boolean | string | number) => {
-                removeOptions.removeNetworks = Boolean(value)
+              modelValue: options.removeNetworks,
+              'onUpdate:modelValue': (value: unknown) => {
+                options.removeNetworks = value === true
               }
             },
-            () => '同时删除关联网络（默认 bridge / host / none 会跳过）'
+            () => '同时删除关联网络（跳过默认网络，仍被使用时保留）'
           )
         ])
-    }
-  })
-
-  await ElMessageBox({
-    title: containers.length > 1 ? '删除项目容器' : '删除容器',
-    message,
+    }),
     type: 'warning',
     showCancelButton: true,
     confirmButtonText: '删除',
     cancelButtonText: '取消',
     confirmButtonClass: 'el-button--danger'
   })
-
-  return {
-    removeImage: Boolean(removeOptions.removeImage),
-    removeNetworks: Boolean(removeOptions.removeNetworks)
-  }
+  return { ...options }
 }
-
-const confirmRemoveContainer = (container: DockerContainer) =>
-  confirmRemoveContainers(`容器 "${container.name}"`, [container])
-
 const actionLabels: Record<DockerContainerAction, string> = {
   start: '启动',
   pause: '暂停',
@@ -703,149 +780,137 @@ const actionLabels: Record<DockerContainerAction, string> = {
   stop: '停止',
   remove: '删除'
 }
-
-const isActionTarget = (action: DockerContainerAction, container: DockerContainer) => {
-  if (action === 'start') return container.state !== 'running' && container.state !== 'paused'
-  if (action === 'pause') return container.state === 'running'
-  if (action === 'unpause') return container.state === 'paused'
-  if (action === 'stop') return container.state === 'running' || container.state === 'paused'
-  return true
-}
-
-const getActionTargets = (
+const groupActionCount = (action: DockerContainerAction, group: DockerContainerGroup) =>
+  group.containers.filter((container) => isActionTarget(action, container)).length
+const runContainerAction = (
   action: DockerContainerAction,
-  containers: DockerContainer[]
-) => containers.filter(container => isActionTarget(action, container))
-
-const groupActionCount = (
-  action: DockerContainerAction,
-  group: DockerContainerGroup
-) => getActionTargets(action, group.containers).length
-
-const runAction = async (action: DockerContainerAction, container: DockerContainer) => {
-  const actionOptions = action === 'remove'
-    ? await confirmRemoveContainer(container)
-    : undefined
-
-  if (action === 'stop' || action === 'restart') {
-    await ElMessageBox.confirm(
-      `确认${actionLabels[action]}容器 "${container.name}" 吗？`,
-      `${actionLabels[action]}容器`,
-      { type: 'info' }
-    )
-  }
-
-  actionLoading.value = true
-  lastOutput.value = ''
-  try {
-    const result = await window.electronAPI.docker.containerAction(
-      props.connectionId,
-      action,
-      container.id,
-      actionOptions
-    )
-
-    if (result.success) {
-      lastOutput.value = result.data || ''
-      ElMessage.success(`${actionLabels[action]}成功`)
-      await loadOverview()
-    } else {
-      lastOutput.value = result.error || ''
-      ElMessage.error(`${actionLabels[action]}失败: ${result.error || '未知错误'}`)
-    }
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(`${actionLabels[action]}失败: ${error.message}`)
-    }
-  } finally {
-    actionLoading.value = false
-  }
-}
-
-const runGroupAction = async (action: DockerContainerAction, group: DockerContainerGroup) => {
-  const targets = getActionTargets(action, group.containers)
-  if (targets.length === 0) {
-    ElMessage.warning(`当前项目没有可${actionLabels[action]}的容器`)
+  containers: DockerContainer[],
+  project?: string
+) => {
+  if (!canOperate.value) return
+  const targets = containers.filter((container) => isActionTarget(action, container))
+  if (!targets.length) {
+    ElMessage.warning('没有可执行此操作的容器')
     return
   }
-
-  const actionOptions = action === 'remove'
-    ? await confirmRemoveContainers(`项目 "${group.name}" 的 ${targets.length} 个容器`, targets)
-    : undefined
-
-  if (action === 'stop' || action === 'restart') {
-    await ElMessageBox.confirm(
-      `确认${actionLabels[action]}项目 "${group.name}" 中的 ${targets.length} 个容器吗？`,
-      `${actionLabels[action]}项目`,
-      { type: 'info' }
-    )
-  }
-
-  actionLoading.value = true
-  lastOutput.value = ''
-  try {
-    const result = await window.electronAPI.docker.containerBatchAction(
-      props.connectionId,
-      action,
-      targets.map(container => container.id),
-      actionOptions
-    )
-
-    if (result.success) {
-      lastOutput.value = result.data || ''
-      ElMessage.success(`${actionLabels[action]}项目成功`)
-      await loadOverview()
-    } else {
-      lastOutput.value = result.error || ''
-      ElMessage.error(`${actionLabels[action]}项目失败: ${result.error || '未知错误'}`)
-    }
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(`${actionLabels[action]}项目失败: ${error.message}`)
-    }
-  } finally {
-    actionLoading.value = false
-  }
-}
-
-const isDockerContainerAction = (command: unknown): command is DockerContainerAction => {
-  return (
-    typeof command === 'string' &&
-    ['start', 'pause', 'unpause', 'restart', 'stop', 'remove'].includes(command)
+  let options: DockerContainerActionOptions = {}
+  const label = actionLabels[action] + (project ? '项目容器' : '容器')
+  const title = project
+    ? '项目「' + project + '」中的 ' + targets.length + ' 个容器'
+    : '容器「' + targets[0].name + '」'
+  return runOperation(
+    label,
+    'container',
+    async () => {
+      if (action === 'remove') options = await confirmRemoveContainers(title, targets)
+      else if (project || action === 'stop' || action === 'restart') {
+        await ElMessageBox.confirm(
+          '确认' +
+            actionLabels[action] +
+            title +
+            '？' +
+            (project
+              ? '\n包含搜索或筛选隐藏的容器：' +
+                targets.map((c) => c.name).join('、') +
+                '\n此操作批量控制已有容器，不重新部署 Compose。'
+              : ''),
+          label,
+          { type: 'warning' }
+        )
+      }
+    },
+    (id) =>
+      project
+        ? window.electronAPI.docker.containerBatchAction(
+            id,
+            action,
+            targets.map((c) => c.id),
+            options
+          )
+        : window.electronAPI.docker.containerAction(id, action, targets[0].id, options)
   )
 }
-
+const isDockerContainerAction = (command: unknown): command is DockerContainerAction =>
+  typeof command === 'string' &&
+  ['start', 'pause', 'unpause', 'restart', 'stop', 'remove'].includes(command)
 const handleContainerCommand = (command: unknown, container: DockerContainer) => {
-  if (isDockerContainerAction(command)) {
-    void runAction(command, container)
-  }
+  if (isDockerContainerAction(command)) void runContainerAction(command, [container])
 }
-
 const handleGroupCommand = (command: unknown, group: DockerContainerGroup) => {
-  if (isDockerContainerAction(command)) {
-    void runGroupAction(command, group)
-  }
+  if (isDockerContainerAction(command))
+    void runContainerAction(command, group.containers, group.name)
 }
-
 const shortId = (id: string) => id.slice(0, 12)
+const stateLabel = (state: string) =>
+  (
+    ({
+      running: '运行中',
+      paused: '已暂停',
+      exited: '已停止',
+      created: '已创建',
+      restarting: '重启中',
+      removing: '删除中',
+      dead: '异常'
+    }) as Record<string, string>
+  )[state] ||
+  state ||
+  'unknown'
+const stateClass = (state: string) =>
+  (
+    ({ running: 'is-running', paused: 'is-paused', exited: 'is-stopped' }) as Record<string, string>
+  )[state] || 'is-other'
 
-const stateLabel = (state: string) => {
-  const normalized = state.toLowerCase()
-  if (normalized === 'running') return '运行中'
-  if (normalized === 'paused') return '已暂停'
-  if (normalized === 'exited') return '已停止'
-  if (normalized === 'created') return '已创建'
-  if (normalized === 'restarting') return '重启中'
-  return state || 'unknown'
+const onVisibility = () => {
+  visible.value = !document.hidden
 }
-
-const stateClass = (state: string) => {
-  const normalized = state.toLowerCase()
-  if (normalized === 'running') return 'is-running'
-  if (normalized === 'paused') return 'is-paused'
-  if (normalized === 'exited') return 'is-stopped'
-  return 'is-other'
-}
+watch(refreshInterval, schedule)
+watch(
+  () => [props.connectionId, props.active, connected.value, visible.value] as const,
+  (next, previous) => {
+    generation++
+    stopTimer()
+    if (previous && next[0] !== previous[0]) {
+      overview.value = null
+      stale.value = true
+      lastUpdated.value = ''
+      lastOutput.value = ''
+      operationSummary.value = ''
+      errorMessage.value = ''
+      connected.value = true
+      installing.value = cleaning.value = actionLoading.value = confirming.value = false
+      expandedProjectKeys.value = new Set()
+    }
+    if (canRefresh.value) void loadOverview()
+  }
+)
+onMounted(() => {
+  document.addEventListener('visibilitychange', onVisibility)
+  const ssh = window.electronAPI.ssh
+  const close = ssh?.onClose?.((id) => {
+    if (id !== props.connectionId) return
+    connected.value = false
+    stale.value = true
+    errorMessage.value = 'SSH 连接已断开，保留上次数据，重连后自动刷新'
+  })
+  const reconnect = ssh?.onReconnected?.((id) => {
+    if (id !== props.connectionId) return
+    if (!connected.value) connected.value = true
+    else {
+      generation++
+      if (canRefresh.value) void loadOverview()
+    }
+  })
+  if (close) cleanups.push(close)
+  if (reconnect) cleanups.push(reconnect)
+  void loadOverview()
+})
+onUnmounted(() => {
+  disposed = true
+  generation++
+  stopTimer()
+  document.removeEventListener('visibilitychange', onVisibility)
+  cleanups.forEach((cleanup) => cleanup())
+})
 </script>
 
 <style scoped>
@@ -884,6 +949,27 @@ const stateClass = (state: string) => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.refresh-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.refresh-toolbar select {
+  margin-left: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 3px 5px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
 }
 
 .docker-content {
@@ -1044,7 +1130,10 @@ const stateClass = (state: string) => {
   font-family: inherit;
   font-size: var(--text-xs);
   line-height: 1;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .stat-item:hover,

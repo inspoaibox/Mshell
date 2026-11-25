@@ -17,6 +17,9 @@
           <el-radio value="vnc">
             <el-icon><DesktopOutlined /></el-icon> VNC
           </el-radio>
+          <el-radio value="ipmi">
+            <el-icon><Cpu /></el-icon> IPMI
+          </el-radio>
         </el-radio-group>
       </el-form-item>
 
@@ -270,6 +273,51 @@
         </el-form-item>
       </template>
 
+      <!-- IPMI / Redfish 选项 -->
+      <template v-if="form.type === 'ipmi'">
+        <el-form-item label="密码" prop="password">
+          <el-input
+            v-model="form.password"
+            type="password"
+            placeholder="IPMI 管理密码"
+            show-password
+          />
+        </el-form-item>
+
+        <el-divider content-position="left">
+          <span style="font-size: var(--text-base); color: var(--text-secondary)">IPMI 连接选项</span>
+        </el-divider>
+
+        <el-form-item label="管理协议">
+          <el-select v-model="form.ipmiTransport" style="width: 100%" @change="handleIpmiTransportChange">
+            <el-option label="Redfish API（推荐）" value="redfish" />
+            <el-option label="IPMI LANPlus（需要本机 ipmitool）" value="lanplus" />
+          </el-select>
+        </el-form-item>
+
+        <template v-if="form.ipmiTransport === 'redfish'">
+          <el-form-item label="HTTPS">
+            <el-switch v-model="form.ipmiRedfishHttps" @change="handleIpmiHttpsChange" />
+            <span class="field-hint">{{ form.ipmiRedfishHttps ? '使用 HTTPS（默认端口 443）' : '使用 HTTP（默认端口 80）' }}</span>
+          </el-form-item>
+          <el-form-item label="验证证书">
+            <el-switch v-model="form.ipmiVerifyCertificate" />
+            <span class="field-hint">关闭后允许自签名 BMC 证书</span>
+          </el-form-item>
+          <el-form-item label="Redfish 路径">
+            <el-input v-model="form.ipmiBasePath" placeholder="/redfish/v1" />
+          </el-form-item>
+        </template>
+
+        <el-alert
+          v-if="form.ipmiTransport === 'lanplus'"
+          title="LANPlus 使用本机 ipmitool 连接 BMC，请先确认 ipmitool 已安装并可执行。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+      </template>
+
       <!-- 服务器管理信息（可折叠） -->
       <el-divider content-position="left">
         <span style="font-size: var(--text-base); color: var(--text-secondary)">服务器管理信息（可选）</span>
@@ -380,7 +428,7 @@
 <script setup lang="ts">
 import { ref, reactive, watch } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
-import { Monitor } from '@element-plus/icons-vue'
+import { Monitor, Cpu } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 import type { SessionConfig, ProxyJumpConfig as ProxyJumpConfigType, ProxyConfig as ProxyConfigType, SessionType } from '@/types/session'
 import ProxyJumpConfig from './ProxyJumpConfig.vue'
@@ -504,6 +552,11 @@ const getDefaultForm = () => ({
   vncLocalCursor: true,
   vncQuality: 6,
   vncCompression: 2,
+  // IPMI / Redfish 选项
+  ipmiTransport: 'redfish' as 'redfish' | 'lanplus',
+  ipmiRedfishHttps: true,
+  ipmiVerifyCertificate: true,
+  ipmiBasePath: '/redfish/v1',
   // 服务器管理字段
   provider: '',
   region: '',
@@ -532,6 +585,19 @@ const handleTypeChange = (type: SessionType) => {
   } else if (type === 'vnc') {
     form.port = 5900
     form.authType = 'password'
+  } else if (type === 'ipmi') {
+    form.port = form.ipmiTransport === 'lanplus' ? 623 : form.ipmiRedfishHttps ? 443 : 80
+    form.authType = 'password'
+  }
+}
+
+const handleIpmiTransportChange = (transport: 'redfish' | 'lanplus') => {
+  form.port = transport === 'lanplus' ? 623 : form.ipmiRedfishHttps ? 443 : 80
+}
+
+const handleIpmiHttpsChange = (enabled: boolean) => {
+  if (form.type === 'ipmi' && form.ipmiTransport === 'redfish') {
+    form.port = enabled ? 443 : 80
   }
 }
 
@@ -563,8 +629,8 @@ const rules: FormRules = {
   username: [
     {
       validator: (_rule, value, callback) => {
-        // RDP 用户名可选（连接时输入），SSH 必填
-        if (form.type === 'ssh' && !value) {
+        // RDP 用户名可选（连接时输入），SSH/IPMI 必填
+        if ((form.type === 'ssh' || form.type === 'ipmi') && !value) {
           callback(new Error('请输入用户名'))
         } else {
           callback()
@@ -576,8 +642,8 @@ const rules: FormRules = {
   password: [
     {
       validator: (_rule, value, callback) => {
-        // SSH 密码认证时必填，RDP 密码可选
-        if (form.type === 'ssh' && form.authType === 'password' && !value) {
+        // SSH 密码认证和 IPMI 必填，RDP/VNC 密码可选
+        if ((form.type === 'ssh' && form.authType === 'password' || form.type === 'ipmi') && !value) {
           callback(new Error('请输入密码'))
         } else {
           callback()
@@ -636,7 +702,9 @@ watch(
         form.type = props.session.type || 'ssh'
         form.name = props.session.name || ''
         form.host = props.session.host || ''
-        form.port = props.session.port || (form.type === 'rdp' ? 3389 : 22)
+        form.port = props.session.port || (
+          form.type === 'rdp' ? 3389 : form.type === 'vnc' ? 5900 : form.type === 'ipmi' ? 443 : 22
+        )
         form.username = props.session.username || ''
         form.authType = props.session.authType || 'password'
         form.password = props.session.password || ''
@@ -682,6 +750,12 @@ watch(
         form.vncLocalCursor = vncOpts.localCursor !== false
         form.vncQuality = vncOpts.quality ?? 6
         form.vncCompression = vncOpts.compression ?? 2
+        // IPMI / Redfish 选项
+        const ipmiOpts = props.session.ipmiOptions || {}
+        form.ipmiTransport = ipmiOpts.transport || 'redfish'
+        form.ipmiRedfishHttps = ipmiOpts.redfishHttps !== false
+        form.ipmiVerifyCertificate = ipmiOpts.verifyCertificate !== false
+        form.ipmiBasePath = ipmiOpts.basePath || '/redfish/v1'
         // 服务器管理字段
         form.provider = props.session.provider || ''
         form.region = props.session.region || ''
@@ -908,6 +982,24 @@ const handleSave = async () => {
           quality: form.vncQuality,
           compression: form.vncCompression
         }
+      } else if (form.type === 'ipmi') {
+        if (shouldSavePasswords) {
+          sessionData.password = form.password || undefined
+        } else {
+          ;(sessionData as any).password = null
+        }
+        sessionData.authType = 'password'
+        sessionData.ipmiOptions = {
+          transport: form.ipmiTransport,
+          redfishHttps: form.ipmiRedfishHttps,
+          verifyCertificate: form.ipmiVerifyCertificate,
+          basePath: form.ipmiBasePath.trim() || '/redfish/v1'
+        }
+        ;(sessionData as any).privateKeyId = null
+        ;(sessionData as any).privateKeyPath = null
+        ;(sessionData as any).passphrase = null
+        ;(sessionData as any).proxyJump = null
+        ;(sessionData as any).proxy = null
       }
 
       if (isEdit.value && props.session) {

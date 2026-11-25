@@ -8,8 +8,14 @@ import type {
   ProxyConfig,
   SessionType,
   RDPOptions,
-  VNCOptions
+  VNCOptions,
+  IPMIOptions,
+  SessionGroup,
+  SessionGroupOrderAction,
+  SessionOrderAction
 } from '../../src/types/session'
+import { sortSessionGroups } from '../../src/utils/session-groups'
+import { sortSessions } from '../../src/utils/session-order'
 import type { TerminalBackgroundConfig } from '../../src/types/terminal-background'
 import { appSettingsManager } from '../utils/app-settings'
 
@@ -30,6 +36,7 @@ export interface SessionConfig {
   terminalBackground?: TerminalBackgroundConfig
   color?: string
   sortOrder?: number // 用于拖拽排序
+  isPinned?: boolean
   // 跳板机配置
   proxyJump?: ProxyJumpConfig
   // 代理配置
@@ -51,13 +58,11 @@ export interface SessionConfig {
   rdpOptions?: RDPOptions
   // VNC 特有配置
   vncOptions?: VNCOptions
+  // IPMI / Redfish 带外管理配置
+  ipmiOptions?: IPMIOptions
 }
 
-export interface SessionGroup {
-  id: string
-  name: string
-  sessions: string[]
-}
+export type { SessionGroup } from '../../src/types/session'
 
 type SessionCreateConfig = Omit<SessionConfig, 'id' | 'createdAt' | 'updatedAt'> &
   Partial<Pick<SessionConfig, 'id' | 'createdAt' | 'updatedAt'>>
@@ -70,6 +75,7 @@ export class SessionManager {
   private sessions: Map<string, SessionConfig>
   private groups: Map<string, SessionGroup>
   private initialized: boolean = false
+  private saveQueue: Promise<void> = Promise.resolve()
 
   constructor() {
     const userDataPath = app.getPath('userData')
@@ -119,7 +125,10 @@ export class SessionManager {
       // 加载分组
       if (parsed.groups && Array.isArray(parsed.groups)) {
         for (const group of parsed.groups) {
-          this.groups.set(group.id, group)
+          this.groups.set(group.id, {
+            ...group,
+            ...this.groupOrderMetadata(group, this.groups.size)
+          })
         }
       }
 
@@ -141,17 +150,27 @@ export class SessionManager {
    * 保存会话配置到文件
    */
   async saveSessions(): Promise<void> {
+    return this.enqueueSave(() => this.writeSessions())
+  }
+
+  private enqueueSave<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.saveQueue.then(operation)
+    this.saveQueue = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  private async writeSessions(groups = this.groups, sessions = this.sessions): Promise<void> {
     try {
       // 确保目录存在
       const dir = join(this.configPath, '..')
       await fs.mkdir(dir, { recursive: true })
 
       // 加密敏感字段
-      const sessionsArray = Array.from(this.sessions.values()).map((session) =>
+      const sessionsArray = Array.from(sessions.values()).map((session) =>
         this.encryptSession(session)
       )
 
-      const groupsArray = Array.from(this.groups.values())
+      const groupsArray = Array.from(groups.values())
 
       const data = {
         sessions: sessionsArray,
@@ -160,7 +179,10 @@ export class SessionManager {
         lastModified: new Date().toISOString()
       }
 
-      await fs.writeFile(this.configPath, JSON.stringify(data, null, 2), 'utf-8')
+      // Serialize writes and replace only after a complete file has been written.
+      const temporaryPath = `${this.configPath}.tmp`
+      await fs.writeFile(temporaryPath, JSON.stringify(data, null, 2), 'utf-8')
+      await fs.rename(temporaryPath, this.configPath)
     } catch (error) {
       console.error('Failed to save sessions:', error)
       throw new Error('Failed to save session configuration')
@@ -471,7 +493,13 @@ export class SessionManager {
    */
   async syncUpsertGroup(raw: any): Promise<void> {
     if (!raw?.id) return
-    this.groups.set(raw.id, { id: raw.id, name: String(raw.name || ''), sessions: [] })
+    const existing = this.groups.get(raw.id)
+    this.groups.set(raw.id, {
+      id: raw.id,
+      name: String(raw.name || ''),
+      sessions: [],
+      ...this.groupOrderMetadata({ ...existing, ...raw }, this.nextGroupOrder())
+    })
     await this.saveSessions()
   }
 
@@ -495,6 +523,63 @@ export class SessionManager {
    */
   getAllSessions(): SessionConfig[] {
     return Array.from(this.sessions.values())
+  }
+
+  async updateSessionOrder(id: string, action: SessionOrderAction): Promise<SessionConfig[]> {
+    if (!action || !['pin', 'unpin', 'move'].includes(action.type)) {
+      throw new Error('无效的会话排序操作')
+    }
+    return this.enqueueSave(async () => {
+      const session = this.sessions.get(id)
+      if (!session) throw new Error('会话不存在，请刷新后重试')
+      const groupOf = (item: SessionConfig) =>
+        item.group && this.groups.has(item.group) ? item.group : undefined
+      const ordered = sortSessions(this.getAllSessions().filter(item => groupOf(item) === groupOf(session)))
+        .map(item => ({ ...item }))
+      const index = ordered.findIndex(item => item.id === id)
+      const selected = ordered[index]
+      if (action.type === 'move') {
+        const target = ordered.findIndex(item => item.id === action.targetId)
+        if (target < 0) throw new Error('只能在同一分组内调整会话顺序')
+        if ((ordered[target].isPinned === true) !== (selected.isPinned === true)) {
+          throw new Error('置顶会话固定显示在前，请在同类会话之间拖拽排序')
+        }
+        if (target === index) return this.getAllSessions()
+        ordered.splice(index, 1)
+        ordered.splice(target, 0, selected)
+      } else {
+        const pinned = action.type === 'pin'
+        if ((selected.isPinned === true) === pinned) return this.getAllSessions()
+        selected.isPinned = pinned
+        ordered.splice(index, 1)
+        const firstOrdinary = ordered.findIndex(item => item.isPinned !== true)
+        ordered.splice(pinned ? 0 : firstOrdinary < 0 ? ordered.length : firstOrdinary, 0, selected)
+      }
+      const updatedAt = new Date()
+      const candidate = new Map(this.sessions)
+      const changed: SessionConfig[] = []
+      ordered.forEach((item, sortOrder) => {
+        const previous = this.sessions.get(item.id)!
+        if (previous.isPinned === item.isPinned && previous.sortOrder === sortOrder) return
+        const updated = { ...item, sortOrder, updatedAt }
+        candidate.set(item.id, updated)
+        changed.push(updated)
+      })
+      await this.writeSessions(this.groups, candidate)
+      // Publish only persisted metadata; preserve concurrent edits to connection details.
+      for (const item of changed) {
+        const current = this.sessions.get(item.id)
+        if (current) {
+          this.sessions.set(item.id, {
+            ...current,
+            isPinned: item.isPinned,
+            sortOrder: item.sortOrder,
+            updatedAt: current.updatedAt > updatedAt ? current.updatedAt : updatedAt
+          })
+        }
+      }
+      return this.getAllSessions()
+    })
   }
 
   /**
@@ -544,11 +629,16 @@ export class SessionManager {
   /**
    * 创建分组
    */
-  async createGroup(name: string, id?: string): Promise<SessionGroup> {
+  async createGroup(
+    name: string,
+    id?: string,
+    order: Pick<SessionGroup, 'isPinned' | 'sortOrder'> = {}
+  ): Promise<SessionGroup> {
     const newGroup: SessionGroup = {
       id: id || uuidv4(),
       name,
-      sessions: [] // Keep for compatibility but don't persist
+      sessions: [], // Populated dynamically from session.group
+      ...this.groupOrderMetadata(order, this.nextGroupOrder())
     }
 
     this.groups.set(newGroup.id, newGroup)
@@ -573,7 +663,7 @@ export class SessionManager {
    * 获取所有分组
    */
   getAllGroups(): SessionGroup[] {
-    const groups = Array.from(this.groups.values())
+    const groups = sortSessionGroups(Array.from(this.groups.values()))
 
     // Dynamically populate sessions array for frontend compatibility
     for (const group of groups) {
@@ -582,6 +672,54 @@ export class SessionManager {
         .map(s => s.id)
     }
     return groups
+  }
+
+  private groupOrderMetadata(raw: Partial<SessionGroup>, fallback: number) {
+    return {
+      isPinned: raw.isPinned === true,
+      sortOrder: typeof raw.sortOrder === 'number' && Number.isFinite(raw.sortOrder)
+        ? raw.sortOrder : fallback
+    }
+  }
+
+  private nextGroupOrder(): number {
+    return Math.max(-1, ...Array.from(this.groups.values(), (group, index) =>
+      this.groupOrderMetadata(group, index).sortOrder)) + 1
+  }
+
+  async updateGroupOrder(groupId: string, action: SessionGroupOrderAction): Promise<SessionGroup[]> {
+    if (!['pin', 'unpin', 'up', 'down'].includes(action)) {
+      throw new Error('无效的分组排序操作')
+    }
+    return this.enqueueSave(async () => {
+      const ordered = this.getAllGroups().map(group => ({ ...group }))
+      const index = ordered.findIndex(group => group.id === groupId)
+      if (index < 0) throw new Error('分组不存在，请刷新后重试')
+      const group = ordered[index]
+      if (action === 'pin' || action === 'unpin') {
+        const isPinned = action === 'pin'
+        if (Boolean(group.isPinned) === isPinned) return this.getAllGroups()
+        ordered.splice(index, 1)
+        group.isPinned = isPinned
+        // Pin to the very top; unpin to the start of the ordinary groups.
+        const firstOrdinary = ordered.findIndex(item => !item.isPinned)
+        ordered.splice(isPinned ? 0 : firstOrdinary < 0 ? ordered.length : firstOrdinary, 0, group)
+      } else {
+        const target = index + (action === 'up' ? -1 : 1)
+        if (!ordered[target] || Boolean(ordered[target].isPinned) !== Boolean(group.isPinned)) {
+          return this.getAllGroups()
+        }
+        ;[ordered[index], ordered[target]] = [ordered[target], ordered[index]]
+      }
+      ordered.forEach((item, position) => { item.sortOrder = position })
+      await this.writeSessions(new Map(ordered.map(item => [item.id, item])))
+      // Publish only after saving succeeds. Preserve concurrent name/member changes.
+      for (const item of ordered) {
+        const current = this.groups.get(item.id)
+        if (current) Object.assign(current, { isPinned: item.isPinned, sortOrder: item.sortOrder })
+      }
+      return this.getAllGroups()
+    })
   }
 
   /**
@@ -677,6 +815,17 @@ export class SessionManager {
 
       const imported: SessionConfig[] = []
 
+      // Keep imported group membership and ordering while generating fresh IDs.
+      const importedGroupIds = new Map<string, string>()
+      if (Array.isArray(parsed.groups)) {
+        for (const group of sortSessionGroups(parsed.groups)) {
+          if (group.name) {
+            const created = await this.createGroup(group.name, undefined, { isPinned: group.isPinned })
+            importedGroupIds.set(group.id, created.id)
+          }
+        }
+      }
+
       for (const session of parsed.sessions) {
         // 验证必需字段
         if (!session.name || !session.host || !session.username) {
@@ -688,21 +837,13 @@ export class SessionManager {
         const { id: _id, createdAt: _c, updatedAt: _u, ...sessionRest } = session as any
         const newSession = await this.createSession({
           ...sessionRest,
+          group: importedGroupIds.get(session.group),
           port: session.port || 22,
           authType: session.authType || 'password',
           expiryDate: session.expiryDate ? new Date(session.expiryDate) : undefined,
         })
 
         imported.push(newSession)
-      }
-
-      // 导入分组
-      if (parsed.groups && Array.isArray(parsed.groups)) {
-        for (const group of parsed.groups) {
-          if (group.name) {
-            await this.createGroup(group.name)
-          }
-        }
       }
 
       return imported

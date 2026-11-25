@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <title>MShell 实时监控验证</title>
+  </head>
+  <body>
+    <div id="preview"></div>
+    <script type="module">
+      import { createApp, h, ref } from 'vue'
+      import Panel from '/src/components/Monitor/ServerMonitorPanel.vue'
+      import '/src/styles/variables.css'
+
+      // Local synthetic samples only: this fixture does not connect to any server.
+      const listeners = new Set()
+      const narrow = ref(false)
+      let timer,
+        interval = 1000,
+        step = 0,
+        failure = '',
+        latest
+      const snapshot = () => {
+        const stamp = new Date().toISOString()
+        step++
+        const cpu = 32 + Math.sin(step / 3) * 26
+        const sourceTime = (name, period) => {
+          const previous = latest?.sources[name].timestamp
+          return step === 1 || !previous || Date.now() - Date.parse(previous) >= period
+            ? stamp
+            : previous
+        }
+        return {
+          sessionId: 'preview',
+          timestamp: stamp,
+          interval,
+          sampleIntervalMs: step === 1 ? null : interval,
+          collectionDurationMs: 78,
+          connection: 'connected',
+          cpu: { usage: step === 1 ? null : cpu, cores: 4, loadAverage: [1.21, 0.82, 0.55] },
+          memory: {
+            total: 8 * 1024 ** 3,
+            used: 3.5 * 1024 ** 3,
+            available: 4.5 * 1024 ** 3,
+            free: 2 * 1024 ** 3,
+            usage: 43.75
+          },
+          disk: {
+            total: 100 * 1024 ** 3,
+            used: 33 * 1024 ** 3,
+            free: 67 * 1024 ** 3,
+            usage: 33,
+            filesystems: [
+              { filesystem: '/dev/vda1', mount: '/', total: 100, used: 33, free: 67, usage: 33 }
+            ]
+          },
+          network: {
+            bytesIn: 13 * 1024 ** 3,
+            bytesOut: 4 * 1024 ** 3,
+            packetsIn: 900,
+            packetsOut: 300,
+            speedIn: step === 1 ? null : 320000 + Math.max(0, Math.sin(step)) * 900000,
+            speedOut: step === 1 ? null : 120000
+          },
+          processes: { total: 126, running: 3, sleeping: 123, zombie: 0 },
+          topProcesses: [
+            { pid: 2180, user: 'root', command: 'node', cpu: cpu * 2, memory: 12.3 },
+            { pid: 590, user: '1000', command: 'postgres', cpu: 3.5, memory: 23.2 },
+            { pid: 712, user: 'root', command: 'nginx', cpu: 1.4, memory: 0.5 },
+            { pid: 940, user: 'root', command: 'dockerd', cpu: 0.7, memory: 2.1 }
+          ],
+          dockerContainers: [
+            {
+              name: 'web-api',
+              status: 'Up 3 days',
+              cpu: '12.4%',
+              memory: '8.1%',
+              netIO: '3MB / 5MB'
+            }
+          ],
+          system: {
+            uptime: 360000 + step,
+            hostname: 'preview-linux',
+            platform: 'Linux',
+            kernel: '6.8.0'
+          },
+          sources: {
+            core: { timestamp: stamp },
+            disk: { timestamp: sourceTime('disk', 10000) },
+            docker: {
+              timestamp: sourceTime('docker', 5000),
+              available: true
+            }
+          }
+        }
+      }
+      const publish = () => listeners.forEach((callback) => callback('preview', latest))
+      const tick = () => {
+        if (failure) {
+          if (latest) {
+            latest = {
+              ...latest,
+              connection: failure === 'disconnect' ? 'waiting' : 'connected',
+              sources: {
+                ...latest.sources,
+                core: {
+                  ...latest.sources.core,
+                  error:
+                    failure === 'disconnect'
+                      ? 'SSH 已断开，重连后自动恢复监控'
+                      : '监控采集超时（8 秒），将自动重试'
+                }
+              }
+            }
+            publish()
+          }
+        } else {
+          latest = snapshot()
+          publish()
+        }
+      }
+      window.electronAPI = {
+        serverMonitor: {
+          async start(_id, config) {
+            interval = config.interval
+            clearInterval(timer)
+            step = 0
+            failure = ''
+            tick()
+            timer = setInterval(tick, interval)
+            return { success: true }
+          },
+          async stop() {
+            clearInterval(timer)
+            return { success: true }
+          },
+          async updateConfig(_id, config) {
+            interval = config.interval
+            clearInterval(timer)
+            timer = setInterval(tick, interval)
+            return { success: true }
+          },
+          async refresh() {
+            tick()
+            return { success: true, data: latest }
+          },
+          onMetrics(callback) {
+            listeners.add(callback)
+            return () => listeners.delete(callback)
+          },
+          onError() {
+            return () => {}
+          }
+        }
+      }
+      createApp({
+        render: () =>
+          h('main', [
+            h(
+              'section',
+              { class: 'preview-panel', style: { width: narrow.value ? '340px' : '460px' } },
+              [h(Panel, { sessionId: 'preview' })]
+            ),
+            h('aside', [
+              h('h1', '实时监控 · 本地验证'),
+              h('p', '此页使用模拟数据验证界面，不连接真实服务器。'),
+              h('p', '可切换刷新频率、暂停查看进程、按 PID 搜索或按内存排序。'),
+              h(
+                'button',
+                {
+                  onClick: () => {
+                    failure = 'timeout'
+                    tick()
+                  }
+                },
+                '模拟采集超时'
+              ),
+              h(
+                'button',
+                {
+                  onClick: () => {
+                    failure = 'disconnect'
+                    tick()
+                  }
+                },
+                '模拟 SSH 断线'
+              ),
+              h(
+                'button',
+                {
+                  onClick: () => {
+                    failure = ''
+                    step = 0
+                    tick()
+                  }
+                },
+                '恢复采样'
+              ),
+              h(
+                'button',
+                {
+                  onClick: () => {
+                    document.documentElement.classList.toggle('light-theme')
+                    document.documentElement.classList.toggle('dark')
+                  }
+                },
+                '切换深浅色'
+              ),
+              h(
+                'button',
+                {
+                  onClick: () => {
+                    narrow.value = !narrow.value
+                  }
+                },
+                '切换侧栏宽度'
+              ),
+              h('p', '磁盘每 10 秒、Docker 每 5 秒更新；基础数据不等待慢查询。')
+            ])
+          ])
+      }).mount('#preview')
+    </script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: var(--text-primary);
+        background: var(--bg-main);
+        font:
+          14px 'Segoe UI',
+          sans-serif;
+      }
+      main {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 32px;
+        justify-content: center;
+        padding: 28px;
+      }
+      .preview-panel {
+        width: 440px;
+        max-width: 100%;
+        height: 800px;
+        border: 1px solid var(--border-color);
+      }
+      .preview-panel .server-monitor-panel.compact {
+        width: 100%;
+      }
+      aside {
+        width: 340px;
+      }
+      h1 {
+        font-size: 22px;
+      }
+      p {
+        line-height: 1.7;
+        color: var(--text-secondary);
+      }
+      aside button {
+        border: 1px solid var(--border-color);
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        padding: 8px 12px;
+        margin: 0 8px 8px 0;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+    </style>
+  </body>
+</html>

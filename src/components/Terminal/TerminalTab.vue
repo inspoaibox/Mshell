@@ -43,6 +43,8 @@
               <el-checkbox v-model="toolbarConfig.monitor" size="small">监控</el-checkbox>
               <el-checkbox v-model="toolbarConfig.docker" size="small">Docker</el-checkbox>
               <el-checkbox v-model="toolbarConfig.firewall" size="small">防火墙</el-checkbox>
+              <el-checkbox v-model="toolbarConfig.fail2ban" size="small">Fail2Ban</el-checkbox>
+              <el-checkbox v-model="toolbarConfig.ports" size="small">端口管理</el-checkbox>
               <el-checkbox v-model="toolbarConfig.file" size="small">文件管理</el-checkbox>
               <el-checkbox v-model="toolbarConfig.ai" size="small">AI 助手</el-checkbox>
               <el-checkbox v-model="toolbarConfig.quickCommand" size="small">快捷命令</el-checkbox>
@@ -283,7 +285,7 @@
         <!-- 防火墙管理 -->
         <el-tooltip
           v-if="toolbarConfig.firewall"
-          :content="showFirewallPanel ? '关闭防火墙' : '防火墙管理'"
+          :content="showFirewallPanel ? '关闭防火墙面板' : '防火墙管理'"
           placement="bottom"
         >
           <el-button
@@ -293,6 +295,38 @@
             @click="toggleToolDockPanel('firewall')"
             class="action-btn"
             :class="{ 'is-active': showFirewallPanel }"
+          />
+        </el-tooltip>
+
+        <!-- Fail2Ban -->
+        <el-tooltip
+          v-if="toolbarConfig.fail2ban"
+          :content="showFail2BanPanel ? '关闭 Fail2Ban 面板' : 'Fail2Ban 管理'"
+          placement="bottom"
+        >
+          <el-button
+            type="primary"
+            link
+            :icon="Aim"
+            @click="toggleToolDockPanel('fail2ban')"
+            class="action-btn"
+            :class="{ 'is-active': showFail2BanPanel }"
+          />
+        </el-tooltip>
+
+        <!-- 端口管理 -->
+        <el-tooltip
+          v-if="toolbarConfig.ports"
+          :content="showPortPanel ? '关闭端口管理' : '端口管理'"
+          placement="bottom"
+        >
+          <el-button
+            type="primary"
+            link
+            :icon="Connection"
+            @click="toggleToolDockPanel('ports')"
+            class="action-btn"
+            :class="{ 'is-active': showPortPanel }"
           />
         </el-tooltip>
       </div>
@@ -341,6 +375,14 @@
       </div>
     </transition>
 
+    <TerminalSearch
+      v-model:visible="showSearch"
+      :result="searchResult"
+      @search="handleSearch"
+      @find-next="handleFindNext"
+      @find-previous="handleFindPrevious"
+      @close="terminalRef?.focus()"
+    />
     <div class="terminal-body">
       <div
         class="terminal-content"
@@ -351,6 +393,8 @@
           'with-file': showFilePanel,
           'with-docker': showDockerPanel,
           'with-firewall': showFirewallPanel,
+          'with-fail2ban': showFail2BanPanel,
+          'with-ports': showPortPanel,
           'with-snippet': showSnippetDialog,
           'with-quick-command': showQuickCommand,
           'has-terminal-background': hasEffectiveTerminalBackground
@@ -372,23 +416,20 @@
           :connection-id="connectionId"
           :session-name="session?.name"
           :options="effectiveTerminalOptions"
+          :search-visible="showSearch"
+          :intelligence="commandIntelligenceSettings"
           ref="terminalRef"
           @input="handleTerminalInput"
           @data="handleTerminalData"
           @cursor-position="handleCursorPosition"
           @ai-request="handleAIRequest"
           @ssh-output="handleSSHOutput"
+          @search-result="searchResult = $event"
         />
         <div v-else class="connecting-overlay">
           <div class="loader"></div>
           <div class="loading-text">Connecting to {{ session?.host }}...</div>
         </div>
-        <TerminalSearch
-          v-model:visible="showSearch"
-          @search="handleSearch"
-          @find-next="handleFindNext"
-          @find-previous="handleFindPrevious"
-        />
         <!-- 命令自动补全 -->
         <CommandAutocomplete
           ref="autocompleteRef"
@@ -396,6 +437,7 @@
           :input="autocompleteInput"
           :cursor-position="autocompleteCursorPosition"
           :session-id="connectionId"
+          :cwd="currentWorkingDir"
           @select="handleAutocompleteSelect"
           @close="showAutocomplete = false"
         />
@@ -416,6 +458,7 @@
           :query="aiCommandQuery"
           :position="autocompleteCursorPosition"
           :session-id="connectionId"
+          :cwd="currentWorkingDir"
           @execute="handleAICommandExecute"
           @edit="handleAICommandEdit"
           @close="showAICommandSuggest = false"
@@ -441,12 +484,12 @@
 
         <!-- 服务器监控面板 -->
         <div v-if="showMonitor" class="monitor-sidebar">
-          <ServerMonitorPanel :session-id="connectionId" @close="showMonitor = false" />
+          <ServerMonitorPanel :session-id="connectionId" :host-key="monitorHostKey" :active="appStore.activeView === 'sessions'" @close="showMonitor = false" />
         </div>
 
         <!-- Docker 管理面板 -->
         <div v-if="showDockerPanel" class="docker-sidebar">
-          <DockerPanel :connection-id="connectionId" @close="showDockerPanel = false" />
+          <DockerPanel :connection-id="connectionId" :active="appStore.activeView === 'sessions'" @close="showDockerPanel = false" />
         </div>
 
         <!-- 终端 AI 助手面板 -->
@@ -480,7 +523,17 @@
 
         <!-- 防火墙管理面板 -->
         <div v-if="showFirewallPanel" class="firewall-sidebar">
-          <FirewallPanel :connection-id="connectionId" @close="showFirewallPanel = false" />
+          <FirewallPanel :connection-id="connectionId" :active="appStore.activeView === 'sessions'" @close="showFirewallPanel = false" />
+        </div>
+
+        <!-- Fail2Ban 管理面板 -->
+        <div v-if="showFail2BanPanel" class="fail2ban-sidebar">
+          <Fail2BanPanel :connection-id="connectionId" :active="appStore.activeView === 'sessions'" @close="showFail2BanPanel = false" />
+        </div>
+
+        <!-- 端口管理面板 -->
+        <div v-if="showPortPanel" class="ports-sidebar">
+          <PortPanel :connection-id="connectionId" :active="appStore.activeView === 'sessions'" @close="showPortPanel = false" />
         </div>
 
         <!-- 命令片段面板 -->
@@ -618,9 +671,11 @@ import {
   CopyDocument,
   Picture,
   Box,
-  Lock
+  Aim,
+  Lock,
+  Connection
 } from '@element-plus/icons-vue'
-import { ElMessage, ElNotification } from 'element-plus'
+import { ElMessage, ElNotification, ElMessageBox } from 'element-plus'
 import TerminalView from './TerminalView.vue'
 import TerminalSearch from './TerminalSearch.vue'
 import CommandAutocomplete from './CommandAutocomplete.vue'
@@ -628,6 +683,8 @@ import CommandHistoryPanel from './CommandHistoryPanel.vue'
 import ServerMonitorPanel from '../Monitor/ServerMonitorPanel.vue'
 import DockerPanel from '../Docker/DockerPanel.vue'
 import FirewallPanel from '../Firewall/FirewallPanel.vue'
+import Fail2BanPanel from '../Fail2Ban/Fail2BanPanel.vue'
+import PortPanel from '../Ports/PortPanel.vue'
 import TerminalAIChatPanel from '../AI/TerminalAIChatPanel.vue'
 import TerminalFilePanel from './TerminalFilePanel.vue'
 import QuickCommandPanel from './QuickCommandPanel.vue'
@@ -641,6 +698,8 @@ import {
   shouldShowInlineSuggestion
 } from '@/utils/autocomplete/inline-suggest'
 import { isExplainQuery, parseExplainQuery } from '@/utils/command-intelligence'
+import { executeSuggestedCommand } from '@/utils/ai-command'
+import { completionHistory } from '@/utils/autocomplete/history'
 import {
   buildTerminalExecutePayload,
   buildTerminalInsertPayload
@@ -657,6 +716,7 @@ import {
   type TerminalBackgroundConfig
 } from '@/types/terminal-background'
 import { useAppStore } from '@/stores/app'
+import { emptySearchResult } from '@/utils/terminal-search'
 
 // 全局连接跟踪 - 防止重复连接（使用 Map 存储每个 connectionId 的状态，避免模块级 Set 在 HMR 时不清空的问题）
 const globalConnectionState = new Map<string, 'connecting' | 'connected'>()
@@ -733,12 +793,20 @@ const showFilePanel = ref(false)
 const showQuickCommand = ref(false)
 const showDockerPanel = ref(false)
 const showFirewallPanel = ref(false)
+const showFail2BanPanel = ref(false)
+const showPortPanel = ref(false)
+// 安全监控的信任规则按主机保存
+const monitorHostKey = computed(() =>
+  props.session?.host ? `${props.session.host}:${props.session.port || 22}` : undefined
+)
 const hasExternalToolPanels = computed(
   () =>
     showCommandHistory.value ||
     showMonitor.value ||
     showDockerPanel.value ||
     showFirewallPanel.value ||
+    showFail2BanPanel.value ||
+    showPortPanel.value ||
     showTerminalAI.value ||
     showFilePanel.value ||
     showQuickCommand.value ||
@@ -758,7 +826,9 @@ const toolbarConfig = ref({
   file: true,
   ai: true,
   quickCommand: true,
-  firewall: true
+  firewall: true,
+  fail2ban: true,
+  ports: true
 })
 
 // 加载工具栏配置
@@ -842,6 +912,8 @@ type ToolDockPanel =
   | 'monitor'
   | 'docker'
   | 'firewall'
+  | 'fail2ban'
+  | 'ports'
   | 'file'
   | 'ai'
   | 'quickCommand'
@@ -852,6 +924,8 @@ const closeToolDockPanels = () => {
   showMonitor.value = false
   showDockerPanel.value = false
   showFirewallPanel.value = false
+  showFail2BanPanel.value = false
+  showPortPanel.value = false
   showFilePanel.value = false
   showTerminalAI.value = false
   showQuickCommand.value = false
@@ -869,6 +943,10 @@ const isToolDockPanelOpen = (panel: ToolDockPanel) => {
       return showDockerPanel.value
     case 'firewall':
       return showFirewallPanel.value
+    case 'fail2ban':
+      return showFail2BanPanel.value
+    case 'ports':
+      return showPortPanel.value
     case 'file':
       return showFilePanel.value
     case 'ai':
@@ -894,6 +972,12 @@ const openToolDockPanel = (panel: ToolDockPanel) => {
       break
     case 'firewall':
       showFirewallPanel.value = true
+      break
+    case 'fail2ban':
+      showFail2BanPanel.value = true
+      break
+    case 'ports':
+      showPortPanel.value = true
       break
     case 'file':
       updateCurrentWorkingDir()
@@ -921,7 +1005,7 @@ const toggleFilePanel = () => {
 
 // 搜索相关状态
 const currentSearchTerm = ref('')
-const currentSearchOptions = ref({ caseSensitive: false, regex: false })
+const searchResult = ref(emptySearchResult())
 
 // 主题相关
 const availableThemes = themes
@@ -1548,7 +1632,7 @@ onMounted(async () => {
   const handleKeyDown = (e: KeyboardEvent) => {
     // 首先检查当前标签页是否激活，避免多标签页时的事件冲突
     // 只有当前激活的标签页才处理键盘事件
-    if (appStore.activeTab !== props.connectionId) {
+    if (appStore.activeTab !== props.connectionId || appStore.activeView !== 'sessions' || e.isComposing) {
       return // 不是当前激活的标签页，不处理
     }
 
@@ -1556,12 +1640,23 @@ onMounted(async () => {
       return
     }
 
+    if (!terminalRef.value?.canUseIntelligence?.()) { clearAllIntelligenceStates(); return }
+
     // 0. 命令解释模式
     if (showCommandExplain.value) {
+      if (e.key === 'Enter') {
+        e.preventDefault(); e.stopPropagation()
+        const text = terminalRef.value?.getInputSnapshot?.()?.text
+        if (text?.trimStart().startsWith('?')) terminalRef.value?.replaceIntelligenceInput?.('', text)
+        clearAllIntelligenceStates()
+        return
+      }
       if (e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
-        showCommandExplain.value = false
+        const text = terminalRef.value?.getInputSnapshot?.()?.text
+        if (text?.trimStart().startsWith('?')) terminalRef.value?.replaceIntelligenceInput?.('', text)
+        clearAllIntelligenceStates()
         return
       }
       return
@@ -1574,7 +1669,7 @@ onMounted(async () => {
         e.stopPropagation()
         // 检查是否正在加载或没有建议
         const isLoading = aiCommandSuggestRef.value?.isLoading?.()
-        const suggestion = aiCommandSuggestRef.value?.getSuggestion?.()
+        const suggestion = aiCommandSuggestRef.value?.getSuggestion?.(terminalRef.value?.getInputSnapshot?.()?.text.slice(1).trim())
         if (!isLoading && suggestion) {
           handleAICommandExecute(suggestion)
         }
@@ -1584,7 +1679,7 @@ onMounted(async () => {
         e.preventDefault()
         e.stopPropagation()
         const isLoading = aiCommandSuggestRef.value?.isLoading?.()
-        const suggestion = aiCommandSuggestRef.value?.getSuggestion?.()
+        const suggestion = aiCommandSuggestRef.value?.getSuggestion?.(terminalRef.value?.getInputSnapshot?.()?.text.slice(1).trim())
         if (!isLoading && suggestion) {
           handleAICommandEdit(suggestion)
         }
@@ -1593,15 +1688,16 @@ onMounted(async () => {
       if (e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
-        showAICommandSuggest.value = false
-        aiCommandQuery.value = ''
+        const text = terminalRef.value?.getInputSnapshot?.()?.text
+        if (text?.startsWith('#')) terminalRef.value?.replaceIntelligenceInput?.('', text)
+        clearAllIntelligenceStates()
         return
       }
       return
     }
 
     // 2. Ghost Text 模式 - Tab 接受补全（不拦截 ArrowRight，避免与光标移动冲突）
-    if (showGhostText.value && ghostText.value) {
+    if (showGhostText.value && ghostText.value && !autocompleteRef.value?.hasActiveSelection?.()) {
       if (e.key === 'Tab') {
         e.preventDefault()
         e.stopPropagation()
@@ -1796,10 +1892,6 @@ onUnmounted(async () => {
   reconnectListenerCleanups.length = 0
 
   // 清理 AI 建议防抖定时器
-  if (aiSuggestDebounceTimer) {
-    clearTimeout(aiSuggestDebounceTimer)
-    aiSuggestDebounceTimer = null
-  }
 
   // 清理所有智能功能状态，避免状态污染
   clearAllIntelligenceStates()
@@ -1937,7 +2029,6 @@ const handleThemeChange = async (themeName: string) => {
 
 const handleSearch = (term: string, options: { caseSensitive: boolean; regex: boolean }) => {
   currentSearchTerm.value = term
-  currentSearchOptions.value = options
   if (terminalRef.value) {
     terminalRef.value.search(term, options)
   }
@@ -1945,13 +2036,13 @@ const handleSearch = (term: string, options: { caseSensitive: boolean; regex: bo
 
 const handleFindNext = () => {
   if (terminalRef.value && currentSearchTerm.value) {
-    terminalRef.value.findNext(currentSearchTerm.value, currentSearchOptions.value)
+    terminalRef.value.findNext()
   }
 }
 
 const handleFindPrevious = () => {
   if (terminalRef.value && currentSearchTerm.value) {
-    terminalRef.value.findPrevious(currentSearchTerm.value, currentSearchOptions.value)
+    terminalRef.value.findPrevious()
   }
 }
 
@@ -2064,11 +2155,12 @@ const executeSnippet = async () => {
 }
 
 // AI 命令建议防抖定时器
-let aiSuggestDebounceTimer: ReturnType<typeof setTimeout> | null = null
-const CLEAR_CURRENT_TERMINAL_LINE = '\x15\x0b'
+const aiExecuting = ref(false)
 
 // 清除所有智能功能状态（用于模式切换时避免状态污染）
 const clearAllIntelligenceStates = (except?: 'autocomplete' | 'aiSuggest' | 'explain') => {
+  ghostTextRequestId++
+  ghostFullText.value = ''
   if (except !== 'autocomplete') {
     showAutocomplete.value = false
     autocompleteInput.value = '' // 同时清空输入，避免状态不一致
@@ -2080,10 +2172,7 @@ const clearAllIntelligenceStates = (except?: 'autocomplete' | 'aiSuggest' | 'exp
   if (except !== 'aiSuggest') {
     showAICommandSuggest.value = false
     aiCommandQuery.value = ''
-    if (aiSuggestDebounceTimer) {
-      clearTimeout(aiSuggestDebounceTimer)
-      aiSuggestDebounceTimer = null
-    }
+    aiCommandSuggestRef.value?.invalidate?.()
   }
   if (except !== 'explain') {
     showCommandExplain.value = false
@@ -2095,153 +2184,46 @@ const clearAllIntelligenceStates = (except?: 'autocomplete' | 'aiSuggest' | 'exp
 
 // 处理终端输入（用于智能补全）
 const handleTerminalInput = async (input: string) => {
-  // 保存原始输入用于各种模式判断
-  const rawInput = input
-
-  if (
-    !rawInput ||
-    rawInput === '\r' ||
-    rawInput === '\n' ||
-    rawInput === '\x03' ||
-    rawInput === '\x15'
-  ) {
-    ghostTextRequestId++
+  ghostTextRequestId++
+  if (!input || !terminalRef.value?.canUseIntelligence?.()) {
     clearAllIntelligenceStates()
     return
   }
-
-  // 0. 命令解释模式 (? 开头或结尾) - 需要检查开关
-  if (commandIntelligenceSettings.value.commandExplain && isExplainQuery(rawInput)) {
-    const command = parseExplainQuery(rawInput)
-    if (command && command.length >= 2) {
-      // 清除其他所有状态，避免状态污染
-      clearAllIntelligenceStates('explain')
-      // 不更新 autocompleteInput，因为命令解释模式不需要补全
-      explainCommand.value = command
-      showCommandExplain.value = true
-      return
-    }
-  } else {
-    // 不是解释查询，关闭解释面板
-    if (showCommandExplain.value) {
-      showCommandExplain.value = false
-    }
-  }
-
-  // 1. AI 命令模式 (# 开头) - 检查开关
-  if (rawInput.startsWith('#') && commandIntelligenceSettings.value.aiCommandSuggest) {
-    const query = rawInput.substring(1).trim()
-
-    // 更新 autocompleteInput 以便执行时能正确清除输入
-    autocompleteInput.value = rawInput
-
-    // 只有当 query 有实际内容时才显示 AI 建议
-    if (query.length >= 2) {
-      // 清除其他状态
-      clearAllIntelligenceStates('aiSuggest')
-
-      // 防抖：用户停止输入 800ms 后才触发 AI 请求
-      if (aiSuggestDebounceTimer) {
-        clearTimeout(aiSuggestDebounceTimer)
-      }
-
-      // 立即显示面板（显示加载状态）
-      showAICommandSuggest.value = true
-
-      aiSuggestDebounceTimer = setTimeout(() => {
-        // 只有当 query 真正变化时才更新（触发 AI 请求）
-        if (aiCommandQuery.value !== query) {
-          aiCommandQuery.value = query
-        }
-      }, 800)
-    } else {
-      // query 太短，隐藏 AI 建议但不显示其他补全
-      clearAllIntelligenceStates()
-    }
+  currentWorkingDir.value = terminalManager.get(props.connectionId)?.inputState.cwd || ''
+  if (commandIntelligenceSettings.value.commandExplain && isExplainQuery(input)) {
+    clearAllIntelligenceStates('explain')
+    explainCommand.value = parseExplainQuery(input) || ''
+    showCommandExplain.value = !!explainCommand.value
     return
-  } else if (rawInput.startsWith('#') && !commandIntelligenceSettings.value.aiCommandSuggest) {
-    // AI 命令建议已关闭，不处理 # 开头的输入
-    clearAllIntelligenceStates()
-    return
-  } else {
-    // 不是 # 开头，清除 AI 建议状态
-    if (showAICommandSuggest.value) {
-      showAICommandSuggest.value = false
-      aiCommandQuery.value = ''
-    }
-    if (aiSuggestDebounceTimer) {
-      clearTimeout(aiSuggestDebounceTimer)
-      aiSuggestDebounceTimer = null
-    }
   }
-
-  // 如果命令补全已关闭，直接返回
+  if (input.startsWith('#')) {
+    clearAllIntelligenceStates('aiSuggest')
+    const query = input.slice(1).trim()
+    aiCommandQuery.value = query
+    showAICommandSuggest.value = commandIntelligenceSettings.value.aiCommandSuggest && query.length >= 2
+    return
+  }
+  clearAllIntelligenceStates('autocomplete')
   if (!commandIntelligenceSettings.value.commandAutocomplete) {
     showAutocomplete.value = false
-    autocompleteInput.value = '' // 同时清空输入
-    showGhostText.value = false
+    autocompleteInput.value = ''
     return
   }
-
-  // 从这里开始，更新 autocompleteInput（仅用于补全模式）
-  autocompleteInput.value = rawInput
-
-  // 2. 快捷命令模式 (/ 开头) - 检查开关
-  if (rawInput.startsWith('/') && commandIntelligenceSettings.value.commandAutocomplete) {
-    showGhostText.value = false
-    showAutocomplete.value = true
-    return
-  } else if (rawInput.startsWith('/')) {
-    // 命令补全已关闭
-    showAutocomplete.value = false
-    showGhostText.value = false
-    return
-  }
-
-  // 3. 内联预览补全 (Ghost Text) - 检查开关
-  if (
-    commandIntelligenceSettings.value.commandAutocomplete &&
-    shouldShowInlineSuggestion(rawInput)
-  ) {
-    const currentRequestId = ++ghostTextRequestId
-    try {
-      const suggestion = await getInlineSuggestion(rawInput, props.connectionId)
-      // 检查请求是否过期
-      if (currentRequestId !== ghostTextRequestId) return
-
-      if (suggestion && suggestion.ghostText) {
-        ghostText.value = suggestion.ghostText
-        ghostFullText.value = suggestion.text
-        showGhostText.value = true
-      } else {
-        showGhostText.value = false
-        ghostText.value = ''
-      }
-    } catch (e) {
-      if (currentRequestId === ghostTextRequestId) {
-        showGhostText.value = false
-      }
+  autocompleteInput.value = input
+  showAutocomplete.value = input.length >= 2 || input.startsWith('/')
+  if (!shouldShowInlineSuggestion(input)) return
+  const requestId = ghostTextRequestId
+  try {
+    const suggestion = await getInlineSuggestion(input, props.connectionId)
+    if (requestId !== ghostTextRequestId || !commandIntelligenceSettings.value.commandAutocomplete ||
+      !terminalRef.value?.canUseIntelligence?.() || terminalRef.value.getInputSnapshot?.()?.text !== input) return
+    if (suggestion?.ghostText) {
+      ghostText.value = suggestion.ghostText
+      ghostFullText.value = suggestion.text
+      showGhostText.value = true
     }
-  } else {
-    showGhostText.value = false
-    ghostText.value = ''
-  }
-
-  // 4. 弹窗补全（与内联预览共存）- 检查开关
-  if (commandIntelligenceSettings.value.commandAutocomplete) {
-    const shouldShowPopup =
-      rawInput &&
-      rawInput.length > 0 &&
-      !rawInput.endsWith('\n') &&
-      !rawInput.endsWith('\r') &&
-      rawInput.length >= 2
-
-    if (shouldShowPopup) {
-      // 显示补全时清除其他状态
-    }
-    showAutocomplete.value = Boolean(shouldShowPopup)
-  } else {
-    showAutocomplete.value = false
+  } catch {
+    if (requestId === ghostTextRequestId) { showGhostText.value = false; ghostText.value = '' }
   }
 }
 
@@ -2259,157 +2241,69 @@ const handleCursorPosition = (position: { x: number; y: number }) => {
 }
 
 // 处理补全选择
-const handleAutocompleteSelect = (text: string) => {
-  if (terminalRef.value) {
-    // 获取当前输入
-    const currentInput = autocompleteInput.value
-
-    // 计算需要删除的字符数
-    let deleteCount = 0
-
-    // 如果是快捷命令（以 / 开头），需要删除整个快捷命令
-    if (currentInput.startsWith('/')) {
-      deleteCount = currentInput.length
-    } else {
-      // 常规补全：只删除当前单词
-      const words = currentInput.split(/\s+/)
-      const lastWord = words[words.length - 1]
-      deleteCount = lastWord.length
-    }
-    // 发送退格删除当前单词，然后发送新文本
-    // 使用 \x7f (DEL) 或 \b 来删除字符
-    const backspaces = '\x7f'.repeat(deleteCount)
-    window.electronAPI.ssh.write(props.connectionId, backspaces + text)
-
-    // 计算补全后的完整命令并更新终端的命令缓冲
-    const newCommand = currentInput.slice(0, currentInput.length - deleteCount) + text
-    terminalRef.value.updateCommandBuffer?.(newCommand.trim())
-
-    // 如果是快捷命令，增加使用次数
-    if (currentInput.startsWith('/')) {
-      // 尝试找到对应的片段并增加使用次数
-      window.electronAPI.snippet?.getByShortcut?.(currentInput).then((result) => {
-        if (result?.success && result.data) {
-          window.electronAPI.snippet?.incrementUsage?.(result.data.id)
-        }
-      })
-    }
-
-    // 自动聚焦终端
-    setTimeout(() => {
-      if (terminalRef.value) {
-        terminalRef.value.focus()
-      }
-    }, 50)
-
-    // --- 连续补全逻辑 (Continuous Completion) ---
-    // 如果补全文本自带空格 (如 "restart ")，说明用户可能需要立即补全下一个参数
-    // 我们手动更新 input 状态，并保持弹窗打开
-    // 注意：需要检查 commandAutocomplete 开关是否开启
-    if (text.endsWith(' ') && commandIntelligenceSettings.value.commandAutocomplete) {
-      autocompleteInput.value = newCommand
-      // 确保符合显示条件 (非空等)，通常来说加上命令后肯定符合
-      showAutocomplete.value = true
-      return // 早期返回，跳过下面的关闭逻辑
-    }
-  }
-
-  // 默认：补全结束，关闭弹窗并清理状态
-  showAutocomplete.value = false
-  autocompleteInput.value = ''
-  showGhostText.value = false
-  ghostText.value = ''
-
-  // 强制重置 CommandAutocomplete 组件的所有状态，确保下次能正常触发
-  if (autocompleteRef.value) {
-    autocompleteRef.value.forceReset?.()
-  }
+const handleAutocompleteSelect = (command: string, sourceInput: string, snippetId?: string) => {
+  if (!commandIntelligenceSettings.value.commandAutocomplete || autocompleteInput.value !== sourceInput) return
+  if (!terminalRef.value?.replaceIntelligenceInput?.(command, sourceInput)) return
+  clearAllIntelligenceStates()
+  if (snippetId) void window.electronAPI.snippet.incrementUsage(snippetId)
+  terminalRef.value.focus()
+  void handleTerminalInput(command)
 }
 
-// 处理 Ghost Text 接受（Tab 或 → 键）
 const acceptGhostText = () => {
-  if (!showGhostText.value || !ghostText.value) return false
-
-  // 发送补全文本到终端
-  window.electronAPI.ssh.write(props.connectionId, ghostText.value)
-
-  // 更新命令缓冲
-  if (terminalRef.value) {
-    terminalRef.value.updateCommandBuffer?.(ghostFullText.value)
-  }
-
-  // 清除 ghost text
-  showGhostText.value = false
-  ghostText.value = ''
-  ghostFullText.value = ''
-
+  if (!commandIntelligenceSettings.value.commandAutocomplete || !showGhostText.value || !ghostText.value) return false
+  const source = autocompleteInput.value
+  const command = ghostFullText.value
+  if (!command.startsWith(source) || !terminalRef.value?.replaceIntelligenceInput?.(command, source)) return false
+  clearAllIntelligenceStates()
   return true
 }
 
-// 处理 AI 命令执行
 const handleAICommandExecute = async (command: string) => {
-  if (!command) return
-
-  // 使用 Ctrl+U + Ctrl+K 清除光标前后内容，然后发送新命令
-  // \x15 = Ctrl+U (清除光标前的所有内容)
-  // \x0b = Ctrl+K (清除光标后的所有内容)
-  const inst = terminalManager.get(props.connectionId)
-  window.electronAPI.ssh.write(
-    props.connectionId,
-    CLEAR_CURRENT_TERMINAL_LINE +
-      buildTerminalExecutePayload(command, inst?.bracketedPasteEnabled ?? false)
-  )
-
-  // 记录 AI 生成的命令到历史
+  if (aiExecuting.value || !commandIntelligenceSettings.value.aiCommandSuggest || !terminalRef.value?.canUseIntelligence?.()) return
+  const snapshot = terminalRef.value.getInputSnapshot()
+  if (!snapshot || !snapshot.text.startsWith('#')) return
+  const query = snapshot.text.slice(1).trim()
+  if (aiCommandSuggestRef.value?.getSuggestion?.(query) !== command) return
+  aiExecuting.value = true
   try {
-    await window.electronAPI.commandHistory?.add?.({
-      command,
-      sessionId: props.connectionId,
-      sessionName: props.session.name || 'Unknown Session',
-      duration: undefined
+    const executed = await executeSuggestedCommand(command, snapshot, {
+      snapshot: () => terminalRef.value?.getInputSnapshot?.(),
+      isCurrent: () => commandIntelligenceSettings.value.aiCommandSuggest &&
+        aiCommandSuggestRef.value?.getSuggestion?.(query) === command && !!terminalRef.value?.canUseIntelligence?.(),
+      confirm: () => ElMessageBox.confirm(command, '确认执行可能改变系统或数据的命令', {
+        type: 'warning', confirmButtonText: '执行此命令', cancelButtonText: '取消', closeOnClickModal: false
+      }),
+      write: () => !!terminalRef.value?.replaceIntelligenceInput?.(command, snapshot.text, true)
     })
+    if (executed) {
+      clearAllIntelligenceStates()
+      terminalRef.value.focus()
+    }
   } catch (error) {
-    console.error('Failed to record AI command:', error)
-  }
-
-  // 更新命令缓冲
-  if (terminalRef.value) {
-    terminalRef.value.updateCommandBuffer?.('')
-  }
-
-  // 关闭 AI 建议
-  showAICommandSuggest.value = false
-  aiCommandQuery.value = ''
-  autocompleteInput.value = ''
-
-  // 聚焦终端
-  setTimeout(() => terminalRef.value?.focus(), 50)
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error instanceof Error ? error.message : String(error))
+  } finally { aiExecuting.value = false }
 }
 
-// 处理 AI 命令编辑（Tab 键）
 const handleAICommandEdit = (command: string) => {
-  if (!command) return
-
-  // 使用 Ctrl+U + Ctrl+K 清除当前行输入，然后发送新命令（不执行）
-  const inst = terminalManager.get(props.connectionId)
-  window.electronAPI.ssh.write(
-    props.connectionId,
-    CLEAR_CURRENT_TERMINAL_LINE + buildTerminalInsertPayload(command, inst?.bracketedPasteEnabled ?? false)
-  )
-
-  // 更新命令缓冲
-  if (terminalRef.value) {
-    terminalRef.value.updateCommandBuffer?.(command)
+  if (!commandIntelligenceSettings.value.aiCommandSuggest || !terminalRef.value?.canUseIntelligence?.()) return
+  const snapshot = terminalRef.value.getInputSnapshot()
+  if (!snapshot?.text.startsWith('#') || aiCommandSuggestRef.value?.getSuggestion?.(snapshot.text.slice(1).trim()) !== command) return
+  if (terminalRef.value.replaceIntelligenceInput(command, snapshot.text)) {
+    clearAllIntelligenceStates()
+    terminalRef.value.focus()
   }
-
-  // 关闭 AI 建议
-  showAICommandSuggest.value = false
-  aiCommandQuery.value = ''
-  autocompleteInput.value = command
-
-  // 聚焦终端
-  setTimeout(() => terminalRef.value?.focus(), 50)
 }
+
+watch(() => appStore.activeView, view => {
+  if (view !== 'sessions') clearAllIntelligenceStates()
+})
+watch(completionHistory, () => {
+  if (commandIntelligenceSettings.value.commandAutocomplete && terminalRef.value?.canUseIntelligence?.()) {
+    const text = terminalRef.value.getInputSnapshot?.()?.text
+    if (text && !text.startsWith('#') && !isExplainQuery(text)) void handleTerminalInput(text)
+  }
+})
 
 // 处理 SSH 输出（预留接口）
 const handleSSHOutput = (_output: string) => {
@@ -2800,6 +2694,14 @@ defineExpose({
   flex: 1;
 }
 
+.terminal-content.with-fail2ban {
+  flex: 1;
+}
+
+.terminal-content.with-ports {
+  flex: 1;
+}
+
 .terminal-content.with-snippet {
   flex: 1;
 }
@@ -2844,6 +2746,8 @@ defineExpose({
 .terminal-external-dock :deep(.server-monitor-panel),
 .terminal-external-dock :deep(.docker-panel),
 .terminal-external-dock :deep(.firewall-panel),
+.terminal-external-dock :deep(.fail2ban-panel),
+.terminal-external-dock :deep(.port-panel),
 .terminal-external-dock :deep(.terminal-ai-panel),
 .terminal-external-dock :deep(.terminal-file-panel),
 .terminal-external-dock :deep(.quick-command-panel) {
@@ -2858,6 +2762,8 @@ defineExpose({
 .terminal-external-dock :deep(.monitor-header),
 .terminal-external-dock :deep(.docker-header),
 .terminal-external-dock :deep(.firewall-header),
+.terminal-external-dock :deep(.fail2ban-header),
+.terminal-external-dock :deep(.port-header),
 .terminal-external-dock :deep(.chat-header),
 .terminal-external-dock .sidebar-header {
   min-height: 44px !important;
@@ -2874,6 +2780,8 @@ defineExpose({
 .terminal-external-dock :deep(.monitor-header h3),
 .terminal-external-dock :deep(.docker-header h3),
 .terminal-external-dock :deep(.firewall-header h3),
+.terminal-external-dock :deep(.fail2ban-header h3),
+.terminal-external-dock :deep(.port-header h3),
 .terminal-external-dock :deep(.chat-header .title),
 .terminal-external-dock .sidebar-header h3 {
   color: var(--text-primary) !important;
@@ -2903,6 +2811,16 @@ defineExpose({
 }
 
 .docker-sidebar {
+  display: flex;
+  flex-direction: column;
+}
+
+.ports-sidebar {
+  display: flex;
+  flex-direction: column;
+}
+
+.fail2ban-sidebar {
   display: flex;
   flex-direction: column;
 }

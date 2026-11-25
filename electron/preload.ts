@@ -5,12 +5,14 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('electronAPI', {
   // SSH operations
   ssh: {
+    protectInput: (id: string, token: string, enabled: boolean) => ipcRenderer.invoke('ssh:protectInput', id, token, enabled),
     connect: (id: string, options: any) => ipcRenderer.invoke('ssh:connect', id, options),
     disconnect: (id: string) => ipcRenderer.invoke('ssh:disconnect', id),
-    write: (id: string, data: string) => ipcRenderer.send('ssh:write', id, data),
+    write: (id: string, data: string, sensitive = false) => ipcRenderer.send('ssh:write', id, data, sensitive),
     executeCommand: (id: string, command: string, timeout?: number) =>
       ipcRenderer.invoke('ssh:executeCommand', id, command, timeout),
     getCurrentDirectory: (id: string) => ipcRenderer.invoke('ssh:getCurrentDirectory', id),
+    completePath: (id: string, input: string, cwd?: string) => ipcRenderer.invoke('ssh:completePath', id, input, cwd),
     resize: (id: string, cols: number, rows: number) =>
       ipcRenderer.send('ssh:resize', id, cols, rows),
     getConnection: (id: string) => ipcRenderer.invoke('ssh:getConnection', id),
@@ -62,12 +64,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     get: (id: string) => ipcRenderer.invoke('session:get', id),
     create: (config: any) => ipcRenderer.invoke('session:create', config),
     update: (id: string, updates: any) => ipcRenderer.invoke('session:update', id, updates),
+    updateOrder: (id: string, action: import('../src/types/session').SessionOrderAction) =>
+      ipcRenderer.invoke('session:updateOrder', id, action),
     delete: (id: string) => ipcRenderer.invoke('session:delete', id),
     export: (filePath: string) => ipcRenderer.invoke('session:export', filePath),
     import: (filePath: string) => ipcRenderer.invoke('session:import', filePath),
     createGroup: (name: string, description?: string) =>
       ipcRenderer.invoke('session:createGroup', name, description),
     getAllGroups: () => ipcRenderer.invoke('session:getAllGroups'),
+    updateGroupOrder: (groupId: string, action: import('../src/types/session').SessionGroupOrderAction) =>
+      ipcRenderer.invoke('session:updateGroupOrder', groupId, action),
     addToGroup: (sessionId: string, groupId: string) =>
       ipcRenderer.invoke('session:addToGroup', sessionId, groupId),
     renameGroup: (groupId: string, newName: string) =>
@@ -140,6 +146,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('sftp:readFile', connectionId, filePath),
     readFileBuffer: (connectionId: string, filePath: string) =>
       ipcRenderer.invoke('sftp:readFileBuffer', connectionId, filePath),
+    readFilePreview: (connectionId: string, filePath: string, maxBytes: number) =>
+      ipcRenderer.invoke('sftp:readFilePreview', connectionId, filePath, maxBytes),
+    realpath: (connectionId: string, path: string) =>
+      ipcRenderer.invoke('sftp:realpath', connectionId, path),
     writeFile: (connectionId: string, filePath: string, content: string) =>
       ipcRenderer.invoke('sftp:writeFile', connectionId, filePath, content),
     createFile: (connectionId: string, filePath: string) =>
@@ -175,6 +185,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const listener = (_event: any, taskId: string, error: string) => callback(taskId, error)
       ipcRenderer.on('sftp:error', listener)
       return () => ipcRenderer.removeListener('sftp:error', listener)
+    },
+    onPaused: (callback: (taskId: string) => void) => {
+      const listener = (_event: any, taskId: string) => callback(taskId)
+      ipcRenderer.on('sftp:paused', listener)
+      return () => ipcRenderer.removeListener('sftp:paused', listener)
+    },
+    onCancelled: (callback: (taskId: string) => void) => {
+      const listener = (_event: any, taskId: string) => callback(taskId)
+      ipcRenderer.on('sftp:cancelled', listener)
+      return () => ipcRenderer.removeListener('sftp:cancelled', listener)
     }
   },
 
@@ -243,6 +263,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Dialog operations
   dialog: {
     openFile: (options?: any) => ipcRenderer.invoke('dialog:openFile', options),
+    openFiles: (options?: any) => ipcRenderer.invoke('dialog:openFiles', options),
     saveFile: (options?: any) => ipcRenderer.invoke('dialog:saveFile', options),
     openDirectory: (options?: any) => ipcRenderer.invoke('dialog:openDirectory', options),
     showContextMenu: (menuItems: any[]) => ipcRenderer.invoke('dialog:showContextMenu', menuItems)
@@ -259,6 +280,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteFile: (filePath: string) => ipcRenderer.invoke('fs:deleteFile', filePath),
     rename: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
     stat: (filePath: string) => ipcRenderer.invoke('fs:stat', filePath),
+    listDrives: () => ipcRenderer.invoke('fs:listDrives'),
     writeFile: (filePath: string, content: string) =>
       ipcRenderer.invoke('fs:writeFile', filePath, content),
     compress: (sourcePath: string, archivePath: string) =>
@@ -284,6 +306,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       options?: any
     ) =>
       ipcRenderer.invoke('docker:containerBatchAction', connectionId, action, containerIds, options)
+  },
+
+  // Fail2Ban operations
+  fail2ban: {
+    getOverview: (connectionId: string) => ipcRenderer.invoke('fail2ban:getOverview', connectionId),
+    install: (connectionId: string) => ipcRenderer.invoke('fail2ban:install', connectionId),
+    unban: (connectionId: string, jail: string, ip: string) =>
+      ipcRenderer.invoke('fail2ban:unban', connectionId, jail, ip)
   },
 
   // Port forward operations
@@ -364,6 +394,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMostUsed: (limit?: number) => ipcRenderer.invoke('commandHistory:getMostUsed', limit),
     getRecentUnique: (limit?: number) =>
       ipcRenderer.invoke('commandHistory:getRecentUnique', limit),
+    onChanged: (callback: () => void) => {
+      const listener = () => callback()
+      ipcRenderer.on('commandHistory:changed', listener)
+      return () => ipcRenderer.removeListener('commandHistory:changed', listener)
+    },
     getToday: () => ipcRenderer.invoke('commandHistory:getToday'),
     getByTimeRange: (startDate: string, endDate: string) =>
       ipcRenderer.invoke('commandHistory:getByTimeRange', startDate, endDate),
@@ -461,6 +496,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Server Monitor operations
+  firewall: {
+    inspect: (id: string) => ipcRenderer.invoke('firewall:inspect', id),
+    apply: (id: string, action: unknown, context: unknown) => ipcRenderer.invoke('firewall:apply', id, action, context),
+    confirm: (id: string, token: string) => ipcRenderer.invoke('firewall:confirm', id, token),
+    onChanged: (callback: (id: string) => void) => {
+      const listener = (_event: unknown, id: string) => callback(id)
+      ipcRenderer.on('firewall:changed', listener)
+      return () => ipcRenderer.removeListener('firewall:changed', listener)
+    }
+  },
+
+  ports: {
+    inspect: (id: string) => ipcRenderer.invoke('ports:inspect', id),
+    close: (id: string, request: unknown) => ipcRenderer.invoke('ports:close', id, request)
+  },
   serverMonitor: {
     start: (sessionId: string, config?: any) =>
       ipcRenderer.invoke('serverMonitor:start', sessionId, config),
@@ -470,6 +520,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMonitoredSessions: () => ipcRenderer.invoke('serverMonitor:getMonitoredSessions'),
     updateConfig: (sessionId: string, config: any) =>
       ipcRenderer.invoke('serverMonitor:updateConfig', sessionId, config),
+    getSecurity: (sessionId: string) => ipcRenderer.invoke('serverMonitor:security', sessionId),
+    getSecurityDetails: (sessionId: string) =>
+      ipcRenderer.invoke('serverMonitor:securityDetails', sessionId),
     onMetrics: (callback: (sessionId: string, metrics: any) => void) => {
       const listener = (_event: any, sessionId: string, metrics: any) =>
         callback(sessionId, metrics)
@@ -745,6 +798,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
+  // IPMI / Redfish operations
+  ipmi: {
+    connect: (config: any) => ipcRenderer.invoke('ipmi:connect', config),
+    getInfo: (connectionId: string) => ipcRenderer.invoke('ipmi:getInfo', connectionId),
+    power: (connectionId: string, action: string) =>
+      ipcRenderer.invoke('ipmi:power', connectionId, action),
+    disconnect: (connectionId: string) => ipcRenderer.invoke('ipmi:disconnect', connectionId),
+    getStatus: (connectionId: string) => ipcRenderer.invoke('ipmi:getStatus', connectionId)
+  },
+
   // Update operations
   update: {
     check: () => ipcRenderer.invoke('update:check'),
@@ -825,6 +888,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Lazy Script operations
   lazyScript: {
+    deploy: (id: string, token: string, fileName: string, content: string, copyTo?: string) => ipcRenderer.invoke('lazyScript:deploy', id, token, fileName, content, copyTo),
+    cancelDeployment: (token: string) => ipcRenderer.invoke('lazyScript:cancelDeployment', token),
+    onChanged: (callback: () => void) => {
+      const listener = () => callback()
+      ipcRenderer.on('lazyScript:changed', listener)
+      return () => ipcRenderer.removeListener('lazyScript:changed', listener)
+    },
     getAll: () => ipcRenderer.invoke('lazyScript:getAll'),
     get: (id: string) => ipcRenderer.invoke('lazyScript:get', id),
     create: (data: any) => ipcRenderer.invoke('lazyScript:create', data),

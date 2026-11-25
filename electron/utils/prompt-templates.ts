@@ -102,7 +102,7 @@ export function buildPrompt(action: AIAction, content: string, language?: string
   let prompt = template.template
 
   // 替换变量
-  prompt = prompt.replace('{content}', content)
+  prompt = prompt.replace('{content}', () => content)
   prompt = prompt.replace(/{language}/g, language || 'unknown')
 
   return prompt

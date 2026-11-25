@@ -1095,7 +1095,7 @@
               <template #title>让 Codex、Claude 等 Agent 操作当前已连接的 SSH 会话</template>
               <template #default>
                 默认能力以只读为主：会话列表、连接状态、远程目录、远程文本文件和受限查询命令。
-                “查询”只允许读取；“确认”在写入前弹窗审批；“执行”允许连续修改。始终不暴露密码、私钥或
+                “查询”只允许读取；“确认”在写入前弹窗审批；“执行”允许连续修改。只读查询白名单在三种模式下都生效，切回“查询”会取消仍在等待或执行中的写请求。始终不暴露密码、私钥或
                 Electron IPC。
               </template>
             </el-alert>
@@ -1144,7 +1144,7 @@
                 <template #default>
                   {{
                     settings.agentMcp.permissionMode === 'execute'
-                      ? '持有当前 MCP Token 的 Agent 可以直接写文件并执行修改命令。完成操作后建议切回“查询”。'
+                      ? '持有当前 MCP Token 的 Agent 可以直接写文件并执行修改命令。切回“查询”会取消仍在等待或执行中的写请求；已发到远程服务器的操作无法自动回滚。完成操作后建议切回“查询”。'
                       : 'Agent 的查询直接执行；写文件和修改命令会暂停，并由 MShell 弹窗逐次确认。'
                   }}
                 </template>
@@ -1453,7 +1453,8 @@ codex mcp list</code></pre>
                     查询：<code>write_remote_file</code> 和 <code>execute_command</code> 被拒绝。
                   </li>
                   <li>确认：查询直接执行；每个写入工具调用会暂停，用户批准后继续。</li>
-                  <li>执行：查询和写入直接执行，适合已经明确授权的连续任务。</li>
+                  <li>执行：查询和写入直接执行，适合已经明确授权的连续任务；只读查询白名单仍然生效。</li>
+                  <li>切回“查询”会取消仍在等待或执行中的写请求；已经在远程服务器完成的操作无法自动回滚。</li>
                   <li>确认弹窗被拒绝、关闭或等待超过 2 分钟，本次写入会取消。</li>
                   <li>数据库查询在三档权限下都保持只读，不提供数据库写入工具。</li>
                   <li>设置会保存在本机，重启 MShell 后仍保持上次状态。</li>
@@ -2013,7 +2014,7 @@ const DEFAULT_RESTORE_OPTIONS = [
 const restoreOptions = ref<string[]>([...DEFAULT_RESTORE_OPTIONS])
 const backupLoading = ref(false)
 
-const appVersion = ref('0.2.21')
+const appVersion = ref('0.2.22')
 
 const mcpStatus = ref({
   enabled: false,

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as fc from 'fast-check'
+import { EventEmitter } from 'node:events'
 
 vi.mock('electron', () => ({
   app: {
@@ -422,6 +423,41 @@ describe('SSHConnectionManager', () => {
    * Additional unit tests for specific methods
    */
   describe('Unit tests', () => {
+    it('times out before the exec callback, closes late channels, and ends on disconnect', async () => {
+      vi.useFakeTimers()
+      let open!: (error: null, stream: any) => void
+      const client = Object.assign(new EventEmitter(), {
+        exec: (_: string, callback: typeof open) => {
+          open = callback
+        },
+        end: vi.fn()
+      })
+      ;(manager as any).connections.set('pending', {
+        id: 'pending',
+        status: 'connected',
+        client,
+        lastActivity: new Date()
+      })
+      try {
+        const timed = expect(manager.executeCommand('pending', 'true', 100)).rejects.toThrow(
+          'timed out'
+        )
+        await vi.advanceTimersByTimeAsync(100)
+        await timed
+        const channel = Object.assign(new EventEmitter(), { close: vi.fn(), signal: vi.fn() })
+        open(null, channel)
+        expect(channel.close).toHaveBeenCalledOnce()
+        const disconnected = expect(manager.executeCommand('pending', 'true', 100)).rejects.toThrow(
+          'closed'
+        )
+        client.emit('close')
+        await disconnected
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        ;(manager as any).connections.delete('pending')
+        vi.useRealTimers()
+      }
+    })
     it('sends database SQL through stdin after attaching channel listeners', async () => {
       const handlers: Record<string, Function> = {}
       const stream = {
@@ -437,6 +473,8 @@ describe('SSHConnectionManager', () => {
         })
       }
       const client = {
+        once: vi.fn(),
+        removeListener: vi.fn(),
         exec: vi.fn((_command: string, callback: Function) => callback(null, stream)),
         end: vi.fn()
       }
@@ -470,6 +508,8 @@ describe('SSHConnectionManager', () => {
         close: vi.fn()
       }
       const client = {
+        once: vi.fn(),
+        removeListener: vi.fn(),
         exec: vi.fn((_command: string, callback: Function) => callback(null, stream)),
         end: vi.fn()
       }

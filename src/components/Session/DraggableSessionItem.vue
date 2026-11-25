@@ -28,7 +28,7 @@ interface Props {
 
 const props = defineProps<Props>()
 const emit = defineEmits<{
-  reorder: [fromIndex: number, toIndex: number]
+  reorder: [sessionId: string, targetId: string]
   moveToGroup: [sessionId: string, groupId: string]
 }>()
 
@@ -92,11 +92,10 @@ const handleDrop = (event: DragEvent) => {
   
   if (draggedItem.id === props.sessionId) return
   
-  // 触发重新排序
-  const fromIndex = draggedItem.data.index
-  const toIndex = props.index
-  
-  emit('reorder', fromIndex, toIndex)
+  // Cross-group drops bubble to DroppableGroup. Same-group drops only reorder.
+  if (draggedItem.data.group !== props.sessionData.group) return
+  event.stopPropagation()
+  emit('reorder', draggedItem.id, props.sessionId)
   dragDrop.endDrag()
 }
 </script>
@@ -108,7 +107,7 @@ const handleDrop = (event: DragEvent) => {
   align-items: center;
   gap: 0; /* 移除间距 */
   transition: all 0.2s;
-  cursor: grab; /* 整个区域都可以拖�?*/
+  cursor: grab; /* 整个区域都可以拖拽 */
   width: 100%; /* 确保宽度100% */
 }
 
@@ -126,7 +125,7 @@ const handleDrop = (event: DragEvent) => {
 }
 
 .drag-handle {
-  display: none; /* 隐藏拖拽图标，节省空�?*/
+  display: none; /* 隐藏拖拽图标，节省空间 */
   cursor: grab;
   color: var(--text-tertiary);
   font-size: var(--text-lg);

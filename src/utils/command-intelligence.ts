@@ -4,6 +4,8 @@
  */
 
 // 命令解释结果
+import { completionInput } from './autocomplete/input'
+
 export interface CommandExplanation {
   command: string
   summary: string
@@ -43,7 +45,7 @@ export function parseExplainQuery(input: string): string | null {
  * 获取命令的本地解释（不依赖 AI）
  */
 export function getLocalCommandExplanation(command: string): CommandExplanation | null {
-  const parts = command.trim().split(/\s+/)
+  const parts = completionInput(command.trim()).words
   const baseCommand = parts[0]
   
   // 本地命令解释字典
@@ -335,6 +337,9 @@ export function getLocalCommandExplanation(command: string): CommandExplanation 
       const desc = explanation.options[part]
       if (desc) {
         result.parts.push({ part, description: desc })
+      } else if (/^-[a-zA-Z]{2,}$/.test(part)) {
+        const combined = [...part.slice(1)].map(flag => explanation.options?.['-' + flag])
+        if (combined.every(Boolean)) result.parts.push({ part, description: combined.join('；') })
       }
     }
   }

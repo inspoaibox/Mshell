@@ -11,6 +11,7 @@
             :icon="Refresh"
             circle
             :loading="loading"
+            :disabled="actionLoading"
             aria-label="重新检测防火墙"
             @click="loadOverview"
           />
@@ -31,6 +32,20 @@
       />
 
       <template v-if="overview">
+        <div class="firewall-freshness">{{ updatedLabel }} · 页面可见时约每 15 秒更新</div>
+        <el-alert
+          v-for="message in overview.errors"
+          :key="message"
+          :title="message"
+          type="warning"
+          :closable="false"
+        />
+        <el-alert v-if="pending" type="warning" :closable="false" title="启用等待确认">
+          请另开 SSH 会话测试登录。{{ remaining }} 秒内未确认会自动停用。
+          <el-button :disabled="!remaining || actionLoading" @click="confirmEnable"
+            >已验证连接，保留启用</el-button
+          >
+        </el-alert>
         <section class="status-band" :class="`is-${protectionState.tone}`">
           <div class="status-icon">
             <el-icon><component :is="protectionState.icon" /></el-icon>
@@ -69,8 +84,24 @@
         />
 
         <el-tabs v-model="activeSection" class="firewall-tabs">
-          <el-tab-pane label="开放规则" name="rules">
+          <el-tab-pane label="入站规则" name="rules">
             <section class="rules-view">
+              <div v-if="primaryTool?.id === 'firewalld'" class="zone-picker">
+                <label>规则所属 zone</label>
+                <el-select
+                  v-model="selectedZone"
+                  :disabled="actionLoading"
+                  aria-label="规则所属 zone"
+                >
+                  <el-option
+                    v-for="zone in overview.zones"
+                    :key="zone.name"
+                    :value="zone.name"
+                    :label="zone.name + (zone.name === overview.sshZone ? ' · 当前 SSH' : '')"
+                  />
+                </el-select>
+                <small v-if="overview.zoneError">{{ overview.zoneError }}</small>
+              </div>
               <div class="section-header">
                 <div>
                   <strong>允许访问的服务</strong>
@@ -89,7 +120,7 @@
               <el-alert
                 v-if="primaryTool?.id === 'nftables'"
                 type="warning"
-                title="当前仅检测到原生 nftables 服务。为避免破坏复杂 ruleset，暂时只提供查看功能。"
+                title="检测到原生 nftables 入站规则。为避免跨管理器改写，当前提供只读查看。"
                 :closable="false"
                 show-icon
               />
@@ -100,13 +131,30 @@
                   <div class="rule-main">
                     <div class="rule-heading">
                       <strong>{{ rule.service || formatRulePort(rule) }}</strong>
-                      <span>{{ rule.protocol?.toUpperCase() || '全部协议' }}</span>
+                      <span>{{
+                        rule.protocol?.toUpperCase() || (rule.service ? '按服务定义' : '详见规则')
+                      }}</span>
                       <el-tag v-if="rule.family" size="small" type="info">{{ rule.family }}</el-tag>
-                      <el-tag v-if="rule.managed && rule.persistent" size="small" type="success"
-                        >开机恢复</el-tag
+                      <el-tag
+                        v-if="rule.persistent && (rule.managed || rule.tool === 'firewalld')"
+                        size="small"
+                        type="success"
+                        >永久配置</el-tag
                       >
-                      <el-tag v-if="rule.persistent === false" size="small" type="warning"
+                      <el-tag
+                        v-if="rule.persistent === false && rule.managed"
+                        size="small"
+                        type="warning"
                         >临时</el-tag
+                      >
+                      <el-tag v-if="rule.runtime === false" size="small" type="warning"
+                        >仅保存，未生效</el-tag
+                      >
+                      <el-tag
+                        v-else-if="rule.tool === 'firewalld' && !rule.persistent"
+                        size="small"
+                        type="info"
+                        >仅运行时</el-tag
                       >
                     </div>
                     <div class="rule-source">
@@ -117,6 +165,9 @@
                       <summary>查看原始规则</summary>
                       <code>{{ rule.raw }}</code>
                     </details>
+                    <small v-if="rule.protectionReason" class="rule-protection">{{
+                      rule.protectionReason
+                    }}</small>
                   </div>
                   <el-tooltip v-if="rule.deletable" content="删除规则" placement="left">
                     <el-button
@@ -125,6 +176,7 @@
                       type="danger"
                       plain
                       :aria-label="`删除 ${formatRulePort(rule)} 规则`"
+                      :disabled="!canManage || conflict"
                       @click="deleteRule(rule)"
                     />
                   </el-tooltip>
@@ -194,21 +246,40 @@
                       </el-tag>
                       <el-tag
                         size="small"
-                        :type="tool.active ? 'success' : tool.installed ? 'info' : undefined"
+                        :type="
+                          tool.status === 'unknown'
+                            ? 'warning'
+                            : tool.active
+                              ? 'success'
+                              : tool.installed
+                                ? 'info'
+                                : undefined
+                        "
                       >
-                        {{ tool.active ? '运行中' : tool.installed ? '已安装' : '未安装' }}
+                        {{
+                          tool.status === 'unknown'
+                            ? '状态未知'
+                            : tool.active
+                              ? '运行中'
+                              : tool.installed
+                                ? '已安装'
+                                : '未安装'
+                        }}
                       </el-tag>
                       <el-button
                         v-if="canInstallTool(tool)"
                         size="small"
                         :icon="Download"
+                        :disabled="!canManage"
                         @click="installFirewall(tool.id)"
                         >安装</el-button
                       >
                       <el-button
                         v-if="canEnableTool(tool)"
                         size="small"
-                        :disabled="!canSafelyEnable"
+                        :disabled="
+                          !canSafelyEnable || (tool.id === 'firewalld' && !overview.sshZone)
+                        "
                         @click="enableFirewall(tool.id)"
                         >启用</el-button
                       >
@@ -217,6 +288,7 @@
                         size="small"
                         type="danger"
                         plain
+                        :disabled="!canManage"
                         @click="disableFirewall(tool.id)"
                         >停用</el-button
                       >
@@ -243,7 +315,7 @@
               <el-alert
                 v-if="overview.tools.some(canEnableTool) && !canSafelyEnable"
                 type="warning"
-                title="未识别到当前 SSH 来源 IP 或服务端口，一键启用已禁用，以避免当前连接被防火墙中断。"
+                title="启用需要完整的 SSH 来源、端口和自动回滚能力；信息不完整时已禁用。"
                 :closable="false"
                 show-icon
               />
@@ -361,13 +433,20 @@
             <span>多个地址可使用逗号或空格分隔</span>
           </div>
           <label v-if="primaryTool?.id === 'iptables'" class="persistence-option">
-            <el-switch v-model="ruleForm.persist" aria-label="重启后保留规则" />
+            <el-switch
+              v-model="ruleForm.persist"
+              :disabled="!overview?.canPersist"
+              aria-label="重启后保留规则"
+            />
             <span>
               <strong>重启后继续生效</strong>
-              <small>使用 MShell 专用规则链，不保存 Docker 动态规则</small>
+              <small>{{
+                overview?.canPersist
+                  ? '使用 MShell 专用规则链，不保存 Docker 动态规则'
+                  : '当前未运行 systemd，仅支持临时规则'
+              }}</small>
             </span>
           </label>
-          <el-alert v-if="formError" type="error" :title="formError" :closable="false" show-icon />
         </div>
       </template>
 
@@ -388,6 +467,9 @@
           </div>
           <div>
             <span>管理方式</span><strong>{{ primaryToolLabel }}</strong>
+          </div>
+          <div v-if="rulePlan.zone">
+            <span>目标 zone</span><strong>{{ rulePlan.zone }}</strong>
           </div>
           <div>
             <span>生效方式</span
@@ -411,6 +493,7 @@
         />
       </template>
 
+      <el-alert v-if="formError" type="error" :title="formError" :closable="false" show-icon />
       <template #footer>
         <el-button :disabled="actionLoading" @click="ruleDialogVisible = false">取消</el-button>
         <el-button
@@ -432,7 +515,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, markRaw, onMounted, ref, watch } from 'vue'
+import { computed, markRaw, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft,
@@ -453,46 +536,39 @@ import {
 import {
   FIREWALL_PORT_PRESETS,
   FIREWALL_TOOL_LABELS,
-  buildAllowFirewallCommand,
-  buildDeleteFirewallCommand,
-  buildDisableFirewallCommand,
-  buildEnableFirewallCommand,
-  buildFirewallDetectCommand,
-  buildInstallFirewallCommand,
-  classifyFirewallInstallError,
   createFirewallRulePlan,
   displayFirewallLabel,
+  firewallConflict,
   normalizeFirewallRules,
-  parseFirewallOverview,
   recommendedFirewall,
   selectPrimaryFirewall,
   shouldOfferFirewallInstall,
+  type FirewallAction,
   type FirewallOverview,
   type FirewallRule,
   type FirewallRulePlan,
   type FirewallTool,
-  type FirewallToolId,
   type RuleProtocol,
   type RuleSourceMode
-} from '../../utils/firewall-manager'
-
-interface Props {
-  connectionId: string
-}
-const props = defineProps<Props>()
+} from '../../utils/firewall-model'
+const props = withDefaults(defineProps<{ connectionId: string; active?: boolean }>(), {
+  active: true
+})
 defineEmits<{ close: [] }>()
-
-const overview = ref<FirewallOverview | null>(null)
-const loading = ref(false)
-const actionLoading = ref(false)
-const errorMessage = ref('')
-const lastOutput = ref('')
-const activeSection = ref<'rules' | 'details'>('rules')
-const ruleDialogVisible = ref(false)
-const ruleStep = ref<'edit' | 'review'>('edit')
-const rulePlan = ref<FirewallRulePlan | null>(null)
-const selectedPreset = ref('custom')
-const formError = ref('')
+const overview = ref<FirewallOverview | null>(null),
+  loading = ref(false),
+  actionLoading = ref(false),
+  errorMessage = ref(''),
+  lastOutput = ref('')
+const stale = ref(true),
+  now = ref(Date.now()),
+  activeSection = ref<'rules' | 'details'>('rules'),
+  selectedZone = ref('')
+const ruleDialogVisible = ref(false),
+  ruleStep = ref<'edit' | 'review'>('edit'),
+  rulePlan = ref<FirewallRulePlan | null>(null),
+  selectedPreset = ref('custom'),
+  formError = ref('')
 const ruleForm = ref({
   ports: '',
   protocol: 'tcp' as RuleProtocol,
@@ -500,15 +576,25 @@ const ruleForm = ref({
   customSources: '',
   persist: true
 })
-
-const installedTools = computed(() => overview.value?.tools.filter((tool) => tool.installed) || [])
-const activeTools = computed(() => installedTools.value.filter((tool) => tool.active))
-const allRules = computed(() => normalizeFirewallRules(overview.value))
+const pending = ref<{ token: string; expiresAt: number; tool: 'ufw' | 'firewalld' } | null>(null)
+let disposed = false,
+  generation = 0,
+  request: Promise<void> | undefined,
+  timer: ReturnType<typeof setInterval> | undefined
+let reviewContext: Pick<FirewallOverview, 'sshClientIp' | 'sshServerPort' | 'sshZone'> | undefined,
+  reviewConnection = ''
+const releases: Array<() => void> = []
+const installedTools = computed(() => overview.value?.tools.filter((t) => t.installed) || [])
 const primaryTool = computed(() =>
   overview.value ? selectPrimaryFirewall(overview.value) : undefined
 )
+const allRules = computed(() => normalizeFirewallRules(overview.value))
 const primaryRules = computed(() =>
-  allRules.value.filter((rule) => rule.tool === primaryTool.value?.id)
+  allRules.value.filter(
+    (rule) =>
+      rule.tool === primaryTool.value?.id &&
+      (rule.tool !== 'firewalld' || rule.zone === selectedZone.value)
+  )
 )
 const primaryToolLabel = computed(() =>
   overview.value ? displayFirewallLabel(primaryTool.value, overview.value) : '检测中'
@@ -516,20 +602,36 @@ const primaryToolLabel = computed(() =>
 const usesNftBackend = computed(
   () => primaryTool.value?.id === 'iptables' && overview.value?.iptablesBackend === 'nf_tables'
 )
-const iptablesOpenByDefault = computed(() => {
-  if (primaryTool.value?.id !== 'iptables' || !overview.value) return false
-  const policies = Object.values(overview.value.iptablesPolicies).filter(Boolean)
-  return policies.length === 0 || policies.some((policy) => policy === 'ACCEPT')
-})
+const conflict = computed(() => (overview.value ? firewallConflict(overview.value) : false))
+const canManage = computed(
+  () =>
+    !!overview.value &&
+    !stale.value &&
+    !overview.value.errors.length &&
+    !actionLoading.value &&
+    !pending.value
+)
+const iptablesOpenByDefault = computed(
+  () =>
+    primaryTool.value?.id === 'iptables' &&
+    Object.values(overview.value?.iptablesPolicies || {}).some((policy) => policy === 'ACCEPT')
+)
 const canAddRule = computed(
   () =>
-    Boolean(primaryTool.value && ['ufw', 'firewalld', 'iptables'].includes(primaryTool.value.id)) &&
-    !(overview.value?.needsPrivilege && !overview.value.canSudo)
+    canManage.value &&
+    !conflict.value &&
+    !overview.value?.nativeNftInput &&
+    !!primaryTool.value &&
+    ['ufw', 'firewalld', 'iptables'].includes(primaryTool.value.id) &&
+    (primaryTool.value.id === 'iptables' || primaryTool.value.active)
 )
 const canSafelyEnable = computed(
   () =>
-    Boolean(overview.value?.sshClientIp && overview.value?.sshServerPort) &&
-    !(overview.value?.needsPrivilege && !overview.value.canSudo)
+    canManage.value &&
+    overview.value?.canWatchdog &&
+    !!overview.value.sshClientIp &&
+    !!overview.value.sshServerPort &&
+    !conflict.value
 )
 const systemLabel = computed(
   () => overview.value?.osName || overview.value?.osId || '正在检测服务器'
@@ -537,86 +639,105 @@ const systemLabel = computed(
 const recommendedInstallTool = computed(() =>
   overview.value ? recommendedFirewall(overview.value) : 'ufw'
 )
-const shouldRecommendInstall = computed(() =>
-  Boolean(overview.value && shouldOfferFirewallInstall(overview.value))
+const shouldRecommendInstall = computed(
+  () => !!overview.value && shouldOfferFirewallInstall(overview.value)
 )
-
+const remaining = computed(() =>
+  Math.max(0, Math.ceil(((pending.value?.expiresAt || 0) - now.value) / 1000))
+)
+const updatedLabel = computed(() =>
+  overview.value
+    ? Math.max(0, Math.floor((now.value - overview.value.capturedAt) / 1000)) + ' 秒前检测'
+    : '尚未检测'
+)
 const protectionState = computed(() => {
-  const activeHighLevel = activeTools.value.filter(
-    (tool) => tool.id === 'ufw' || tool.id === 'firewalld'
-  )
-  const nftServiceActive = activeTools.value.some((tool) => tool.id === 'nftables')
-  if (activeHighLevel.length > 1 || (activeHighLevel.length > 0 && nftServiceActive)) {
+  if (stale.value || overview.value?.errors.length)
     return {
       tone: 'warning',
       icon: markRaw(WarningFilled),
-      title: '检测到多个管理器同时运行',
-      description: '规则可能互相覆盖，请在系统详情中确认后再修改。'
+      title: '状态未知，已暂停修改',
+      description: '检测失败或连接已变化，请重新检测后操作。'
     }
-  }
-  if (iptablesOpenByDefault.value) {
+  if (conflict.value)
     return {
       tone: 'warning',
       icon: markRaw(WarningFilled),
-      title: primaryRules.value.length
-        ? '规则已配置，默认仍允许其他入站连接'
-        : '未检测到主机入站限制',
-      description: primaryRules.value.length
-        ? '规则可以开机恢复，但 INPUT 默认策略为 ACCEPT，其他端口并未因此关闭。'
-        : 'INPUT 默认策略为 ACCEPT，服务器可能依赖云防火墙控制公网访问。'
+      title: '多个管理器同时控制入站流量',
+      description: '已阻止新增与跨管理器删除，请先确认配置归属。'
     }
-  }
-  if (primaryTool.value?.active) {
-    return {
-      tone: 'success',
-      icon: markRaw(CircleCheckFilled),
-      title: '防火墙规则正在生效',
-      description: `MShell 将通过 ${primaryToolLabel.value} 管理入站访问。`
-    }
-  }
-  if (primaryRules.value.length) {
+  if (overview.value?.nativeNftInput)
     return {
       tone: 'info',
       icon: markRaw(InfoFilled),
-      title: '检测到入站规则',
-      description: '当前工具没有独立服务状态，请确认规则是否已配置开机持久化。'
+      title: '检测到原生 nftables 入站规则',
+      description: '以内核规则为准；当前提供只读查看。'
     }
-  }
+  if (iptablesOpenByDefault.value)
+    return {
+      tone: 'warning',
+      icon: markRaw(WarningFilled),
+      title: 'INPUT 默认允许，开放规则不代表其他端口被关闭',
+      description: '这里只描述主机 INPUT；容器转发与云安全组需分别检查。'
+    }
+  if (primaryTool.value?.active)
+    return {
+      tone: 'success',
+      icon: markRaw(CircleCheckFilled),
+      title: '已读取当前防火墙规则',
+      description: '主机规则已检测；不代表云安全组或容器端口的最终可达性。'
+    }
   return {
-    tone: 'warning',
-    icon: markRaw(WarningFilled),
-    title: '未检测到主机入站限制',
-    description: '服务器可能依赖云防火墙或尚未配置本机防火墙。'
+    tone: 'info',
+    icon: markRaw(InfoFilled),
+    title: '当前管理工具未启用或没有可识别的限制',
+    description: '请查看系统详情，不能仅凭服务状态判断公网访问。'
   }
 })
-
-async function runSSHCommand(command: string, timeout = 60_000) {
-  const result = await window.electronAPI.ssh.executeCommand(props.connectionId, command, timeout)
-  if (!result?.success) throw new Error(result?.error || 'SSH 命令执行失败')
-  return String(result.data || '')
+const contextOf = (data: FirewallOverview) => ({
+  sshClientIp: data.sshClientIp,
+  sshServerPort: data.sshServerPort,
+  sshZone: data.sshZone
+})
+function acceptOverview(data: FirewallOverview) {
+  overview.value = data
+  stale.value = false
+  if (!data.zones.some((z) => z.name === selectedZone.value))
+    selectedZone.value = data.sshZone || data.defaultZone || data.zones[0]?.name || ''
 }
-
-async function loadOverview() {
+function loadOverview(): Promise<void> {
+  if (disposed || actionLoading.value) return Promise.resolve()
+  if (request) return request
+  const id = props.connectionId,
+    version = ++generation
   loading.value = true
-  errorMessage.value = ''
-  try {
-    overview.value = parseFirewallOverview(
-      await runSSHCommand(buildFirewallDetectCommand(), 45_000)
-    )
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '防火墙检测失败'
-  } finally {
-    loading.value = false
-  }
+  request = (async () => {
+    try {
+      const result = await window.electronAPI.firewall.inspect(id)
+      if (disposed || version !== generation || id !== props.connectionId) return
+      if (!result.success || !result.data) throw new Error(result.error || '检测失败')
+      acceptOverview(result.data)
+      errorMessage.value = ''
+      if (pending.value && Date.now() > pending.value.expiresAt + 10000) {
+        const active = result.data.tools.find((t) => t.id === pending.value!.tool)?.active
+        if (active) {
+          stale.value = true
+          errorMessage.value = '回滚结果尚未验证，请检查服务器防火墙状态'
+        } else errorMessage.value = '启用未确认，防火墙已自动停用'
+        pending.value = null
+      }
+    } catch (error) {
+      if (!disposed && version === generation) {
+        stale.value = true
+        errorMessage.value = error instanceof Error ? error.message : '检测失败'
+      }
+    } finally {
+      if (version === generation) loading.value = false
+    }
+  })().finally(() => {
+    if (version === generation) request = undefined
+  })
+  return request
 }
-
-function openRuleDialog() {
-  if (!primaryTool.value || !canAddRule.value) return
-  resetRuleDialog()
-  ruleForm.value.sourceMode = overview.value?.sshClientIp ? 'current' : 'custom'
-  ruleDialogVisible.value = true
-}
-
 function resetRuleDialog() {
   ruleStep.value = 'edit'
   rulePlan.value = null
@@ -627,210 +748,284 @@ function resetRuleDialog() {
     protocol: 'tcp',
     sourceMode: overview.value?.sshClientIp ? 'current' : 'custom',
     customSources: '',
-    persist: true
+    persist: overview.value?.canPersist ?? false
   }
 }
-
+function openRuleDialog() {
+  if (!canAddRule.value) return
+  resetRuleDialog()
+  ruleDialogVisible.value = true
+}
 function applyPortPreset(value: string) {
-  const preset = FIREWALL_PORT_PRESETS.find((item) => item.value === value)
-  if (!preset || preset.value === 'custom') return
-  ruleForm.value.ports = preset.ports
+  const preset = FIREWALL_PORT_PRESETS.find((p) => p.value === value)
+  if (!preset || value === 'custom') return
+  ruleForm.value.ports =
+    value === 'ssh' ? String(overview.value?.sshServerPort || 22) : preset.ports
   ruleForm.value.protocol = preset.protocol
 }
-
 function prepareRuleReview() {
   formError.value = ''
-  if (!primaryTool.value) return
+  if (!primaryTool.value || !overview.value) return
   try {
     rulePlan.value = createFirewallRulePlan({
       tool: primaryTool.value.id,
-      ports: ruleForm.value.ports,
-      protocol: ruleForm.value.protocol,
-      sourceMode: ruleForm.value.sourceMode,
-      customSources: ruleForm.value.customSources,
-      sshClientIp: overview.value?.sshClientIp || '',
-      persist: ruleForm.value.persist
+      ...ruleForm.value,
+      sshClientIp: overview.value.sshClientIp,
+      sshServerPort: overview.value.sshServerPort,
+      zone: primaryTool.value.id === 'firewalld' ? selectedZone.value : undefined
     })
+    reviewContext = contextOf(overview.value)
+    reviewConnection = props.connectionId
     ruleStep.value = 'review'
   } catch (error) {
-    formError.value = error instanceof Error ? error.message : '规则内容不正确'
+    formError.value = error instanceof Error ? error.message : '规则无效'
   }
 }
-
 async function allowRule() {
-  if (!rulePlan.value) return
+  const plan = rulePlan.value
+  if (!plan || !reviewContext || actionLoading.value) return
+  const ok = await perform(
+    {
+      type: 'allow',
+      draft: {
+        tool: plan.tool,
+        ports: plan.ports.join(','),
+        protocol: plan.protocols.length === 2 ? 'both' : plan.protocols[0],
+        sourceMode: plan.sourceMode,
+        customSources: plan.sources.join(','),
+        sshClientIp: reviewContext.sshClientIp,
+        sshServerPort: reviewContext.sshServerPort,
+        persist: plan.persistent,
+        zone: plan.zone
+      }
+    },
+    reviewConnection,
+    reviewContext
+  )
+  if (ok) ruleDialogVisible.value = false
+}
+async function perform(
+  action: FirewallAction,
+  id = props.connectionId,
+  context:
+    | Pick<FirewallOverview, 'sshClientIp' | 'sshServerPort' | 'sshZone'>
+    | undefined = overview.value ? contextOf(overview.value) : undefined
+) {
+  if (actionLoading.value || !context || disposed) return false
   actionLoading.value = true
   errorMessage.value = ''
+  formError.value = ''
+  generation++
+  request = undefined
+  loading.value = false
+  let ok = false
   try {
-    lastOutput.value = await runSSHCommand(buildAllowFirewallCommand(rulePlan.value), 60_000)
-    ruleDialogVisible.value = false
-    ElMessage.success('开放规则已添加')
-    await loadOverview()
+    const result = await window.electronAPI.firewall.apply(id, action, context)
+    if (disposed || id !== props.connectionId) return false
+    if (!result.success || !result.data) throw new Error(result.error || '操作失败')
+    acceptOverview(result.data.overview)
+    lastOutput.value = result.data.output
+    if (result.data.pending && action.type === 'enable')
+      pending.value = { ...result.data.pending, tool: action.tool }
+    ElMessage.success(
+      result.data.pending ? '已临时启用，请测试连接后确认保留' : '操作完成并已重新验证'
+    )
+    ok = true
   } catch (error) {
-    formError.value = error instanceof Error ? error.message : '新增规则失败'
+    if (!disposed && id === props.connectionId) {
+      const message = error instanceof Error ? error.message : '操作失败'
+      errorMessage.value = message
+      formError.value = message
+      lastOutput.value = message
+      stale.value = true
+      ElMessage.error(message)
+    }
   } finally {
     actionLoading.value = false
+    // On failure, retain the visible error while reading the actual post-rollback state.
+    if (!ok && !disposed && id === props.connectionId) {
+      const message = errorMessage.value
+      await loadOverview()
+      errorMessage.value = message
+    }
   }
+  return ok
 }
-
 function canEnableTool(tool: FirewallTool) {
-  return tool.installed && !tool.active && (tool.id === 'ufw' || tool.id === 'firewalld')
+  return tool.installed && !tool.active && ['ufw', 'firewalld'].includes(tool.id)
 }
-
 function canInstallTool(tool: FirewallTool) {
-  return !tool.installed && (tool.id === 'ufw' || tool.id === 'firewalld')
+  return !tool.installed && ['ufw', 'firewalld'].includes(tool.id)
 }
-
 function isRecommendedInstall(tool: FirewallTool) {
   return shouldRecommendInstall.value && tool.id === recommendedInstallTool.value
 }
-
 function canDisableTool(tool: FirewallTool) {
-  return tool.active && (tool.id === 'ufw' || tool.id === 'firewalld')
+  return tool.active && ['ufw', 'firewalld'].includes(tool.id)
 }
-
-async function enableFirewall(tool: FirewallToolId) {
-  if (!overview.value) return
-  let command: string
+async function confirmAction(action: FirewallAction, message: string, title: string) {
+  if (!canManage.value || !overview.value) return
+  const id = props.connectionId,
+    context = contextOf(overview.value)
   try {
-    command = buildEnableFirewallCommand(
-      tool,
-      overview.value.sshClientIp,
-      overview.value.sshServerPort
-    )
-  } catch (error) {
-    ElMessage.warning(error instanceof Error ? error.message : '无法安全启用防火墙')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      `启用前将先允许 ${overview.value.sshClientIp} 访问当前 SSH 端口 ${overview.value.sshServerPort}，然后启用 ${FIREWALL_TOOL_LABELS[tool]}。`,
-      '保护当前连接并启用',
-      { type: 'warning', confirmButtonText: '确认启用', cancelButtonText: '取消' }
-    )
-  } catch {
-    return
-  }
-  await executeAction(command, '防火墙已启用', 60_000)
-}
-
-async function disableFirewall(tool: FirewallToolId) {
-  try {
-    await ElMessageBox.confirm(
-      `停用 ${FIREWALL_TOOL_LABELS[tool]} 后，服务器端口可能失去访问控制。`,
-      '确认停用防火墙',
-      { type: 'error', confirmButtonText: '停用防火墙', cancelButtonText: '取消' }
-    )
-  } catch {
-    return
-  }
-  try {
-    await executeAction(buildDisableFirewallCommand(tool), '防火墙已停用', 60_000)
-  } catch {
-    /* executeAction reports the error */
-  }
-}
-
-async function installFirewall(tool: FirewallToolId) {
-  if (tool !== 'ufw' && tool !== 'firewalld') return
-  const existing = primaryTool.value?.installed
-    ? `当前已可使用 ${primaryToolLabel.value}；安装后不会自动启用，也不要同时启用多个管理器。`
-    : '安装完成后不会自动启用。'
-  try {
-    await ElMessageBox.confirm(
-      `将使用服务器当前配置的可信软件源安装 ${FIREWALL_TOOL_LABELS[tool]}。${existing}`,
-      '安装防火墙管理工具',
-      { type: 'info', confirmButtonText: '开始安装', cancelButtonText: '取消' }
-    )
-  } catch {
-    return
-  }
-  try {
-    await executeAction(buildInstallFirewallCommand(tool), '防火墙工具已安装', 180_000, (error) => {
-      const failure = classifyFirewallInstallError(error)
-      return `${failure.message}。${failure.guidance}`
+    await ElMessageBox.confirm(message, title, {
+      type: 'warning',
+      confirmButtonText: '确认',
+      cancelButtonText: '取消'
     })
   } catch {
-    /* executeAction reports the classified error */
-  }
-}
-
-async function deleteRule(rule: FirewallRule) {
-  try {
-    await ElMessageBox.confirm(
-      `将删除 ${formatRulePort(rule)}，来源 ${rule.source || '所有来源'} 的规则。删除后对应服务可能无法访问。`,
-      '确认删除规则',
-      { type: 'warning', confirmButtonText: '删除规则', cancelButtonText: '取消' }
-    )
-  } catch {
     return
   }
-  try {
-    await executeAction(buildDeleteFirewallCommand(rule), '规则已删除', 60_000)
-  } catch {
-    /* executeAction reports the error */
-  }
+  if (disposed || id !== props.connectionId) return
+  await perform(action, id, context)
 }
-
-async function executeAction(
-  command: string,
-  success: string,
-  timeout: number,
-  formatError?: (error: unknown) => string
-) {
+function enableFirewall(tool: FirewallTool['id']) {
+  if ((tool !== 'ufw' && tool !== 'firewalld') || !overview.value) return
+  return confirmAction(
+    { type: 'enable', tool },
+    `先保护 SSH ${overview.value.sshClientIp}:${overview.value.sshServerPort}${tool === 'firewalld' ? '，实际 zone：' + (overview.value.sshZone || '未确定') : ''}。启用后需另开 SSH 会话确认可连接，90 秒未确认会自动停用。`,
+    '限时启用防火墙'
+  )
+}
+function disableFirewall(tool: FirewallTool['id']) {
+  if (tool === 'ufw' || tool === 'firewalld')
+    return confirmAction(
+      { type: 'disable', tool },
+      `停用 ${FIREWALL_TOOL_LABELS[tool]} 后可能失去访问控制。`,
+      '确认停用'
+    )
+}
+function installFirewall(tool: FirewallTool['id']) {
+  if (tool === 'ufw' || tool === 'firewalld')
+    return confirmAction(
+      { type: 'install', tool },
+      `使用系统软件源安装 ${FIREWALL_TOOL_LABELS[tool]}，不会跳过仓库校验。`,
+      '确认安装'
+    )
+}
+function deleteRule(rule: FirewallRule) {
+  if (!rule.deletable) {
+    ElMessage.warning(rule.protectionReason || '该规则只读')
+    return
+  }
+  return confirmAction(
+    { type: 'delete', key: rule.key },
+    `删除 ${rule.zone ? 'zone ' + rule.zone + ' 中的 ' : ''}${formatRulePort(rule)}，来源 ${rule.source || '所有来源'}。提交前会重新核对规则与 SSH 保护。`,
+    '确认删除规则'
+  )
+}
+async function confirmEnable() {
+  if (!pending.value || !remaining.value || actionLoading.value) return
+  const id = props.connectionId,
+    token = pending.value.token
   actionLoading.value = true
-  errorMessage.value = ''
   try {
-    lastOutput.value = await runSSHCommand(command, timeout)
-    ElMessage.success(success)
-    await loadOverview()
+    const result = await window.electronAPI.firewall.confirm(id, token)
+    if (disposed || id !== props.connectionId) return
+    if (!result.success || !result.data) throw new Error(result.error || '确认失败')
+    acceptOverview(result.data)
+    pending.value = null
+    ElMessage.success('已保留防火墙启用状态')
   } catch (error) {
-    errorMessage.value = formatError
-      ? formatError(error)
-      : error instanceof Error
-        ? error.message
-        : '防火墙操作失败'
-    activeSection.value = 'details'
-    throw error
+    errorMessage.value = error instanceof Error ? error.message : '确认失败'
+    stale.value = true
   } finally {
     actionLoading.value = false
   }
 }
-
-function formatRulePort(rule: FirewallRule) {
-  return rule.port ? `端口 ${rule.port}` : rule.summary
+const formatRulePort = (rule: FirewallRule) => (rule.port ? '端口 ' + rule.port : rule.summary)
+const toolDisplayName = (tool: FirewallTool) =>
+  overview.value ? displayFirewallLabel(tool, overview.value) : tool.label
+const describeTool = (tool: FirewallTool) =>
+  tool.status === 'unknown'
+    ? '读取失败，状态未知'
+    : !tool.installed
+      ? '未安装'
+      : tool.id === 'nftables'
+        ? '以当前内核 ruleset 为准'
+        : tool.version || '状态已检测'
+const rawRulesFor = (tool: FirewallTool['id']) =>
+  overview.value?.rawRules[tool].join('\n') || '暂无输出'
+function invalidate() {
+  generation++
+  request = undefined
+  loading.value = false
+  stale.value = true
+  overview.value = null
+  pending.value = null
+  ruleDialogVisible.value = false
+  void loadOverview()
 }
-
-function toolDisplayName(tool: FirewallTool) {
-  return overview.value ? displayFirewallLabel(tool, overview.value) : tool.label
+function visibilityChanged() {
+  if (!document.hidden && props.active) void loadOverview()
 }
-
-function describeTool(tool: FirewallTool) {
-  if (!tool.installed) return '当前服务器未安装'
-  if (tool.id === 'nftables' && overview.value?.iptablesBackend === 'nf_tables' && !tool.active) {
-    return '作为 iptables 的底层规则后端使用'
+watch(() => props.connectionId, invalidate)
+watch(
+  () => props.active,
+  (active) => {
+    if (active) void loadOverview()
   }
-  if (tool.id === 'iptables' && overview.value) {
-    const policies = Object.entries(overview.value.iptablesPolicies)
-      .filter(([, policy]) => policy)
-      .map(([family, policy]) => `${family === 'ipv4' ? 'IPv4' : 'IPv6'} ${policy}`)
-      .join(' · ')
-    return `${policies || '默认策略未知'} · ${tool.version || '版本未知'}`
-  }
-  if (tool.active) return tool.version || '服务正在运行'
-  return tool.version || '已安装，未检测到运行状态'
-}
-
-function rawRulesFor(tool: FirewallToolId) {
-  const lines = overview.value?.rawRules[tool] || []
-  return lines.length ? lines.join('\n') : '暂无原始规则输出'
-}
-
-watch(() => props.connectionId, loadOverview)
-onMounted(loadOverview)
+)
+onMounted(() => {
+  void loadOverview()
+  releases.push(
+    window.electronAPI.firewall.onChanged((id) => {
+      if (id === props.connectionId && !actionLoading.value) void loadOverview()
+    })
+  )
+  releases.push(
+    window.electronAPI.ssh.onClose((id) => {
+      if (id === props.connectionId) {
+        generation++
+        request = undefined
+        loading.value = false
+        stale.value = true
+        errorMessage.value = 'SSH 已断开，重连后将重新检测'
+      }
+    })
+  )
+  releases.push(
+    window.electronAPI.ssh.onReconnected((id) => {
+      if (id === props.connectionId) void loadOverview()
+    })
+  )
+  document.addEventListener('visibilitychange', visibilityChanged)
+  timer = setInterval(() => {
+    now.value = Date.now()
+    if (
+      !document.hidden &&
+      props.active &&
+      !ruleDialogVisible.value &&
+      !actionLoading.value &&
+      (!overview.value || now.value - overview.value.capturedAt >= 15000)
+    )
+      void loadOverview()
+  }, 1000)
+})
+onUnmounted(() => {
+  disposed = true
+  generation++
+  clearInterval(timer)
+  releases.forEach((release) => release())
+  document.removeEventListener('visibilitychange', visibilityChanged)
+})
 </script>
 
 <style scoped>
+.firewall-freshness {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.zone-picker {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.zone-picker small,
+.rule-protection {
+  color: var(--warning-color);
+  overflow-wrap: anywhere;
+}
 .firewall-panel {
   display: flex;
   flex-direction: column;

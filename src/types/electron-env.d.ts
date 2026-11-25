@@ -1,3 +1,8 @@
+import type { FirewallAction, FirewallActionResult, FirewallOverview } from '../utils/firewall-model'
+import type { PortCloseRequest, PortCloseResult, PortOverview } from './ports'
+import type { SecurityDetails, SecuritySummary } from './security'
+import type { ScriptDeploymentResult } from '../utils/lazy-script-template'
+import type { DockerContainerAction, DockerContainerActionOptions, DockerOverview, DockerOperationResult } from './docker'
 type ApiResult<T = void> = {
   success: boolean
   data?: T
@@ -28,52 +33,32 @@ type DeleteBatchResult = {
 
 type TransferBatchResult = DeleteBatchResult & {
   paused: string[]
+  cancelled?: string[]
 }
 
-type DockerContainerAction = 'start' | 'pause' | 'unpause' | 'restart' | 'stop' | 'remove'
-
-type DockerContainerActionOptions = {
-  removeImage?: boolean
-  removeNetworks?: boolean
+/** 单文件传输结果：暂停或取消时 success 为 false，并带 paused / cancelled 标记 */
+type TransferResult = {
+  success: boolean
+  taskId?: string
+  error?: string
+  paused?: boolean
+  cancelled?: boolean
 }
 
-type DockerEnvironment = {
-  installed: boolean
-  dockerVersion: string
-  composeInstalled: boolean
-  composeVersion: string
-  serviceStatus: string
-  socketAccessible: boolean
-  needsSudo: boolean
-  os: {
-    id: string
-    versionId: string
-    prettyName: string
-    packageManager: string
-  }
-}
-
-type DockerContainer = {
-  id: string
+/**
+ * SFTP 目录项。type 为 'symlink' 时，targetType 是链接目标的类型（目标不存在时缺省）；
+ * permissions 只含 0o777 权限位，specialBits 为 setuid/setgid/sticky（0o7000）。
+ */
+type SFTPFileEntry = {
   name: string
-  image: string
-  status: string
-  state: string
-  ports: string
-  createdAt: string
-  size: string
-  cpu: string
-  memory: string
-  netIO: string
-  composeProject: string
-  composeService: string
-  composeWorkingDir: string
-  composeConfigFiles: string
-}
-
-type DockerOverview = {
-  environment: DockerEnvironment
-  containers: DockerContainer[]
+  path: string
+  type: 'file' | 'directory' | 'symlink'
+  targetType?: 'file' | 'directory'
+  size: number
+  modifyTime: Date
+  permissions: number
+  specialBits?: number
+  [key: string]: any
 }
 
 type UploadTransferRequest = {
@@ -124,10 +109,14 @@ export interface ElectronAPI {
       config: Partial<import('./session').SessionConfig>
     ) => Promise<ApiResult<import('./session').SessionConfig>>
     update: (id: string, updates: Partial<import('./session').SessionConfig>) => Promise<ApiResult>
+    updateOrder: (id: string, action: import('./session').SessionOrderAction) =>
+      Promise<ApiResult<import('./session').SessionConfig[]>>
     delete: (id: string) => Promise<ApiResult>
     export: (filePath: string) => Promise<ApiResult>
     import: (filePath: string) => Promise<ApiResult<import('./session').SessionConfig[]>>
     getAllGroups: () => Promise<import('./session').SessionGroup[]>
+    updateGroupOrder: (id: string, action: import('./session').SessionGroupOrderAction) =>
+      Promise<ApiResult<import('./session').SessionGroup[]>>
     createGroup: (name: string, description?: string) => Promise<import('./session').SessionGroup>
     addToGroup: (sessionId: string, groupId: string) => Promise<ApiResult>
     renameGroup: (id: string, name: string) => Promise<ApiResult>
@@ -153,20 +142,29 @@ export interface ElectronAPI {
   }
   docker: {
     getOverview: (connectionId: string) => Promise<ApiResult<DockerOverview>>
-    install: (connectionId: string) => Promise<ApiResult<string>>
-    cleanupUnused: (connectionId: string) => Promise<ApiResult<string>>
+    install: (connectionId: string) => Promise<ApiResult<DockerOperationResult>>
+    cleanupUnused: (connectionId: string) => Promise<ApiResult<DockerOperationResult>>
     containerAction: (
       connectionId: string,
       action: DockerContainerAction,
       containerId: string,
       options?: DockerContainerActionOptions
-    ) => Promise<ApiResult<string>>
+    ) => Promise<ApiResult<DockerOperationResult>>
     containerBatchAction: (
       connectionId: string,
       action: DockerContainerAction,
       containerIds: string[],
       options?: DockerContainerActionOptions
-    ) => Promise<ApiResult<string>>
+    ) => Promise<ApiResult<DockerOperationResult>>
+  }
+  fail2ban: {
+    getOverview: (connectionId: string) => Promise<ApiResult<import('./fail2ban').Fail2BanOverview>>
+    install: (connectionId: string) => Promise<ApiResult<import('./fail2ban').Fail2BanOperationResult>>
+    unban: (
+      connectionId: string,
+      jail: string,
+      ip: string
+    ) => Promise<ApiResult<import('./fail2ban').Fail2BanOperationResult>>
   }
   portForward: {
     getAll: (sessionId: string) => Promise<{ success: boolean; forwards?: any[]; error?: string }>
@@ -248,6 +246,7 @@ export interface ElectronAPI {
     toggleFavorite: (id: string) => Promise<ApiResult>
     getMostUsed: (limit?: number) => Promise<ApiResult<any[]>>
     getRecentUnique: (limit: number) => Promise<ApiResult<string[]>>
+    onChanged: (callback: () => void) => () => void
     getToday: () => Promise<ApiResult<any[]>>
     getByTimeRange: (startDate: string, endDate: string) => Promise<ApiResult<any[]>>
     export: (filePath: string) => Promise<ApiResult>
@@ -257,6 +256,8 @@ export interface ElectronAPI {
     delete: (id: string) => Promise<ApiResult>
   }
   ssh: {
+    completePath: (id: string, input: string, cwd?: string) => Promise<ApiResult<Array<{ name: string; directory: boolean }>>>
+    protectInput: (id: string, token: string, enabled: boolean) => Promise<void>
     executeCommand: (
       sessionId: string,
       command: string,
@@ -277,7 +278,7 @@ export interface ElectronAPI {
       details?: any
     }>
     disconnect: (id: string) => Promise<void>
-    write: (id: string, data: string) => Promise<void>
+    write: (id: string, data: string, sensitive?: boolean) => void
     resize: (id: string, cols: number, rows: number) => Promise<void>
     getConnection: (id: string) => Promise<any>
     getAllConnections: () => Promise<any[]>
@@ -299,7 +300,7 @@ export interface ElectronAPI {
     listDirectory: (
       connectionId: string,
       path: string
-    ) => Promise<{ success: boolean; files?: any[]; error?: string }>
+    ) => Promise<{ success: boolean; files?: SFTPFileEntry[]; error?: string }>
     createDirectory: (
       connectionId: string,
       path: string
@@ -318,13 +319,13 @@ export interface ElectronAPI {
       localPath: string,
       remotePath: string,
       options?: { resumeFromExisting?: boolean; taskId?: string }
-    ) => Promise<{ success: boolean; taskId?: string; error?: string }>
+    ) => Promise<TransferResult>
     downloadFile: (
       connectionId: string,
       remotePath: string,
       localPath: string,
       options?: { resumeFromExisting?: boolean; taskId?: string }
-    ) => Promise<{ success: boolean; taskId?: string; error?: string }>
+    ) => Promise<TransferResult>
     readFile: (
       connectionId: string,
       filePath: string
@@ -333,6 +334,23 @@ export interface ElectronAPI {
       connectionId: string,
       filePath: string
     ) => Promise<{ success: boolean; data?: string; error?: string }>
+    /** 读取文件开头至多 maxBytes 字节（UTF-8 文本），超出部分截断 */
+    readFilePreview: (
+      connectionId: string,
+      filePath: string,
+      maxBytes: number
+    ) => Promise<{
+      success: boolean
+      data?: string
+      truncated?: boolean
+      size?: number
+      error?: string
+    }>
+    /** 解析远程路径（支持 '.'、'~'、符号链接），返回绝对路径 */
+    realpath: (
+      connectionId: string,
+      path: string
+    ) => Promise<{ success: boolean; path?: string; error?: string }>
     writeFile: (
       connectionId: string,
       filePath: string,
@@ -419,6 +437,8 @@ export interface ElectronAPI {
     onProgress: (callback: (taskId: string, progress: any) => void) => () => void
     onComplete: (callback: (taskId: string) => void) => () => void
     onError: (callback: (taskId: string, error: string) => void) => () => void
+    onPaused: (callback: (taskId: string) => void) => () => void
+    onCancelled: (callback: (taskId: string) => void) => () => void
     connect: (
       connectionId: string,
       options: any
@@ -429,8 +449,6 @@ export interface ElectronAPI {
       code?: string
       details?: any
     }>
-    list: (path: string) => Promise<any[]>
-    getHomeDir: () => Promise<string>
   }
   fs: {
     readDirectory: (path: string) => Promise<{ success: boolean; files?: any[]; error?: string }>
@@ -438,6 +456,8 @@ export interface ElectronAPI {
     deleteFile: (path: string) => Promise<{ success: boolean; error?: string }>
     rename: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>
     stat: (path: string) => Promise<{ success: boolean; stats?: any; error?: string }>
+    /** Windows 返回存在的盘符（如 ['C:', 'D:']），其它系统返回 ['/'] */
+    listDrives: () => Promise<{ success: boolean; drives?: string[]; error?: string }>
     writeFile: (path: string, content: string) => Promise<{ success: boolean; error?: string }>
     compress: (
       sourcePath: string,
@@ -550,6 +570,8 @@ export interface ElectronAPI {
   dialog: {
     showContextMenu: (items: any[]) => Promise<string>
     openFile: (options: any) => Promise<string | null>
+    /** 多选文件，返回全部选中的路径；取消时返回 null */
+    openFiles: (options?: any) => Promise<string[] | null>
     openDirectory: (options?: any) => Promise<string | null>
     saveFile: (options?: any) => Promise<string | null>
   }
@@ -586,6 +608,16 @@ export interface ElectronAPI {
     getAll: () => Promise<ApiResult<any[]>>
     remove: (host: string, port: number) => Promise<ApiResult>
   }
+  firewall: {
+    inspect: (id: string) => Promise<ApiResult<FirewallOverview>>
+    apply: (id: string, action: FirewallAction, context: Pick<FirewallOverview, 'sshClientIp'|'sshServerPort'|'sshZone'>) => Promise<ApiResult<FirewallActionResult>>
+    confirm: (id: string, token: string) => Promise<ApiResult<FirewallOverview>>
+    onChanged: (callback: (id: string) => void) => () => void
+  }
+  ports: {
+    inspect: (id: string) => Promise<ApiResult<PortOverview>>
+    close: (id: string, request: PortCloseRequest) => Promise<ApiResult<PortCloseResult>>
+  }
   serverMonitor?: {
     start: (sessionId: string, config?: any) => Promise<{ success: boolean; error?: string }>
     stop: (sessionId: string) => Promise<{ success: boolean; error?: string }>
@@ -593,6 +625,8 @@ export interface ElectronAPI {
     refresh: (sessionId: string) => Promise<{ success: boolean; data?: any; error?: string }>
     getMonitoredSessions: () => Promise<{ success: boolean; data?: string[]; error?: string }>
     updateConfig: (sessionId: string, config: any) => Promise<{ success: boolean; error?: string }>
+    getSecurity: (sessionId: string) => Promise<ApiResult<SecuritySummary>>
+    getSecurityDetails: (sessionId: string) => Promise<ApiResult<SecurityDetails>>
     onMetrics: (callback: (sessionId: string, metrics: any) => void) => (() => void) | undefined
     onError: (callback: (sessionId: string, error: any) => void) => (() => void) | undefined
   }
@@ -807,6 +841,13 @@ export interface ElectronAPI {
     onDisconnected: (callback: (connectionId: string) => void) => () => void
     onError: (callback: (connectionId: string, error: string) => void) => () => void
   }
+  ipmi: {
+    connect: (config: any) => Promise<ApiResult<any>>
+    getInfo: (connectionId: string) => Promise<ApiResult<any>>
+    power: (connectionId: string, action: 'on' | 'off' | 'cycle' | 'reset') => Promise<ApiResult<any>>
+    disconnect: (connectionId: string) => Promise<ApiResult>
+    getStatus: (connectionId: string) => Promise<ApiResult<any>>
+  }
   quickCommand: {
     getAll: () => Promise<ApiResult<any[]>>
     get: (id: string) => Promise<ApiResult<any>>
@@ -824,6 +865,9 @@ export interface ElectronAPI {
     import: (filePath: string) => Promise<ApiResult<any>>
   }
   lazyScript: {
+    deploy: (id: string, token: string, fileName: string, content: string, copyTo?: string) => Promise<ApiResult<ScriptDeploymentResult>>
+    cancelDeployment: (token: string) => Promise<void>
+    onChanged: (callback: () => void) => () => void
     getAll: () => Promise<ApiResult<any[]>>
     get: (id: string) => Promise<ApiResult<any>>
     create: (data: any) => Promise<ApiResult<any>>

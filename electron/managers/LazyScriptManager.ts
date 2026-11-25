@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs'
 import { v4 as uuidv4 } from 'uuid'
 import { BaseManager } from './BaseManager'
+import { extractScriptVariables, renderScriptText } from '../../src/utils/lazy-script-template'
 
 export type LazyScriptType = 'command' | 'shell' | 'steps'
 export type LazyScriptRunMode = 'copy' | 'paste' | 'execute'
@@ -53,8 +54,6 @@ const CHANGE_LOGIN_PASSWORD_SCRIPT_DESCRIPTION =
 const INSTALL_BASIC_TOOLS_SCRIPT_DESCRIPTION =
   '按分类选择单个工具安装 sudo、网络诊断、压缩解压、监控排障等常用基础工具，并支持额外包名。'
 const INSTALL_BASIC_TOOLS_DEFAULT_TOOLS = 'sudo,curl,wget,tar,gzip,vim,nano'
-const PREVIOUS_INSTALL_BASIC_TOOLS_DEFAULT_TOOLS =
-  'sudo,curl,wget,vim,git,jq,tree,rsync,zip,unzip'
 const INSTALL_BASIC_TOOLS_SCRIPT_VARIABLES: LazyScriptVariable[] = [
   {
     name: 'tools',
@@ -188,180 +187,6 @@ const SSH_PORT_VARIABLE: LazyScriptVariable = {
   defaultValue: '22',
   required: true
 }
-
-const OLD_CHANGE_SSH_PORT_SCRIPT_CONTENT = `set -e
-NEW_PORT="{{ssh_port}}"
-
-if ! command -v sshd >/dev/null 2>&1; then
-  echo "未检测到 sshd，请先确认系统 SSH 服务。"
-  exit 1
-fi
-
-SSHD_CONFIG="/etc/ssh/sshd_config"
-cp "$SSHD_CONFIG" "$SSHD_CONFIG.bak.$(date +%Y%m%d%H%M%S)"
-
-if grep -qE '^#?Port\\s+' "$SSHD_CONFIG"; then
-  sed -i -E "s/^#?Port\\s+.*/Port $NEW_PORT/" "$SSHD_CONFIG"
-else
-  printf '\\nPort %s\\n' "$NEW_PORT" >> "$SSHD_CONFIG"
-fi
-
-sshd -t
-systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service sshd restart || service ssh restart
-echo "SSH 端口已修改为 $NEW_PORT，请先用新端口测试后再关闭当前连接。"`
-
-const PREVIOUS_CHANGE_SSH_PORT_SCRIPT_CONTENT = `set -e
-NEW_PORT="{{ssh_port}}"
-PROTOCOL="tcp"
-FIREWALL_FOUND=0
-FIREWALL_ERRORS=0
-
-if [ "$(id -u)" -ne 0 ]; then
-  echo "请使用 root 权限执行该脚本。"
-  exit 1
-fi
-
-if ! printf '%s' "$NEW_PORT" | grep -Eq '^[0-9]+$' || [ "$NEW_PORT" -lt 1 ] || [ "$NEW_PORT" -gt 65535 ]; then
-  echo "SSH 端口必须是 1-65535 的数字。"
-  exit 1
-fi
-
-SSHD_BIN="$(command -v sshd || true)"
-if [ -z "$SSHD_BIN" ] && [ -x /usr/sbin/sshd ]; then
-  SSHD_BIN="/usr/sbin/sshd"
-fi
-if [ -z "$SSHD_BIN" ]; then
-  echo "未检测到 sshd，请先确认系统 SSH 服务。"
-  exit 1
-fi
-
-SSHD_CONFIG="/etc/ssh/sshd_config"
-if [ ! -f "$SSHD_CONFIG" ]; then
-  echo "未找到 SSH 配置文件: $SSHD_CONFIG"
-  exit 1
-fi
-
-mark_firewall_error() {
-  FIREWALL_ERRORS=1
-  echo "防火墙放行失败: $1"
-}
-
-ensure_selinux_port() {
-  if ! command -v getenforce >/dev/null 2>&1; then
-    return
-  fi
-
-  SELINUX_MODE="$(getenforce 2>/dev/null || echo Disabled)"
-  if [ "$SELINUX_MODE" = "Disabled" ]; then
-    return
-  fi
-
-  if ! command -v semanage >/dev/null 2>&1; then
-    if [ "$SELINUX_MODE" = "Enforcing" ]; then
-      echo "SELinux 处于 Enforcing，但未安装 semanage，无法确认新端口是否允许。"
-      echo "请先安装 policycoreutils-python-utils 或手动放行 ssh_port_t 后再执行。"
-      FIREWALL_ERRORS=1
-    else
-      echo "SELinux 处于 $SELINUX_MODE，未检测到 semanage，跳过 SELinux 端口策略。"
-    fi
-    return
-  fi
-
-  if semanage port -l 2>/dev/null | awk '$1 == "ssh_port_t" && $2 == "tcp" {print $0}' | grep -Eq "(^|[ ,])$NEW_PORT([, ]|$)"; then
-    echo "SELinux 已允许 SSH 端口 $NEW_PORT/tcp"
-    return
-  fi
-
-  if semanage port -a -t ssh_port_t -p tcp "$NEW_PORT" 2>/dev/null; then
-    echo "已添加 SELinux SSH 端口策略: $NEW_PORT/tcp"
-  elif semanage port -m -t ssh_port_t -p tcp "$NEW_PORT" 2>/dev/null; then
-    echo "已更新 SELinux SSH 端口策略: $NEW_PORT/tcp"
-  else
-    mark_firewall_error "SELinux ssh_port_t $NEW_PORT/tcp"
-  fi
-}
-
-allow_firewalls() {
-  ensure_selinux_port
-
-  if command -v ufw >/dev/null 2>&1; then
-    if ufw status 2>/dev/null | grep -qi "Status: active"; then
-      FIREWALL_FOUND=1
-      echo "检测到 UFW，正在放行 $NEW_PORT/$PROTOCOL"
-      ufw allow "$NEW_PORT/$PROTOCOL" || mark_firewall_error "UFW $NEW_PORT/$PROTOCOL"
-    else
-      echo "检测到 UFW，但当前未启用，跳过。"
-    fi
-  fi
-
-  if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-    FIREWALL_FOUND=1
-    echo "检测到 firewalld，正在放行 $NEW_PORT/$PROTOCOL"
-    firewall-cmd --add-port="$NEW_PORT/$PROTOCOL" || mark_firewall_error "firewalld runtime $NEW_PORT/$PROTOCOL"
-    firewall-cmd --permanent --add-port="$NEW_PORT/$PROTOCOL" || mark_firewall_error "firewalld permanent $NEW_PORT/$PROTOCOL"
-    firewall-cmd --reload || mark_firewall_error "firewalld reload"
-  fi
-
-  if command -v nft >/dev/null 2>&1; then
-    NFT_RULESET="$(nft list ruleset 2>/dev/null || true)"
-    if [ -n "$NFT_RULESET" ] || { command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nftables; }; then
-      FIREWALL_FOUND=1
-      echo "检测到 nftables，正在放行 $NEW_PORT/$PROTOCOL"
-      nft list table inet mshell >/dev/null 2>&1 || nft add table inet mshell || mark_firewall_error "nft add table"
-      nft list chain inet mshell input >/dev/null 2>&1 || nft add chain inet mshell input '{ type filter hook input priority -100; policy accept; }' || mark_firewall_error "nft add input chain"
-      if ! nft list chain inet mshell input 2>/dev/null | grep -q "tcp dport $NEW_PORT accept"; then
-        nft add rule inet mshell input tcp dport "$NEW_PORT" accept || mark_firewall_error "nft add rule $NEW_PORT/$PROTOCOL"
-      fi
-      echo "nftables 已添加运行时规则。如系统依赖 /etc/nftables.conf，请确认规则持久化。"
-    fi
-  fi
-
-  if command -v iptables >/dev/null 2>&1; then
-    IPTABLES_INPUT="$(iptables -S INPUT 2>/dev/null || true)"
-    if printf '%s\\n' "$IPTABLES_INPUT" | grep -Eq '^-P INPUT (DROP|REJECT)|^-A INPUT'; then
-      FIREWALL_FOUND=1
-      echo "检测到 iptables，正在放行 $NEW_PORT/$PROTOCOL"
-      if iptables -C INPUT -p tcp --dport "$NEW_PORT" -j ACCEPT 2>/dev/null; then
-        echo "iptables 已存在 $NEW_PORT/$PROTOCOL 放行规则"
-      else
-        iptables -I INPUT -p tcp --dport "$NEW_PORT" -j ACCEPT || mark_firewall_error "iptables $NEW_PORT/$PROTOCOL"
-      fi
-
-      if command -v netfilter-persistent >/dev/null 2>&1; then
-        netfilter-persistent save || echo "iptables 规则持久化失败，请手动保存。"
-      elif [ -d /etc/iptables ] && command -v iptables-save >/dev/null 2>&1; then
-        iptables-save > /etc/iptables/rules.v4 || echo "iptables 规则持久化失败，请手动保存。"
-      elif command -v service >/dev/null 2>&1; then
-        service iptables save 2>/dev/null || echo "iptables 规则可能仅本次运行有效，请按系统方式持久化。"
-      else
-        echo "iptables 规则可能仅本次运行有效，请按系统方式持久化。"
-      fi
-    fi
-  fi
-
-  if [ "$FIREWALL_FOUND" -eq 0 ]; then
-    echo "未检测到已启用的本机防火墙。若云厂商安全组存在限制，请手动放行 $NEW_PORT/$PROTOCOL。"
-  fi
-
-  if [ "$FIREWALL_ERRORS" -ne 0 ]; then
-    echo "检测到防火墙或 SELinux 放行失败，已停止修改 SSH 配置，避免锁定服务器。"
-    exit 1
-  fi
-}
-
-allow_firewalls
-
-cp "$SSHD_CONFIG" "$SSHD_CONFIG.bak.$(date +%Y%m%d%H%M%S)"
-
-if grep -qE '^#?Port\\s+' "$SSHD_CONFIG"; then
-  sed -i -E "s/^#?Port\\s+.*/Port $NEW_PORT/" "$SSHD_CONFIG"
-else
-  printf '\\nPort %s\\n' "$NEW_PORT" >> "$SSHD_CONFIG"
-fi
-
-"$SSHD_BIN" -t
-systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service sshd restart || service ssh restart
-echo "SSH 端口已修改为 $NEW_PORT，并已尝试放行本机防火墙。请先用新端口测试后再关闭当前连接。"`
 
 const CHANGE_SSH_PORT_SCRIPT_CONTENT = `set -e
 NEW_PORT="{{ssh_port}}"
@@ -664,11 +489,6 @@ fi
 echo "请先打开新连接测试 $NEW_PORT 端口，再关闭当前连接。"
 echo "如果服务器还有云厂商安全组/外部防火墙，请同时放行 $NEW_PORT/$PROTOCOL。"`
 
-const CHANGE_SSH_PORT_SCRIPT_MIGRATION_CONTENTS = [
-  OLD_CHANGE_SSH_PORT_SCRIPT_CONTENT,
-  PREVIOUS_CHANGE_SSH_PORT_SCRIPT_CONTENT
-]
-
 const FIREWALL_PORT_SCRIPT_DESCRIPTION =
   '自动识别 UFW、firewalld、nftables 或 iptables，按单个/多个端口、全端口和来源 IP/IP 段放行，并确认规则持久化。'
 const FIREWALL_PORT_SCRIPT_VARIABLES: LazyScriptVariable[] = [
@@ -695,24 +515,6 @@ const FIREWALL_PORT_SCRIPT_VARIABLES: LazyScriptVariable[] = [
     required: true
   }
 ]
-
-const OLD_FIREWALL_PORT_SCRIPT_CONTENT = `set -e
-PORT="{{port}}"
-PROTOCOL="{{protocol}}"
-
-if command -v ufw >/dev/null 2>&1; then
-  ufw allow "$PORT/$PROTOCOL"
-elif command -v firewall-cmd >/dev/null 2>&1; then
-  firewall-cmd --permanent --add-port="$PORT/$PROTOCOL"
-  firewall-cmd --reload
-elif command -v iptables >/dev/null 2>&1; then
-  iptables -I INPUT -p "$PROTOCOL" --dport "$PORT" -j ACCEPT
-else
-  echo "未检测到已支持的防火墙工具。"
-  exit 1
-fi
-
-echo "已放行 $PORT/$PROTOCOL"`
 
 const FIREWALL_PORT_SCRIPT_CONTENT = `set -e
 set -f
@@ -1189,24 +991,6 @@ fi`
 
 const SYSTEM_INFO_SCRIPT_DESCRIPTION =
   '整理展示发行版、内核、CPU、内存、磁盘、网络和 SSH/防火墙状态。'
-
-const OLD_SYSTEM_INFO_SCRIPT_CONTENT = `echo "== OS =="
-cat /etc/os-release 2>/dev/null | sed -n '1,8p'
-echo
-echo "== Kernel =="
-uname -a
-echo
-echo "== CPU =="
-nproc
-echo
-echo "== Memory =="
-free -h
-echo
-echo "== Disk =="
-df -hT
-echo
-echo "== IP =="
-ip addr show | sed -n '1,120p'`
 
 const SYSTEM_INFO_SCRIPT_CONTENT = `set -e
 
@@ -1965,23 +1749,6 @@ printf '%s:%s\\n' "$TARGET_USER" "$NEW_PASSWORD" | chpasswd
 echo "用户 $TARGET_USER 的登录密码已修改。"
 echo "请使用新密码另开窗口测试登录后，再关闭当前连接。"`
 
-const OLD_INSTALL_BASIC_TOOLS_SCRIPT_CONTENT = `set -e
-PACKAGES="{{packages}}"
-
-if command -v apt-get >/dev/null 2>&1; then
-  apt-get update
-  apt-get install -y $PACKAGES
-elif command -v dnf >/dev/null 2>&1; then
-  dnf install -y $PACKAGES
-elif command -v yum >/dev/null 2>&1; then
-  yum install -y $PACKAGES
-elif command -v apk >/dev/null 2>&1; then
-  apk add --no-cache $PACKAGES
-else
-  echo "未检测到已支持的包管理器。"
-  exit 1
-fi`
-
 const INSTALL_BASIC_TOOLS_SCRIPT_CONTENT = `set -e
 TOOLS="{{tools}}"
 EXTRA_PACKAGES="{{extra_packages}}"
@@ -2655,7 +2422,9 @@ fi
 echo
 echo "换源流程完成。"`
 
-const DEFAULT_LAZY_SCRIPTS: Array<Omit<LazyScript, 'id' | 'usageCount' | 'createdAt' | 'updatedAt'>> = [
+const DEFAULT_LAZY_SCRIPTS: Array<
+  Omit<LazyScript, 'id' | 'usageCount' | 'createdAt' | 'updatedAt'>
+> = [
   {
     name: '查看系统基础信息',
     fileName: 'system-info.sh',
@@ -2922,7 +2691,12 @@ print_key_list
 echo "请先确认新密钥可以登录，再关闭当前 SSH 连接。"`,
     variables: [
       { name: 'username', label: '用户名', type: 'text', defaultValue: 'root', required: true },
-      { name: 'delete_key_index', label: '删除序号（0 只新增）', type: 'number', defaultValue: '0' },
+      {
+        name: 'delete_key_index',
+        label: '删除序号（0 只新增）',
+        type: 'number',
+        defaultValue: '0'
+      },
       { name: 'old_public_key', label: '旧公钥内容', type: 'textarea', defaultValue: '' },
       { name: 'public_key', label: '新公钥内容', type: 'textarea', required: true }
     ],
@@ -3067,28 +2841,45 @@ docker --version`,
   }
 ]
 
-const LEGACY_DEFAULT_SCRIPT_FILE_NAMES = new Set([
-  '查看系统基础信息.sh',
-  '修改-SSH-端口并重启.sh',
-  '添加-SSH-公钥.sh',
-  '关闭-SSH-密码登录.sh',
-  '创建-sudo-用户.sh',
-  '放行防火墙端口.sh',
-  '安装常用工具.sh',
-  '检查磁盘大目录.sh',
-  '安装-Docker.sh'
-])
-
 export class LazyScriptManager extends BaseManager<LazyScript> {
   private initializePromise: Promise<void> | null = null
+  private saveQueue = Promise.resolve()
+  private changeListeners = new Set<() => void>()
+  private removedPasswordDefaults = false
+
+  onChanged(listener: () => void): () => void {
+    this.changeListeners.add(listener)
+    return () => this.changeListeners.delete(listener)
+  }
+
+  protected async save(): Promise<void> {
+    const snapshot = JSON.stringify(
+      this.getAll().map((script) => this.serialize(script)),
+      null,
+      2
+    )
+    const operation = this.saveQueue.then(async () => {
+      const temporary = `${this.dataPath}.${uuidv4()}.tmp`
+      await fs.mkdir(require('path').dirname(this.dataPath), { recursive: true })
+      try {
+        await fs.writeFile(temporary, snapshot, { encoding: 'utf8', mode: 0o600 })
+        await fs.rename(temporary, this.dataPath)
+      } finally {
+        await fs.unlink(temporary).catch(() => {})
+      }
+      this.changeListeners.forEach((listener) => listener())
+    })
+    this.saveQueue = operation.catch(() => {})
+    return operation
+  }
 
   constructor() {
     super('lazy-scripts.json')
   }
 
   async initialize(): Promise<void> {
-    if (this.initialized) return
     if (this.initializePromise) return this.initializePromise
+    if (this.initialized) return
 
     this.initializePromise = this.initializeOnce().finally(() => {
       this.initializePromise = null
@@ -3107,15 +2898,20 @@ export class LazyScriptManager extends BaseManager<LazyScript> {
       }
     }
 
-    await super.initialize()
+    // A corrupt/unreadable library must never be replaced with an empty/default library.
+    this.data.clear()
+    await this.load()
 
     if (!dataFileExists && this.count() === 0) {
       await this.seedDefaultScripts()
+      this.initialized = true
       return
     }
 
-    await this.migrateDefaultScripts()
-    await this.seedMissingDefaultScripts()
+    // Existing libraries belong to the user. Never infer template ownership from a filename,
+    // rewrite customized templates, or resurrect deleted templates during startup.
+    if (this.removedPasswordDefaults) await this.save()
+    this.initialized = true
   }
 
   async create(data: {
@@ -3243,29 +3039,17 @@ export class LazyScriptManager extends BaseManager<LazyScript> {
   }
 
   extractVariables(content: string): string[] {
-    const variables = new Set<string>()
-    const braceMatches = content.matchAll(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g)
-    for (const match of braceMatches) {
-      variables.add(match[1])
-    }
-
-    const dollarMatches = content.matchAll(/\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g)
-    for (const match of dollarMatches) {
-      variables.add(match[1])
-    }
-
-    return Array.from(variables)
+    return extractScriptVariables(content)
   }
 
   render(content: string, values: Record<string, string | string[]>): string {
-    let result = content
-    for (const [key, value] of Object.entries(values || {})) {
-      if (!VARIABLE_NAME_PATTERN.test(key)) continue
-      const normalizedValue = Array.isArray(value) ? value.join(' ') : String(value || '')
-      result = result.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g'), normalizedValue)
-      result = result.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), normalizedValue)
-    }
-    return result
+    return renderScriptText(
+      content,
+      values,
+      Object.keys(values || {})
+        .filter((key) => VARIABLE_NAME_PATTERN.test(key))
+        .map((name) => ({ name }))
+    )
   }
 
   private async seedDefaultScripts(): Promise<void> {
@@ -3279,330 +3063,6 @@ export class LazyScriptManager extends BaseManager<LazyScript> {
         updatedAt: now
       })
     }
-  }
-
-  private async seedMissingDefaultScripts(): Promise<void> {
-    const existingFileNames = new Set(
-      this.getAll().map((script) => this.normalizeFileName(script.fileName || script.name))
-    )
-    const now = new Date().toISOString()
-
-    for (const template of DEFAULT_LAZY_SCRIPTS) {
-      const fileName = this.normalizeFileName(template.fileName || template.name)
-      if (existingFileNames.has(fileName)) continue
-
-      await super.create({
-        ...template,
-        fileName,
-        id: uuidv4(),
-        usageCount: 0,
-        createdAt: now,
-        updatedAt: now
-      })
-      existingFileNames.add(fileName)
-    }
-  }
-
-  private async migrateDefaultScripts(): Promise<void> {
-    await this.deleteLegacyDefaultScripts()
-
-    const changeSshPortScript = this.getAll().find(
-      (script) =>
-        script.fileName === 'change-ssh-port.sh' || script.name === '修改 SSH 端口并重启'
-    )
-
-    if (changeSshPortScript && this.shouldMigrateChangeSshPortScript(changeSshPortScript.content)) {
-      await this.update(changeSshPortScript.id, {
-        description: CHANGE_SSH_PORT_SCRIPT_DESCRIPTION,
-        content: CHANGE_SSH_PORT_SCRIPT_CONTENT
-      })
-    }
-
-    const firewallPortScript = this.getAll().find(
-      (script) => script.fileName === 'allow-firewall-port.sh' || script.name === '放行防火墙端口'
-    )
-
-    if (firewallPortScript && this.shouldMigrateFirewallPortScript(firewallPortScript.content)) {
-      await this.update(firewallPortScript.id, {
-        description: FIREWALL_PORT_SCRIPT_DESCRIPTION,
-        content: FIREWALL_PORT_SCRIPT_CONTENT,
-        variables: FIREWALL_PORT_SCRIPT_VARIABLES
-      })
-    }
-
-    const systemInfoScript = this.getAll().find(
-      (script) => script.fileName === 'system-info.sh' || script.name === '查看系统基础信息'
-    )
-
-    if (systemInfoScript && this.shouldMigrateSystemInfoScript(systemInfoScript.content)) {
-      await this.update(systemInfoScript.id, {
-        description: SYSTEM_INFO_SCRIPT_DESCRIPTION,
-        content: SYSTEM_INFO_SCRIPT_CONTENT
-      })
-    }
-
-    const installBasicToolsScript = this.getAll().find(
-      (script) => script.fileName === 'install-basic-tools.sh' || script.name === '安装常用工具'
-    )
-
-    if (
-      installBasicToolsScript &&
-      this.shouldMigrateInstallBasicToolsScript(installBasicToolsScript)
-    ) {
-      await this.update(installBasicToolsScript.id, {
-        description: INSTALL_BASIC_TOOLS_SCRIPT_DESCRIPTION,
-        tags: ['install', 'tools', 'sudo'],
-        content: INSTALL_BASIC_TOOLS_SCRIPT_CONTENT,
-        variables: INSTALL_BASIC_TOOLS_SCRIPT_VARIABLES
-      })
-    }
-
-    const enableSshPasswordScript = this.getAll().find(
-      (script) =>
-        script.fileName === 'enable-ssh-password-login.sh' || script.name === '开启 SSH 密码登录'
-    )
-
-    if (
-      enableSshPasswordScript &&
-      this.shouldMigrateEnableSshPasswordScript(enableSshPasswordScript)
-    ) {
-      await this.update(enableSshPasswordScript.id, {
-        description: ENABLE_SSH_PASSWORD_SCRIPT_DESCRIPTION,
-        content: ENABLE_SSH_PASSWORD_SCRIPT_CONTENT,
-        variables: [SSH_PORT_VARIABLE]
-      })
-    }
-
-    const autoChangeMirrorScript = this.getAll().find(
-      (script) =>
-        script.fileName === 'auto-change-mirror.sh' || script.name === '自动更换系统软件源'
-    )
-
-    if (
-      autoChangeMirrorScript &&
-      this.shouldMigrateAutoChangeMirrorScript(autoChangeMirrorScript.content)
-    ) {
-      await this.update(autoChangeMirrorScript.id, {
-        description: AUTO_CHANGE_MIRROR_SCRIPT_DESCRIPTION,
-        tags: ['mirror', 'repo', 'source'],
-        content: AUTO_CHANGE_MIRROR_SCRIPT_CONTENT,
-        variables: AUTO_CHANGE_MIRROR_SCRIPT_VARIABLES
-      })
-    }
-
-    const replaceSshPublicKeyScript = this.getAll().find(
-      (script) =>
-        script.fileName === 'replace-ssh-public-key.sh' || script.name === '替换 SSH 公钥'
-    )
-    const replaceSshPublicKeyTemplate = DEFAULT_LAZY_SCRIPTS.find(
-      (script) => script.fileName === 'replace-ssh-public-key.sh'
-    )
-
-    if (
-      replaceSshPublicKeyScript &&
-      replaceSshPublicKeyTemplate &&
-      this.shouldMigrateReplaceSshPublicKeyScript(replaceSshPublicKeyScript)
-    ) {
-      await this.update(replaceSshPublicKeyScript.id, {
-        description: replaceSshPublicKeyTemplate.description,
-        tags: replaceSshPublicKeyTemplate.tags,
-        content: replaceSshPublicKeyTemplate.content,
-        variables: replaceSshPublicKeyTemplate.variables,
-        riskLevel: replaceSshPublicKeyTemplate.riskLevel,
-        runMode: replaceSshPublicKeyTemplate.runMode
-      })
-    }
-  }
-
-  private async deleteLegacyDefaultScripts(): Promise<void> {
-    for (const script of this.getAll()) {
-      const fileName = this.normalizeFileName(script.fileName || script.name)
-      if (!LEGACY_DEFAULT_SCRIPT_FILE_NAMES.has(fileName)) continue
-
-      await super.delete(script.id)
-    }
-  }
-
-  private shouldMigrateChangeSshPortScript(content: string): boolean {
-    if (
-      CHANGE_SSH_PORT_SCRIPT_MIGRATION_CONTENTS.some((template) =>
-        this.isSameScriptContent(content, template)
-      )
-    ) {
-      return true
-    }
-
-    const normalized = content.replace(/\r\n/g, '\n')
-    return (
-      normalized.includes('nftables 已添加运行时规则。如系统使用 /etc/nftables.conf，请确认规则持久化。') ||
-      normalized.includes('iptables 规则可能仅本次运行有效，请按系统方式持久化。') ||
-      normalized.includes('iptables 规则持久化失败，请手动保存。')
-    )
-  }
-
-  private shouldMigrateFirewallPortScript(content: string): boolean {
-    if (this.isSameScriptContent(content, OLD_FIREWALL_PORT_SCRIPT_CONTENT)) {
-      return true
-    }
-
-    const normalized = content.replace(/\r\n/g, '\n')
-    return (
-      normalized.includes('未检测到已支持的防火墙工具。') ||
-      normalized.includes('iptables -I INPUT -p "$PROTOCOL" --dport "$PORT" -j ACCEPT') ||
-      (normalized.includes('PORT="{{port}}"') &&
-        normalized.includes('PROTOCOL="{{protocol}}"') &&
-        !normalized.includes('PORTS="{{ports}}"')) ||
-      (normalized.includes('PORTS="{{ports}}"') && !normalized.includes('ANY_PORT_TOKEN="__ANY_PORT__"')) ||
-      (normalized.includes('ANY_PORT_TOKEN="__ANY_PORT__"') && !normalized.includes('set -f'))
-    )
-  }
-
-  private shouldMigrateSystemInfoScript(content: string): boolean {
-    if (this.isSameScriptContent(content, OLD_SYSTEM_INFO_SCRIPT_CONTENT)) {
-      return true
-    }
-
-    const normalized = content.replace(/\r\n/g, '\n')
-    return (
-      normalized.includes('section "主机总览"') ||
-      normalized.includes('kv "主机名"') ||
-      normalized.includes('printf "%-16s %s\\n", "内存总量"') ||
-      (normalized.includes('section "NETWORK"') &&
-        normalized.includes('IPv4 Addresses') &&
-        !normalized.includes('IPv6 Addresses')) ||
-      normalized.includes('echo "== OS =="') &&
-      normalized.includes('free -h') &&
-      normalized.includes('df -hT') &&
-      normalized.includes("ip addr show | sed -n '1,120p'")
-    )
-  }
-
-  private shouldMigrateEnableSshPasswordScript(script: LazyScript): boolean {
-    const normalized = script.content.replace(/\r\n/g, '\n')
-    const hasSshPortVariable = script.variables.some((variable) => variable.name === 'ssh_port')
-
-    return (
-      !hasSshPortVariable ||
-      (normalized.includes('已开启 SSH 密码登录，并保留密钥登录。') &&
-        !normalized.includes('NEW_PORT="{{ssh_port}}"'))
-    )
-  }
-
-  private shouldMigrateReplaceSshPublicKeyScript(script: LazyScript): boolean {
-    const normalized = script.content.replace(/\r\n/g, '\n')
-    return (
-      !script.variables.some((variable) => variable.name === 'delete_key_index') ||
-      !normalized.includes('DELETE_KEY_INDEX="{{delete_key_index}}"') ||
-      !normalized.includes('print_key_list()') ||
-      !normalized.includes('key_id_by_index()') ||
-      normalized.includes('index += 1')
-    )
-  }
-
-  private shouldMigrateInstallBasicToolsScript(script: LazyScript): boolean {
-    if (this.isSameScriptContent(script.content, OLD_INSTALL_BASIC_TOOLS_SCRIPT_CONTENT)) {
-      return true
-    }
-
-    const normalized = script.content.replace(/\r\n/g, '\n')
-    const toolsVariable = script.variables.find((variable) => variable.name === 'tools')
-    const hasOldPackagesTemplate =
-      normalized.includes('PACKAGES="{{packages}}"') &&
-      normalized.includes('apt-get install -y $PACKAGES') &&
-      normalized.includes('apk add --no-cache $PACKAGES')
-    const hasToolGroupsTemplate =
-      normalized.includes('TOOL_GROUPS="{{tool_groups}}"') &&
-      normalized.includes('EXTRA_PACKAGES="{{extra_packages}}"') &&
-      normalized.includes('add_group()')
-    const hasToolsTemplate =
-      normalized.includes('TOOLS="{{tools}}"') &&
-      normalized.includes('EXTRA_PACKAGES="{{extra_packages}}"') &&
-      normalized.includes('add_tool()')
-    const hasBrokenToolsVariable =
-      hasToolsTemplate &&
-      (toolsVariable?.type !== 'multiselect' ||
-        !script.variables.some((variable) => variable.name === 'extra_packages') ||
-        (toolsVariable.options?.length || 0) < 30)
-    const hasPreviousDefaultTools =
-      hasToolsTemplate && toolsVariable?.defaultValue === PREVIOUS_INSTALL_BASIC_TOOLS_DEFAULT_TOOLS
-
-    return (
-      hasOldPackagesTemplate ||
-      hasToolGroupsTemplate ||
-      hasBrokenToolsVariable ||
-      hasPreviousDefaultTools
-    )
-  }
-
-  private shouldMigrateAutoChangeMirrorScript(content: string): boolean {
-    const normalized = content.replace(/\r\n/g, '\n')
-    // These hidden markers are only used to replace the earlier remote-executing template.
-    const legacyRemoteUrl = String.fromCharCode(
-      104,
-      116,
-      116,
-      112,
-      115,
-      58,
-      47,
-      47,
-      108,
-      105,
-      110,
-      117,
-      120,
-      109,
-      105,
-      114,
-      114,
-      111,
-      114,
-      115,
-      46,
-      99,
-      110,
-      47,
-      109,
-      97,
-      105,
-      110,
-      46,
-      115,
-      104
-    )
-    const legacyRemoteFetchMessage = `${String.fromCharCode(
-      27491,
-      22312,
-      33719,
-      21462,
-      32,
-      76,
-      105,
-      110,
-      117,
-      120,
-      77,
-      105,
-      114,
-      114,
-      111,
-      114,
-      115,
-      32,
-      20027,
-      33050,
-      26412
-    )}`
-
-    return (
-      normalized.includes(legacyRemoteUrl) ||
-      normalized.includes(legacyRemoteFetchMessage) ||
-      normalized.includes('bash "$TMP_SCRIPT" $ARGS')
-    )
-  }
-
-  private isSameScriptContent(left: string, right: string): boolean {
-    return left.replace(/\r\n/g, '\n').trim() === right.replace(/\r\n/g, '\n').trim()
   }
 
   protected serialize(script: LazyScript): any {
@@ -3623,7 +3083,9 @@ export class LazyScriptManager extends BaseManager<LazyScript> {
       fileName: this.normalizeFileName(data.fileName || name),
       description: String(data.description || ''),
       category: String(data.category || ''),
-      tags: Array.isArray(data.tags) ? data.tags.map((tag: any) => String(tag)).filter(Boolean) : [],
+      tags: Array.isArray(data.tags)
+        ? data.tags.map((tag: any) => String(tag)).filter(Boolean)
+        : [],
       type: this.normalizeType(data.type),
       content: String(data.content || ''),
       variables: this.normalizeVariables(data.variables || []),
@@ -3637,6 +3099,8 @@ export class LazyScriptManager extends BaseManager<LazyScript> {
 
   private normalizeVariables(variables: LazyScriptVariable[]): LazyScriptVariable[] {
     if (!Array.isArray(variables)) return []
+    if (variables.some((variable) => variable?.type === 'password' && variable.defaultValue))
+      this.removedPasswordDefaults = true
 
     return variables
       .map((variable) => ({
@@ -3644,7 +3108,9 @@ export class LazyScriptManager extends BaseManager<LazyScript> {
         label: String(variable.label || variable.name || '').trim(),
         type: this.normalizeVariableType(variable.type),
         defaultValue:
-          variable.defaultValue === undefined ? undefined : String(variable.defaultValue),
+          variable.type === 'password' || variable.defaultValue === undefined
+            ? undefined
+            : String(variable.defaultValue),
         required: Boolean(variable.required),
         options: Array.isArray(variable.options)
           ? variable.options.map((option) => String(option)).filter(Boolean)
@@ -3679,12 +3145,13 @@ export class LazyScriptManager extends BaseManager<LazyScript> {
   }
 
   private normalizeFileName(value: string): string {
-    const baseName = String(value || 'script')
-      .trim()
-      .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
-      .replace(/\s+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 80) || 'script'
+    const baseName =
+      String(value || 'script')
+        .trim()
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+        .replace(/\s+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80) || 'script'
 
     const safeName = baseName.replace(/[^a-zA-Z0-9._\-\u4e00-\u9fa5]/g, '-')
     return /\.[a-zA-Z0-9]{1,8}$/.test(safeName) ? safeName : `${safeName}.sh`

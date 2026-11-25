@@ -595,6 +595,16 @@ APPLICATION|worker|example/worker:latest|
       'write_remote_file',
       'execute_command'
     ])
+    expect(
+      toolResult.result.tools.find((tool: { name: string }) => tool.name === 'execute_readonly_command')
+    ).toEqual(expect.objectContaining({
+      annotations: expect.objectContaining({ readOnlyHint: true, destructiveHint: false })
+    }))
+    expect(
+      toolResult.result.tools.find((tool: { name: string }) => tool.name === 'execute_command')
+    ).toEqual(expect.objectContaining({
+      annotations: expect.objectContaining({ readOnlyHint: false, destructiveHint: true })
+    }))
 
     const sessionsResponse = await postMcp(port, {
       jsonrpc: '2.0',
@@ -722,7 +732,12 @@ APPLICATION|worker|example/worker:latest|
       bytes: 6,
       written: true
     })
-    expect(mocks.writeFile).toHaveBeenCalledWith('connected-session', '/tmp/mshell.txt', 'hello\n')
+    expect(mocks.writeFile).toHaveBeenCalledWith(
+      'connected-session',
+      '/tmp/mshell.txt',
+      'hello\n',
+      expect.any(AbortSignal)
+    )
 
     mocks.settings.allowWriteEnabled = false
     mocks.settings.permissionMode = 'query'
@@ -795,5 +810,52 @@ APPLICATION|worker|example/worker:latest|
     )
     expect(commandAudit?.[1].details).not.toHaveProperty('command')
     expect(mocks.auditLog).toHaveBeenCalled()
+  })
+
+  it('cancels an active write command when permission is downgraded', async () => {
+    const port = await getAvailablePort()
+    mocks.settings.port = port
+    mocks.settings.permissionMode = 'execute'
+    mocks.settings.allowWriteEnabled = true
+    mocks.getConnection.mockReturnValue({
+      id: 'connected-session',
+      status: 'connected',
+      options: { host: 'server.example', port: 22, username: 'root', sessionName: 'Production' }
+    })
+
+    let executionSignal: AbortSignal | undefined
+    mocks.executeCommandDetailed.mockImplementation(
+      async (
+        _connectionId: string,
+        _command: string,
+        _timeout: number,
+        _capture: number,
+        _stdin: unknown,
+        signal: AbortSignal
+      ) =>
+        new Promise<never>((_resolve, reject) => {
+          executionSignal = signal
+          signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+          if (signal.aborted) reject(new Error('aborted'))
+        })
+    )
+
+    await mcpServerManager.applySettings({ ...mocks.settings })
+    const responsePromise = postMcp(port, {
+      jsonrpc: '2.0',
+      id: 80,
+      method: 'tools/call',
+      params: {
+        name: 'execute_command',
+        arguments: { connectionId: 'connected-session', command: 'sleep 60' }
+      }
+    })
+    await vi.waitFor(() => expect(executionSignal).toBeDefined())
+
+    await expect(mcpServerManager.setPermissionMode('query')).resolves.toEqual({ success: true })
+    expect(executionSignal?.aborted).toBe(true)
+    const payload = await readMcpPayload(await responsePromise)
+    expect(payload.result.isError).toBe(true)
+    expect(mocks.executeCommandDetailed).toHaveBeenCalledOnce()
   })
 })

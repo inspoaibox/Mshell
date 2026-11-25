@@ -2,386 +2,423 @@
   <div class="lazy-script-shell">
     <div class="lazy-script-panel">
       <aside class="script-sidebar">
-      <div class="sidebar-top">
-        <div>
-          <h2>懒人脚本</h2>
-          <p>{{ scripts.length }} 个脚本</p>
+        <div class="sidebar-top">
+          <div>
+            <h2>懒人脚本</h2>
+            <p>{{ scripts.length }} 个脚本</p>
+          </div>
+          <el-tooltip content="新增脚本" placement="bottom">
+            <el-button type="primary" :icon="Plus" circle @click="openEditor()" />
+          </el-tooltip>
         </div>
-        <el-tooltip content="新增脚本" placement="bottom">
-          <el-button type="primary" :icon="Plus" circle @click="openEditor()" />
-        </el-tooltip>
-      </div>
 
-      <el-input
-        v-model="searchQuery"
-        class="script-search"
-        :prefix-icon="Search"
-        placeholder="搜索脚本、文件名、标签"
-        clearable
-      />
+        <el-input
+          v-model="searchQuery"
+          class="script-search"
+          :prefix-icon="Search"
+          placeholder="搜索脚本、文件名、标签"
+          clearable
+        />
 
-      <div class="category-list">
-        <button
-          v-for="category in categoryItems"
-          :key="category.key"
-          type="button"
-          class="category-item"
-          :class="{ active: selectedCategory === category.key }"
-          @click="selectedCategory = category.key"
-        >
-          <span>{{ category.label }}</span>
-          <strong>{{ category.count }}</strong>
-        </button>
-      </div>
+        <div class="category-list">
+          <button
+            v-for="category in categoryItems"
+            :key="category.key"
+            type="button"
+            class="category-item"
+            :class="{ active: selectedCategory === category.key }"
+            @click="selectedCategory = category.key"
+          >
+            <span>{{ category.label }}</span>
+            <strong>{{ category.count }}</strong>
+          </button>
+        </div>
 
-      <div class="script-actions">
-        <el-tooltip content="使用详情" placement="top">
-          <el-button class="usage-guide-button" :icon="QuestionFilled" @click="showUsageGuide = true">
-            使用详情
-          </el-button>
-        </el-tooltip>
-        <el-tooltip content="导入脚本库" placement="top">
-          <el-button :icon="Upload" @click="importScripts" />
-        </el-tooltip>
-        <el-tooltip content="导出脚本库" placement="top">
-          <el-button :icon="Download" @click="exportScripts" />
-        </el-tooltip>
-        <el-tooltip content="刷新" placement="top">
-          <el-button :icon="Refresh" @click="loadScripts" />
-        </el-tooltip>
-      </div>
+        <div class="script-actions">
+          <el-tooltip content="使用详情" placement="top">
+            <el-button
+              class="usage-guide-button"
+              :icon="QuestionFilled"
+              @click="showUsageGuide = true"
+            >
+              使用详情
+            </el-button>
+          </el-tooltip>
+          <el-tooltip content="导入脚本库" placement="top">
+            <el-button :icon="Upload" @click="importScripts" />
+          </el-tooltip>
+          <el-tooltip content="导出脚本库" placement="top">
+            <el-button :icon="Download" @click="exportScripts" />
+          </el-tooltip>
+          <el-tooltip content="刷新" placement="top">
+            <el-button :icon="Refresh" @click="loadScripts" />
+          </el-tooltip>
+        </div>
       </aside>
 
       <section class="script-list">
-      <el-scrollbar>
-        <button
-          v-for="script in filteredScripts"
-          :key="script.id"
-          type="button"
-          class="script-item"
-          :class="{ active: selectedScript?.id === script.id }"
-          @click="selectScript(script)"
-        >
-          <div class="script-item-main">
-            <span class="script-name">{{ script.name }}</span>
-            <span class="script-file-name">{{ script.fileName }}</span>
-            <span class="script-desc">{{ script.description || script.content }}</span>
-          </div>
-          <div class="script-item-meta">
-            <el-tag size="small" :type="riskTagType(script.riskLevel)" effect="plain">
-              {{ riskLabel(script.riskLevel) }}
-            </el-tag>
-            <span>{{ script.usageCount }}</span>
-          </div>
-        </button>
+        <el-scrollbar>
+          <button
+            v-for="script in filteredScripts"
+            :key="script.id"
+            type="button"
+            class="script-item"
+            :class="{ active: selectedScript?.id === script.id }"
+            @click="selectScript(script)"
+          >
+            <div class="script-item-main">
+              <span class="script-name">{{ script.name }}</span>
+              <span class="script-file-name">{{ script.fileName }}</span>
+              <span class="script-desc">{{ script.description || script.content }}</span>
+            </div>
+            <div class="script-item-meta">
+              <el-tag size="small" :type="riskTagType(script.riskLevel)" effect="plain">
+                {{ riskLabel(script.riskLevel) }}
+              </el-tag>
+              <span>{{ script.usageCount }}</span>
+            </div>
+          </button>
 
-        <el-empty
-          v-if="!loading && filteredScripts.length === 0"
-          description="暂无匹配脚本"
-          :image-size="96"
-        />
-      </el-scrollbar>
+          <el-empty
+            v-if="!loading && filteredScripts.length === 0"
+            description="暂无匹配脚本"
+            :image-size="96"
+          />
+        </el-scrollbar>
       </section>
 
       <main class="script-detail">
-      <div v-if="selectedScript" class="detail-shell">
-        <header class="detail-header">
-          <div class="detail-title">
-            <div class="title-icon">
-              <el-icon><MagicStick /></el-icon>
+        <div v-if="selectedScript" class="detail-shell">
+          <header class="detail-header">
+            <div class="detail-title">
+              <div class="title-icon">
+                <el-icon><MagicStick /></el-icon>
+              </div>
+              <div class="detail-title-content">
+                <h3>{{ selectedScript.name }}</h3>
+                <p>{{ selectedScript.description || '没有描述' }}</p>
+              </div>
             </div>
-            <div class="detail-title-content">
-              <h3>{{ selectedScript.name }}</h3>
-              <p>{{ selectedScript.description || '没有描述' }}</p>
+
+            <div class="detail-actions">
+              <el-tooltip content="编辑" placement="bottom">
+                <el-button :icon="Edit" circle @click="openEditor(selectedScript)" />
+              </el-tooltip>
+              <el-tooltip content="删除" placement="bottom">
+                <el-button
+                  class="detail-delete-button"
+                  :icon="Delete"
+                  circle
+                  type="danger"
+                  plain
+                  @click="deleteScript(selectedScript)"
+                />
+              </el-tooltip>
             </div>
+          </header>
+
+          <div class="detail-meta">
+            <el-tag effect="plain">{{ selectedScript.category || '未分类' }}</el-tag>
+            <el-tag effect="plain" type="info">{{ activeScriptFileName }}</el-tag>
+            <el-tag effect="plain" :type="riskTagType(selectedScript.riskLevel)">
+              {{ riskLabel(selectedScript.riskLevel) }}
+            </el-tag>
+            <el-tag effect="plain" type="info">{{ typeLabel(selectedScript.type) }}</el-tag>
+            <el-tag v-for="tag in selectedScript.tags" :key="tag" effect="plain" type="info">
+              {{ tag }}
+            </el-tag>
           </div>
 
-          <div class="detail-actions">
-            <el-tooltip content="编辑" placement="bottom">
-              <el-button :icon="Edit" circle @click="openEditor(selectedScript)" />
-            </el-tooltip>
-            <el-tooltip content="删除" placement="bottom">
-              <el-button
-                class="detail-delete-button"
-                :icon="Delete"
-                circle
-                type="danger"
-                plain
-                @click="deleteScript(selectedScript)"
-              />
-            </el-tooltip>
-          </div>
-        </header>
-
-        <div class="detail-meta">
-          <el-tag effect="plain">{{ selectedScript.category || '未分类' }}</el-tag>
-          <el-tag effect="plain" type="info">{{ activeScriptFileName }}</el-tag>
-          <el-tag effect="plain" :type="riskTagType(selectedScript.riskLevel)">
-            {{ riskLabel(selectedScript.riskLevel) }}
-          </el-tag>
-          <el-tag effect="plain" type="info">{{ typeLabel(selectedScript.type) }}</el-tag>
-          <el-tag
-            v-for="tag in selectedScript.tags"
-            :key="tag"
-            effect="plain"
-            type="info"
-          >
-            {{ tag }}
-          </el-tag>
-        </div>
-
-        <section v-if="!isCommandScript" class="script-file-section">
-          <div class="script-file-info">
-            <span>远程路径</span>
-            <code>{{ remoteScriptPath }}</code>
-          </div>
-          <div class="script-file-info">
-            <span>运行命令</span>
-            <code>{{ runCommand }}</code>
-          </div>
-        </section>
-
-        <section v-if="showSshKeyHelper" class="ssh-key-helper-section">
-          <div class="section-title">
-            <span>SSH 密钥辅助</span>
-            <small>生成或选择密钥后自动填入公钥变量</small>
-          </div>
-          <div class="ssh-key-helper-row">
-            <el-select
-              v-model="selectedSshKeyId"
-              class="ssh-key-select"
-              placeholder="选择已有 SSH 密钥"
-              filterable
-              clearable
-              :loading="sshKeysLoading"
-              @focus="loadSshKeys"
-              @change="applySelectedPublicKey"
-            >
-              <el-option
-                v-for="key in sshKeys"
-                :key="key.id"
-                :label="`${key.name} (${key.type.toUpperCase()})`"
-                :value="key.id"
-              >
-                <div class="ssh-key-option">
-                  <span>{{ key.name }}</span>
-                  <small>{{ key.type.toUpperCase() }} · {{ key.fingerprint }}</small>
-                </div>
-              </el-option>
-            </el-select>
-            <el-tooltip content="刷新 SSH 密钥列表" placement="top">
-              <el-button :icon="Refresh" :loading="sshKeysLoading" @click="loadSshKeys">
-                <span class="ssh-key-action-text">刷新</span>
-              </el-button>
-            </el-tooltip>
-            <el-tooltip content="手动添加 SSH 密钥并填入公钥" placement="top">
-              <el-button :icon="Plus" @click="openManualKeyDialog">
-                <span class="ssh-key-action-text">手动添加</span>
-              </el-button>
-            </el-tooltip>
-            <el-tooltip content="生成 SSH 密钥并填入公钥" placement="top">
-              <el-button type="primary" :icon="MagicStick" @click="openGenerateKeyDialog">
-                <span class="ssh-key-action-text">生成并填入</span>
-              </el-button>
-            </el-tooltip>
-          </div>
-          <p v-if="selectedSshKey" class="ssh-key-helper-note">
-            已选择：{{ selectedSshKey.name }}，公钥会写入脚本变量 public_key。
-          </p>
-        </section>
-
-        <section v-if="selectedScript.variables.length" class="variables-section">
-          <div class="section-title">
-            <div class="section-title-main">
-              <span>变量</span>
-              <small>部署前替换到脚本文件内容</small>
+          <section v-if="!isCommandScript && !isStepsScript" class="script-file-section">
+            <div class="script-file-info">
+              <span>{{ knownDeploymentPath ? '实际部署路径' : '默认路径（SSH 登录用户）' }}</span>
+              <code>{{ remoteScriptPath }}</code>
             </div>
-            <el-button
-              v-if="showFirewallPortGuideButton"
-              class="variable-help-button"
-              :icon="QuestionFilled"
-              size="small"
-              @click="showFirewallPortGuide = true"
-            >
-              填写规则
-            </el-button>
-          </div>
-          <div v-if="showFirewallPortGuideButton" class="firewall-port-presets">
-            <div class="firewall-port-presets-head">
-              <span>常用端口</span>
-              <small>点击后只填入端口和协议，来源 IP/IP 段保持不变</small>
+            <div class="script-file-info">
+              <span>运行命令</span>
+              <code>{{ runCommand }}</code>
             </div>
-            <div class="firewall-port-preset-list">
-              <button
-                v-for="preset in firewallPortPresets"
-                :key="preset.title"
-                type="button"
-                class="firewall-port-preset"
-                @click="applyFirewallPortPreset(preset)"
-              >
-                <span>{{ preset.title }}</span>
-                <code>{{ preset.ports }} / {{ preset.protocol.join('+') }}</code>
-              </button>
+          </section>
+
+          <section v-if="showSshKeyHelper" class="ssh-key-helper-section">
+            <div class="section-title">
+              <span>SSH 密钥辅助</span>
+              <small>生成或选择密钥后自动填入公钥变量</small>
             </div>
-          </div>
-          <div v-if="showReplaceSshKeyHelper" class="authorized-key-helper">
-            <div class="authorized-key-helper-main">
-              <span>旧公钥选择</span>
-              <small>
-                {{ selectedAuthorizedKeySummary }}
-              </small>
-            </div>
-            <el-button
-              :icon="Refresh"
-              :loading="authorizedKeysLoading"
-              @click="loadRemoteAuthorizedKeys"
-            >
-              读取远程公钥列表
-            </el-button>
-          </div>
-          <div class="variable-grid">
-            <div
-              v-for="variable in selectedScript.variables"
-              :key="variable.name"
-              class="variable-field"
-              :class="{ 'variable-field-wide': variable.type === 'multiselect' }"
-            >
-              <span>
-                {{ variable.label || variable.name }}
-                <em v-if="variable.required">*</em>
-              </span>
+            <div class="ssh-key-helper-row">
               <el-select
-                v-if="variable.type === 'select'"
-                v-model="executionValues[variable.name]"
-                placeholder="请选择"
+                v-model="selectedSshKeyId"
+                class="ssh-key-select"
+                placeholder="选择已有 SSH 密钥"
+                filterable
+                clearable
+                :loading="sshKeysLoading"
+                @focus="loadSshKeys"
+                @change="applySelectedPublicKey"
               >
-                <template v-if="hasGroupedVariableOptions(variable)">
-                  <el-option-group
-                    v-for="group in groupedVariableOptions(variable)"
-                    :key="group.label"
-                    :label="group.label"
-                  >
+                <el-option
+                  v-for="key in sshKeys"
+                  :key="key.id"
+                  :label="`${key.name} (${key.type.toUpperCase()})`"
+                  :value="key.id"
+                >
+                  <div class="ssh-key-option">
+                    <span>{{ key.name }}</span>
+                    <small>{{ key.type.toUpperCase() }} · {{ key.fingerprint }}</small>
+                  </div>
+                </el-option>
+              </el-select>
+              <el-tooltip content="刷新 SSH 密钥列表" placement="top">
+                <el-button :icon="Refresh" :loading="sshKeysLoading" @click="loadSshKeys">
+                  <span class="ssh-key-action-text">刷新</span>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="手动添加 SSH 密钥并填入公钥" placement="top">
+                <el-button :icon="Plus" @click="openManualKeyDialog">
+                  <span class="ssh-key-action-text">手动添加</span>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="生成 SSH 密钥并填入公钥" placement="top">
+                <el-button type="primary" :icon="MagicStick" @click="openGenerateKeyDialog">
+                  <span class="ssh-key-action-text">生成并填入</span>
+                </el-button>
+              </el-tooltip>
+            </div>
+            <p v-if="selectedSshKey" class="ssh-key-helper-note">
+              已选择：{{ selectedSshKey.name }}，公钥会写入脚本变量 public_key。
+            </p>
+          </section>
+
+          <section v-if="selectedScript.variables.length" class="variables-section">
+            <div class="section-title">
+              <div class="section-title-main">
+                <span>变量</span>
+                <small>参数按原值传递，密码运行时隐藏输入</small>
+              </div>
+              <el-button
+                v-if="showFirewallPortGuideButton"
+                class="variable-help-button"
+                :icon="QuestionFilled"
+                size="small"
+                @click="showFirewallPortGuide = true"
+              >
+                填写规则
+              </el-button>
+            </div>
+            <div v-if="showFirewallPortGuideButton" class="firewall-port-presets">
+              <div class="firewall-port-presets-head">
+                <span>常用端口</span>
+                <small>点击后只填入端口和协议，来源 IP/IP 段保持不变</small>
+              </div>
+              <div class="firewall-port-preset-list">
+                <button
+                  v-for="preset in firewallPortPresets"
+                  :key="preset.title"
+                  type="button"
+                  class="firewall-port-preset"
+                  @click="applyFirewallPortPreset(preset)"
+                >
+                  <span>{{ preset.title }}</span>
+                  <code>{{ preset.ports }} / {{ preset.protocol.join('+') }}</code>
+                </button>
+              </div>
+            </div>
+            <div v-if="showReplaceSshKeyHelper" class="authorized-key-helper">
+              <div class="authorized-key-helper-main">
+                <span>旧公钥选择</span>
+                <small>
+                  {{ selectedAuthorizedKeySummary }}
+                </small>
+              </div>
+              <el-button
+                :icon="Refresh"
+                :loading="authorizedKeysLoading"
+                @click="loadRemoteAuthorizedKeys"
+              >
+                读取远程公钥列表
+              </el-button>
+            </div>
+            <div class="variable-grid">
+              <div
+                v-for="variable in selectedScript.variables"
+                :key="variable.name"
+                class="variable-field"
+                :class="{ 'variable-field-wide': variable.type === 'multiselect' }"
+              >
+                <span>
+                  {{ variable.label || variable.name }}
+                  <em v-if="variable.required">*</em>
+                </span>
+                <el-select
+                  v-if="variable.type === 'select'"
+                  v-model="executionValues[variable.name]"
+                  placeholder="请选择"
+                >
+                  <template v-if="hasGroupedVariableOptions(variable)">
+                    <el-option-group
+                      v-for="group in groupedVariableOptions(variable)"
+                      :key="group.label"
+                      :label="group.label"
+                    >
+                      <el-option
+                        v-for="option in group.options"
+                        :key="option.raw"
+                        :label="option.label"
+                        :value="option.value"
+                      />
+                    </el-option-group>
+                  </template>
+                  <template v-else>
                     <el-option
-                      v-for="option in group.options"
+                      v-for="option in parsedVariableOptions(variable)"
                       :key="option.raw"
                       :label="option.label"
                       :value="option.value"
                     />
-                  </el-option-group>
-                </template>
-                <template v-else>
-                  <el-option
-                    v-for="option in parsedVariableOptions(variable)"
-                    :key="option.raw"
-                    :label="option.label"
-                    :value="option.value"
-                  />
-                </template>
-              </el-select>
-              <div v-else-if="variable.type === 'multiselect'" class="variable-check-panel">
-                <el-checkbox-group
-                  :model-value="getMultiSelectValue(variable.name)"
-                  @update:model-value="setMultiSelectValue(variable.name, $event)"
-                >
-                  <div v-if="hasGroupedVariableOptions(variable)" class="variable-check-groups">
-                    <section
-                      v-for="group in groupedVariableOptions(variable)"
-                      :key="group.label"
-                      class="variable-check-group"
-                    >
-                      <div class="variable-check-group-title">{{ group.label }}</div>
-                      <div class="variable-check-list">
-                        <el-checkbox
-                          v-for="option in group.options"
-                          :key="option.raw"
-                          :value="option.value"
-                          border
-                        >
-                          {{ option.label }}
-                        </el-checkbox>
-                      </div>
-                    </section>
-                  </div>
-                  <div v-else class="variable-check-list">
-                    <el-checkbox
-                      v-for="option in parsedVariableOptions(variable)"
-                      :key="option.raw"
-                      :value="option.value"
-                      border
-                    >
-                      {{ option.label }}
-                    </el-checkbox>
-                  </div>
-                </el-checkbox-group>
+                  </template>
+                </el-select>
+                <div v-else-if="variable.type === 'multiselect'" class="variable-check-panel">
+                  <el-checkbox-group
+                    :model-value="getMultiSelectValue(variable.name)"
+                    @update:model-value="setMultiSelectValue(variable.name, $event)"
+                  >
+                    <div v-if="hasGroupedVariableOptions(variable)" class="variable-check-groups">
+                      <section
+                        v-for="group in groupedVariableOptions(variable)"
+                        :key="group.label"
+                        class="variable-check-group"
+                      >
+                        <div class="variable-check-group-title">{{ group.label }}</div>
+                        <div class="variable-check-list">
+                          <el-checkbox
+                            v-for="option in group.options"
+                            :key="option.raw"
+                            :value="option.value"
+                            border
+                          >
+                            {{ option.label }}
+                          </el-checkbox>
+                        </div>
+                      </section>
+                    </div>
+                    <div v-else class="variable-check-list">
+                      <el-checkbox
+                        v-for="option in parsedVariableOptions(variable)"
+                        :key="option.raw"
+                        :value="option.value"
+                        border
+                      >
+                        {{ option.label }}
+                      </el-checkbox>
+                    </div>
+                  </el-checkbox-group>
+                </div>
+                <el-input-number
+                  v-else-if="variable.type === 'number'"
+                  v-model="numberExecutionValues[variable.name]"
+                  controls-position="right"
+                  @change="syncNumberVariable(variable.name)"
+                />
+                <span v-else-if="variable.type === 'password'" class="secret-input-note">
+                  运行时在终端隐藏输入，不保存密码
+                </span>
+                <el-input
+                  v-else
+                  v-model="executionValues[variable.name]"
+                  :type="variable.type === 'textarea' ? 'textarea' : 'text'"
+                  :rows="variable.type === 'textarea' ? 4 : undefined"
+                />
               </div>
-              <el-input-number
-                v-else-if="variable.type === 'number'"
-                v-model="numberExecutionValues[variable.name]"
-                controls-position="right"
-                @change="syncNumberVariable(variable.name)"
-              />
-              <el-input
-                v-else
-                v-model="executionValues[variable.name]"
-                :type="variable.type === 'password' ? 'password' : variable.type === 'textarea' ? 'textarea' : 'text'"
-                :rows="variable.type === 'textarea' ? 4 : undefined"
-                :show-password="variable.type === 'password'"
-              />
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section class="preview-section">
-          <div class="section-title">
-            <span>{{ isCommandScript ? '命令预览' : '脚本文件预览' }}</span>
-            <small>{{ isCommandScript ? '单条命令将直接发送到终端' : activeTerminalText }}</small>
-          </div>
-          <pre class="script-preview"><code>{{ renderedContent }}</code></pre>
-        </section>
+          <section v-if="isStepsScript" class="preview-section">
+            <div class="section-title">
+              <span>人工操作清单</span><small>仅供逐项确认，不执行 Shell 命令</small>
+            </div>
+            <el-checkbox-group v-model="completedSteps" class="manual-step-list">
+              <el-checkbox v-for="(step, index) in manualSteps" :key="index" :value="index">{{
+                step
+              }}</el-checkbox>
+            </el-checkbox-group>
+          </section>
+          <section v-else class="preview-section">
+            <div class="section-title">
+              <span>{{ isCommandScript ? '命令预览' : '脚本文件预览' }}</span>
+              <small>{{ isCommandScript ? '单条命令将直接发送到终端' : activeTerminalText }}</small>
+            </div>
+            <pre class="script-preview"><code>{{ renderedContent }}</code></pre>
+          </section>
 
-        <footer class="run-bar">
-          <div class="run-hint">
-            默认动作：{{ runModeLabel(selectedScript.runMode, selectedScript.type) }}
-          </div>
-          <div class="run-actions">
-            <el-tooltip :content="isCommandScript ? '复制命令' : '复制运行命令'" placement="top">
-              <el-button :icon="DocumentCopy" @click="copyRunCommand">
-                <span class="run-action-text">{{ isCommandScript ? '复制命令' : '复制运行命令' }}</span>
-              </el-button>
-            </el-tooltip>
-            <el-tooltip v-if="!isCommandScript" content="复制部署命令" placement="top">
-              <el-button :icon="DocumentCopy" @click="copyDeployCommand">
-                <span class="run-action-text">复制部署命令</span>
-              </el-button>
-            </el-tooltip>
-            <el-tooltip v-if="!isCommandScript" content="部署到终端" placement="top">
-              <el-button
-                :icon="Promotion"
-                :disabled="!hasActiveTerminal || executingScript"
-                :loading="executingScript"
-                @click="deployScript"
+          <footer class="run-bar">
+            <div class="run-hint">
+              <el-button text :disabled="executingScript" @click="performDefaultAction"
+                >默认：{{
+                  isStepsScript
+                    ? '复制步骤'
+                    : runModeLabel(selectedScript.runMode, selectedScript.type)
+                }}</el-button
               >
-                <span class="run-action-text">部署到终端</span>
-              </el-button>
-            </el-tooltip>
-            <el-tooltip :content="isCommandScript ? '运行命令' : '运行脚本'" placement="top">
-              <el-button
-                type="primary"
-                :icon="VideoPlay"
-                :disabled="!hasActiveTerminal || executingScript"
-                :loading="executingScript"
-                @click="runScript"
+              <span v-if="executionStatus" role="status"
+                >{{ executionName }}：{{ executionStatus }}</span
               >
-                <span class="run-action-text">{{ isCommandScript ? '运行命令' : '运行脚本' }}</span>
-              </el-button>
-            </el-tooltip>
-          </div>
-        </footer>
-      </div>
+              <el-button v-if="executingScript" text @click="stopWaiting">停止等待</el-button>
+            </div>
+            <div class="run-actions">
+              <el-tooltip :content="isStepsScript ? '复制步骤' : '复制运行命令'" placement="top">
+                <el-button :icon="DocumentCopy" @click="copyRunCommand">
+                  <span class="run-action-text">{{
+                    isStepsScript ? '复制步骤' : '复制运行命令'
+                  }}</span>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip
+                v-if="!isCommandScript && !isStepsScript"
+                content="复制部署命令"
+                placement="top"
+              >
+                <el-button :icon="DocumentCopy" @click="copyDeployCommand">
+                  <span class="run-action-text">复制部署命令</span>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip
+                v-if="!isCommandScript && !isStepsScript"
+                content="部署到终端"
+                placement="top"
+              >
+                <el-button
+                  :icon="Promotion"
+                  :disabled="!hasActiveTerminal || executingScript"
+                  :loading="executingScript"
+                  @click="deployScript"
+                >
+                  <span class="run-action-text">部署到终端</span>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip
+                v-if="!isStepsScript"
+                :content="isCommandScript ? '运行命令' : '运行脚本'"
+                placement="top"
+              >
+                <el-button
+                  type="primary"
+                  :icon="VideoPlay"
+                  :disabled="!hasActiveTerminal || executingScript"
+                  :loading="executingScript"
+                  @click="runScript"
+                >
+                  <span class="run-action-text">{{
+                    isCommandScript ? '运行命令' : '运行脚本'
+                  }}</span>
+                </el-button>
+              </el-tooltip>
+            </div>
+          </footer>
+        </div>
 
-      <el-empty v-else description="请选择或新建一个脚本" :image-size="128">
-        <el-button type="primary" :icon="Plus" @click="openEditor()">新增脚本</el-button>
-      </el-empty>
+        <el-empty v-else description="请选择或新建一个脚本" :image-size="128">
+          <el-button type="primary" :icon="Plus" @click="openEditor()">新增脚本</el-button>
+        </el-empty>
       </main>
     </div>
 
@@ -473,7 +510,11 @@
               <el-option label="选项" value="select" />
               <el-option label="多选" value="multiselect" />
             </el-select>
-            <el-input v-model="variable.defaultValue" placeholder="默认值" />
+            <el-input
+              v-model="variable.defaultValue"
+              :disabled="variable.type === 'password'"
+              :placeholder="variable.type === 'password' ? '密码不保存默认值' : '默认值'"
+            />
             <el-input
               v-if="variable.type === 'select' || variable.type === 'multiselect'"
               v-model="variable.optionsText"
@@ -603,8 +644,9 @@
     >
       <div class="authorized-key-dialog">
         <p>
-          从远程用户 <strong>{{ stringifyExecutionValue(executionValues.username) || 'root' }}</strong>
-          的 <code>authorized_keys</code> 中选择要删除的旧公钥。选择“只新增”会保留所有旧公钥。
+          从远程用户
+          <strong>{{ stringifyExecutionValue(executionValues.username) || 'root' }}</strong> 的
+          <code>authorized_keys</code> 中选择要删除的旧公钥。选择“只新增”会保留所有旧公钥。
         </p>
 
         <el-radio-group v-model="selectedAuthorizedKeyIndex" class="authorized-key-radio-list">
@@ -639,9 +681,7 @@
 
       <template #footer>
         <el-button @click="showAuthorizedKeyDialog = false">取消</el-button>
-        <el-button type="primary" @click="applySelectedAuthorizedKey">
-          应用选择
-        </el-button>
+        <el-button type="primary" @click="applySelectedAuthorizedKey"> 应用选择 </el-button>
       </template>
     </el-dialog>
 
@@ -656,7 +696,8 @@
           <h3>脚本是什么</h3>
           <p>
             懒人脚本用于保存常用的 Shell 脚本或单条命令。Shell 脚本会先部署到远程主机
-            <code>~/.mshell/scripts</code>，再通过 <code>bash 脚本文件</code> 运行。
+            SSH 登录用户的 <code>~/.mshell/scripts</code>，再按上传返回的绝对路径运行。
+            终端使用 <code>sudo -i</code> 切换用户后，也会定位到同一份脚本；当前终端用户需要有读取权限。
           </p>
         </section>
 
@@ -673,7 +714,7 @@
             </div>
             <div>
               <strong>操作步骤</strong>
-              <p>适合记录人工操作流程，仍按脚本文本保存和引用。</p>
+              <p>记录人工操作流程，逐项勾选确认；不会作为 Shell 脚本执行。</p>
             </div>
           </div>
         </section>
@@ -681,7 +722,8 @@
         <section class="guide-section">
           <h3>变量用法</h3>
           <p>
-            脚本内容支持 <code v-pre>{{变量名}}</code> 和 <code>${变量名}</code> 两种占位符。
+            推荐使用 <code v-pre>{{ 变量名 }}</code
+            >。已配置变量兼容 <code>${变量名}</code>，识别变量不会添加 Shell 自带变量。
             变量名只能使用字母、数字和下划线，且不能以数字开头。
           </p>
           <pre><code v-pre>NEW_PORT="{{ssh_port}}"
@@ -693,9 +735,14 @@ echo "将 SSH 端口修改为 $NEW_PORT"</code></pre>
           <h3>变量配置</h3>
           <ul>
             <li><strong>变量名</strong>：必须和脚本里的占位符一致，例如 <code>ssh_port</code>。</li>
-            <li><strong>显示名称</strong>：展示给用户看的输入项名称，例如 <code>SSH 端口</code>。</li>
+            <li>
+              <strong>显示名称</strong>：展示给用户看的输入项名称，例如 <code>SSH 端口</code>。
+            </li>
             <li><strong>类型</strong>：支持文本、数字、密码、多行文本、选项和多选。</li>
-            <li><strong>选项</strong>：选项/多选可用逗号分隔；需要分类显示时写成 <code>value|分类|显示名称</code>，分类只作为标题，不能被勾选。</li>
+            <li>
+              <strong>选项</strong>：选项/多选可用逗号分隔；需要分类显示时写成
+              <code>value|分类|显示名称</code>，分类只作为标题，不能被勾选。
+            </li>
             <li><strong>默认值</strong>：打开脚本时自动填入，可按需修改。</li>
             <li><strong>必填</strong>：运行前会检查，避免空变量直接写进脚本。</li>
           </ul>
@@ -706,7 +753,7 @@ echo "将 SSH 端口修改为 $NEW_PORT"</code></pre>
           <div class="guide-grid">
             <div>
               <strong>复制运行命令</strong>
-              <p>复制 <code>bash ~/.mshell/scripts/xxx.sh</code>，适合手动粘贴执行。</p>
+              <p>复制安全同步并运行的完整命令；同步失败时不会继续执行旧脚本。</p>
             </div>
             <div>
               <strong>复制部署命令</strong>
@@ -742,8 +789,12 @@ echo "当前用户: $TARGET_USER"</code></pre>
             <li>高风险脚本建议先备份配置，再执行修改。</li>
             <li>修改 SSH、防火墙、用户权限前，建议保留当前连接并另开窗口测试。</li>
             <li>脚本文件名建议统一使用英文、数字和短横线，例如 <code>init-ssh.sh</code>。</li>
-            <li>变量替换只是文本替换，脚本里仍要自行处理引号和参数安全。</li>
-            <li>脚本运行超过 10 分钟时会停止等待完成标记，但不会强制终止远程进程，请返回目标终端检查。</li>
+            <li>
+              变量作为参数数据传递；密码在终端运行时隐藏输入，不进入预览、脚本文件和导出默认值。
+            </li>
+            <li>
+              脚本运行超过 10 分钟时会停止等待完成标记，但不会强制终止远程进程，请返回目标终端检查。
+            </li>
           </ul>
         </section>
       </div>
@@ -765,7 +816,10 @@ echo "当前用户: $TARGET_USER"</code></pre>
           <div class="firewall-guide-grid">
             <div>
               <strong>端口</strong>
-              <p>支持单个或多个端口，例如 <code>22</code>、<code>22,80,443</code>。填写 <code>*</code>、<code>any</code> 或 <code>all</code> 表示全部端口。</p>
+              <p>
+                支持单个或多个端口，例如 <code>22</code>、<code>22,80,443</code>。填写
+                <code>*</code>、<code>any</code> 或 <code>all</code> 表示全部端口。
+              </p>
             </div>
             <div>
               <strong>协议</strong>
@@ -773,7 +827,9 @@ echo "当前用户: $TARGET_USER"</code></pre>
             </div>
             <div>
               <strong>来源 IP/IP 段</strong>
-              <p>支持 <code>any</code>、单个 IP、多个 IP、CIDR 段。多个来源可用逗号、空格或换行分隔。</p>
+              <p>
+                支持 <code>any</code>、单个 IP、多个 IP、CIDR 段。多个来源可用逗号、空格或换行分隔。
+              </p>
             </div>
           </div>
         </section>
@@ -804,7 +860,9 @@ echo "当前用户: $TARGET_USER"</code></pre>
       <div class="target-terminal-panel">
         <div class="target-terminal-summary">
           <span>即将{{ targetTerminalActionText }}</span>
-          <strong>{{ selectedScript?.name || '未命名脚本' }}</strong>
+          <strong>{{
+            (executingScript ? executionName : selectedScript?.name) || '未命名脚本'
+          }}</strong>
         </div>
 
         <el-form label-position="top">
@@ -850,7 +908,7 @@ echo "当前用户: $TARGET_USER"</code></pre>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Delete,
@@ -868,12 +926,25 @@ import {
 } from '@element-plus/icons-vue'
 import { useAppStore, type Tab } from '@/stores/app'
 import { terminalManager } from '@/utils/terminal-manager'
-import { buildTerminalExecutePayload } from '@/utils/terminal-command-execution'
 import {
-  appendScriptOutputBuffer,
+  buildTerminalExecutePayload,
+  buildTerminalInsertPayload
+} from '@/utils/terminal-command-execution'
+import {
+  buildScriptDeployment,
+  compileScript,
+  renderScriptText,
+  quoteShell,
+  validateDeployedScriptPath
+} from '@/utils/lazy-script-template'
+import {
+  snapshotScript,
+  terminalReadinessError,
+  waitForScriptCompletion
+} from '@/utils/lazy-script-execution'
+import {
   buildInteractiveScriptCommand,
-  createScriptRunToken,
-  findScriptCompletion
+  createScriptRunToken
 } from '@/utils/terminal-script-execution'
 
 type LazyScriptType = 'command' | 'shell' | 'steps'
@@ -956,6 +1027,12 @@ const searchQuery = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const executingScript = ref(false)
+const executionStatus = ref('')
+const executionName = ref('')
+const completedSteps = ref<number[]>([])
+let executionAbort: AbortController | undefined
+let reloadTimer: ReturnType<typeof setTimeout> | undefined
+let unsubscribeLibrary: (() => void) | undefined
 const showEditor = ref(false)
 const showUsageGuide = ref(false)
 const showFirewallPortGuide = ref(false)
@@ -1032,18 +1109,22 @@ const targetTerminalActionText = computed(() => {
 })
 
 const activeScriptFileName = computed(() =>
-  normalizeScriptFileName(selectedScript.value?.fileName || selectedScript.value?.name || 'script.sh')
+  normalizeScriptFileName(
+    selectedScript.value?.fileName || selectedScript.value?.name || 'script.sh'
+  )
 )
 const remoteScriptsDir = '~/.mshell/scripts'
 const scriptExecutionTimeoutMs = 10 * 60 * 1000
-const clearCurrentTerminalLine = '\x15\x0b'
-const remoteScriptPath = computed(() => `${remoteScriptsDir}/${activeScriptFileName.value}`)
+const deployedScriptPaths = reactive<Record<string, string>>({})
+const knownDeploymentPath = computed(() => deployedScriptPaths[`${appStore.activeTab}:${activeScriptFileName.value}`])
+
+const remoteScriptPath = computed(() => knownDeploymentPath.value || `${remoteScriptsDir}/${activeScriptFileName.value}`)
 const quotedRemoteScriptPath = computed(
-  () => `${remoteScriptsDir}/${shellQuotePathSegment(activeScriptFileName.value)}`
+  () => knownDeploymentPath.value ? quoteShell(knownDeploymentPath.value) : `${remoteScriptsDir}/${shellQuotePathSegment(activeScriptFileName.value)}`
 )
 const runCommand = computed(() => `bash ${quotedRemoteScriptPath.value}`)
-const publicKeyVariable = computed(() =>
-  selectedScript.value?.variables.find((variable) => variable.name === 'public_key') || null
+const publicKeyVariable = computed(
+  () => selectedScript.value?.variables.find((variable) => variable.name === 'public_key') || null
 )
 const showSshKeyHelper = computed(() => Boolean(publicKeyVariable.value))
 const selectedSshKey = computed(
@@ -1058,8 +1139,11 @@ const isReplaceSshPublicKeyScript = computed(() => {
   )
 })
 const showReplaceSshKeyHelper = computed(() => isReplaceSshPublicKeyScript.value)
-const selectedAuthorizedKeyEntry = computed(() =>
-  remoteAuthorizedKeys.value.find((entry) => String(entry.index) === selectedAuthorizedKeyIndex.value) || null
+const selectedAuthorizedKeyEntry = computed(
+  () =>
+    remoteAuthorizedKeys.value.find(
+      (entry) => String(entry.index) === selectedAuthorizedKeyIndex.value
+    ) || null
 )
 const selectedAuthorizedKeySummary = computed(() => {
   const oldPublicKey = stringifyExecutionValue(executionValues.old_public_key).trim()
@@ -1168,10 +1252,18 @@ const filteredScripts = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
   return scripts.value.filter((script) => {
     const category = script.category.trim() || '__uncategorized'
-    const matchesCategory = selectedCategory.value === '__all__' || selectedCategory.value === category
+    const matchesCategory =
+      selectedCategory.value === '__all__' || selectedCategory.value === category
     const matchesQuery =
       !query ||
-      [script.name, script.fileName, script.description, script.category, script.content, script.tags.join(' ')]
+      [
+        script.name,
+        script.fileName,
+        script.description,
+        script.category,
+        script.content,
+        script.tags.join(' ')
+      ]
         .join('\n')
         .toLowerCase()
         .includes(query)
@@ -1181,30 +1273,42 @@ const filteredScripts = computed(() => {
 })
 
 const renderedContent = computed(() => {
-  if (!selectedScript.value) return ''
-  let result = selectedScript.value.content
-  Object.entries(executionValues).forEach(([name, value]) => {
-    const escaped = escapeRegExp(name)
-    const normalizedValue = stringifyExecutionValue(value)
-    result = result.replace(new RegExp(`\\{\\{\\s*${escaped}\\s*\\}\\}`, 'g'), normalizedValue)
-    result = result.replace(new RegExp(`\\$\\{${escaped}\\}`, 'g'), normalizedValue)
-  })
-  return result
+  const script = selectedScript.value
+  if (!script) return ''
+  if (script.type === 'steps')
+    return renderScriptText(script.content, executionValues, script.variables)
+  try {
+    return compileScript(script.content, executionValues, script.variables)
+  } catch (error) {
+    return error instanceof Error ? error.message : '请检查变量配置'
+  }
 })
+const isStepsScript = computed(() => selectedScript.value?.type === 'steps')
+const manualSteps = computed(() =>
+  renderedContent.value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+)
 
-watch(selectedScript, (script) => {
-  resetExecutionValues(script)
-  selectedSshKeyId.value = ''
-  remoteAuthorizedKeys.value = []
-  selectedAuthorizedKeyIndex.value = '0'
-  showAuthorizedKeyDialog.value = false
-  if (!showFirewallPortGuideButton.value) {
-    showFirewallPortGuide.value = false
+watch(
+  () => selectedScript.value?.id + JSON.stringify(selectedScript.value?.variables),
+  () => {
+    const script = selectedScript.value
+    completedSteps.value = []
+    resetExecutionValues(script)
+    selectedSshKeyId.value = ''
+    remoteAuthorizedKeys.value = []
+    selectedAuthorizedKeyIndex.value = '0'
+    showAuthorizedKeyDialog.value = false
+    if (!showFirewallPortGuideButton.value) {
+      showFirewallPortGuide.value = false
+    }
+    if (script?.variables.some((variable) => variable.name === 'public_key')) {
+      loadSshKeys(false)
+    }
   }
-  if (script?.variables.some((variable) => variable.name === 'public_key')) {
-    loadSshKeys(false)
-  }
-})
+)
 
 watch(
   () => generateKeyForm.type,
@@ -1226,8 +1330,27 @@ watch(filteredScripts, (nextScripts) => {
   }
 })
 
+const scheduleLibraryReload = () => {
+  clearTimeout(reloadTimer)
+  reloadTimer = setTimeout(() => {
+    void loadScripts()
+  }, 150)
+}
+watch(
+  () => appStore.activeView,
+  (view) => {
+    if (view === 'lazy-scripts') scheduleLibraryReload()
+  }
+)
 onMounted(() => {
-  loadScripts()
+  void loadScripts()
+  unsubscribeLibrary = window.electronAPI.lazyScript.onChanged?.(scheduleLibraryReload)
+})
+onUnmounted(() => {
+  clearTimeout(reloadTimer)
+  unsubscribeLibrary?.()
+  executionAbort?.abort()
+  cancelTargetTerminalSelection()
 })
 
 const loadScripts = async () => {
@@ -1238,7 +1361,10 @@ const loadScripts = async () => {
       scripts.value = (result.data || []).sort(
         (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
       )
-      if (!selectedScript.value || !scripts.value.some((script) => script.id === selectedScript.value?.id)) {
+      if (
+        !selectedScript.value ||
+        !scripts.value.some((script) => script.id === selectedScript.value?.id)
+      ) {
         selectedScript.value = scripts.value[0] || null
       } else {
         selectedScript.value =
@@ -1263,12 +1389,13 @@ const resetExecutionValues = (script: LazyScript | null) => {
   Object.keys(numberExecutionValues).forEach((key) => delete numberExecutionValues[key])
 
   script?.variables.forEach((variable) => {
-    const value = variable.defaultValue || ''
+    const value = variable.type === 'password' ? '' : variable.defaultValue || ''
     executionValues[variable.name] =
       variable.type === 'multiselect' ? parseMultiSelectDefault(value) : value
     if (variable.type === 'number') {
       const numberValue = Number(value)
-      numberExecutionValues[variable.name] = Number.isFinite(numberValue) ? numberValue : undefined
+      numberExecutionValues[variable.name] =
+        value !== '' && Number.isFinite(numberValue) ? numberValue : undefined
     }
   })
 }
@@ -1316,7 +1443,9 @@ const loadRemoteAuthorizedKeys = async () => {
     selectedAuthorizedKeyIndex.value = getCurrentDeleteKeyIndex()
     if (
       selectedAuthorizedKeyIndex.value !== '0' &&
-      !remoteAuthorizedKeys.value.some((entry) => String(entry.index) === selectedAuthorizedKeyIndex.value)
+      !remoteAuthorizedKeys.value.some(
+        (entry) => String(entry.index) === selectedAuthorizedKeyIndex.value
+      )
     ) {
       selectedAuthorizedKeyIndex.value = '0'
     }
@@ -1364,9 +1493,7 @@ const buildListAuthorizedKeysCommand = (username: string) =>
   ].join('\n')
 
 const parseRemoteAuthorizedKeysError = (output: string) => {
-  const line = output
-    .split(/\r?\n/)
-    .find((item) => item.startsWith('__MSHELL_ERROR__\t'))
+  const line = output.split(/\r?\n/).find((item) => item.startsWith('__MSHELL_ERROR__\t'))
   return line ? line.split('\t').slice(1).join('\t') || '读取远程公钥列表失败' : ''
 }
 
@@ -1453,7 +1580,10 @@ const loadSshKeys = async (showError: boolean | Event = true) => {
       .sort((a, b) => {
         const nextTime = new Date(b.createdAt || '').getTime()
         const currentTime = new Date(a.createdAt || '').getTime()
-        return (Number.isFinite(nextTime) ? nextTime : 0) - (Number.isFinite(currentTime) ? currentTime : 0)
+        return (
+          (Number.isFinite(nextTime) ? nextTime : 0) -
+          (Number.isFinite(currentTime) ? currentTime : 0)
+        )
       })
 
     if (selectedSshKeyId.value && !sshKeys.value.some((key) => key.id === selectedSshKeyId.value)) {
@@ -1642,7 +1772,9 @@ const saveScript = async () => {
     return
   }
 
-  const invalidVariable = scriptForm.variables.find((variable) => !isValidVariableName(variable.name))
+  const invalidVariable = scriptForm.variables.find(
+    (variable) => !isValidVariableName(variable.name)
+  )
   if (invalidVariable) {
     ElMessage.warning(`变量名不合法：${invalidVariable.name || '(空)'}`)
     return
@@ -1663,7 +1795,7 @@ const saveScript = async () => {
       name: variable.name.trim(),
       label: variable.label.trim() || variable.name.trim(),
       type: variable.type,
-      defaultValue: variable.defaultValue || '',
+      defaultValue: variable.type === 'password' ? '' : variable.defaultValue || '',
       required: Boolean(variable.required),
       options:
         variable.type === 'select' || variable.type === 'multiselect'
@@ -1691,7 +1823,8 @@ const saveScript = async () => {
     const nextSelectedId = editingScriptId.value || result.data?.id
     showEditor.value = false
     await loadScripts()
-    selectedScript.value = scripts.value.find((script) => script.id === nextSelectedId) || scripts.value[0] || null
+    selectedScript.value =
+      scripts.value.find((script) => script.id === nextSelectedId) || scripts.value[0] || null
     ElMessage.success('脚本已保存')
   } catch (error: any) {
     ElMessage.error('保存失败: ' + error.message)
@@ -1722,185 +1855,221 @@ const deleteScript = async (script: LazyScript) => {
   }
 }
 
+type ExecutionSnapshot = ReturnType<typeof snapshotScript<LazyScript>>
+const captureScript = (): ExecutionSnapshot => {
+  if (!selectedScript.value) throw new Error('请选择脚本')
+  return snapshotScript(selectedScript.value, executionValues)
+}
+const safeError = (error: unknown) => (error instanceof Error ? error.message : String(error))
+const snapshotPath = (fileName: string) => `~/.mshell/scripts/${quoteShell(fileName)}`
 const copyDeployCommand = async () => {
-  if (!selectedScript.value || !validateRequiredVariables()) return
-  if (isCommandScript.value) {
-    ElMessage.warning('单条命令无需部署，请复制命令或直接运行')
-    return
-  }
-  await navigator.clipboard.writeText(buildDeployCommand())
-  await markUsed()
-  ElMessage.success('部署命令已复制')
-}
-
-const copyRunCommand = async () => {
-  if (!selectedScript.value || !validateRequiredVariables()) return
-  await navigator.clipboard.writeText(buildRunCommand())
-  await markUsed()
-  ElMessage.success(isCommandScript.value ? '命令已复制' : '同步并运行命令已复制')
-}
-
-const deployScript = async () => {
-  if (!selectedScript.value || !validateTerminalReady() || !validateRequiredVariables() || executingScript.value) return
-  if (isCommandScript.value) {
-    ElMessage.warning('单条命令无需部署，请直接运行')
-    return
-  }
-
-  const targetTerminalId = await requestTargetTerminal('deploy')
-  if (!targetTerminalId) return
-
-  executingScript.value = true
   try {
-    const result = await window.electronAPI.ssh.executeCommand(
-      targetTerminalId,
-      buildDeployCommand(),
-      scriptExecutionTimeoutMs
+    const snapshot = captureScript()
+    if (snapshot.script.type === 'steps') return
+    await navigator.clipboard.writeText(
+      buildScriptDeployment(snapshot.content, snapshot.script.fileName)
     )
-
-    if (!result.success) {
-      ElMessage.error(result.error || '部署失败')
-      return
-    }
-
-    await markUsed()
-    ElMessage.success(`脚本已静默部署到 ${formatTargetTerminalName(targetTerminalId)}`)
-  } finally {
-    executingScript.value = false
-  }
-}
-
-const runScript = async () => {
-  const script = selectedScript.value
-  if (!script || !validateTerminalReady() || !validateRequiredVariables() || executingScript.value) return
-
-  const targetTerminalId = await requestTargetTerminal(script.type === 'command' ? 'send-command' : 'run')
-  if (!targetTerminalId) return
-
-  if (script.riskLevel === 'high') {
-    try {
-      await ElMessageBox.confirm(
-        `这是高风险${script.type === 'command' ? '命令' : '脚本'}，确认${script.type === 'command' ? '运行' : '同步最新脚本并运行'}吗？`,
-        '高风险确认',
-        {
-          type: 'warning'
-        }
-      )
-    } catch {
-      return
-    }
-  }
-
-  if (script.type === 'command') {
-    terminalManager.requestScrollToBottom(targetTerminalId)
-    const inst = terminalManager.get(targetTerminalId)
-    window.electronAPI.ssh.write(
-      targetTerminalId,
-      buildTerminalExecutePayload(buildRunCommand(), inst?.bracketedPasteEnabled ?? false)
-    )
-    await markUsed()
-    ElMessage.success(`命令已发送到 ${formatTargetTerminalName(targetTerminalId)}`)
-    return
-  }
-
-  executingScript.value = true
-  try {
-    const deployResult = await window.electronAPI.ssh.executeCommand(
-      targetTerminalId,
-      buildDeployCommand(),
-      scriptExecutionTimeoutMs
-    )
-    if (!deployResult.success) {
-      ElMessage.error(deployResult.error || '脚本同步失败')
-      return
-    }
-
-    const exitCode = await runScriptInInteractiveTerminal(targetTerminalId)
-    if (exitCode !== 0) {
-      ElMessage.error(`脚本执行失败，退出码 ${exitCode}`)
-      return
-    }
-
-    await markUsed()
-    ElMessage.success(`脚本执行完成：${formatTargetTerminalName(targetTerminalId)}`)
-    await maybeUpdateActiveSessionPortAfterSuccessfulRun(script, targetTerminalId)
+    await markUsed(snapshot.script.id)
+    ElMessage.success('部署命令已复制；密码将在运行时隐藏输入')
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '脚本运行失败')
-  } finally {
-    executingScript.value = false
+    ElMessage.error(safeError(error))
   }
 }
-
-const runScriptInInteractiveTerminal = async (targetTerminalId: string): Promise<number> => {
-  const instance = terminalManager.get(targetTerminalId)
-  if (!instance) throw new Error('目标终端尚未初始化，请打开终端后重试')
-  if (!instance.echoEnabled) {
-    throw new Error('目标终端正在等待密码或其他隐藏输入，请先完成或取消当前操作')
-  }
-
-  const token = createScriptRunToken()
-  const command = buildInteractiveScriptCommand(quotedRemoteScriptPath.value, token)
-  let outputBuffer = ''
-  let settled = false
-  let unsubscribe: () => void = () => undefined
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
-  const completion = new Promise<number>((resolve, reject) => {
-    const cleanup = () => {
-      if (timeoutHandle) clearTimeout(timeoutHandle)
-      unsubscribe()
-    }
-
-    unsubscribe = terminalManager.subscribeOutput(targetTerminalId, (chunk) => {
-      if (settled) return
-      outputBuffer = appendScriptOutputBuffer(outputBuffer, chunk)
-      const status = findScriptCompletion(outputBuffer, token)
-      if (status === null) return
-      settled = true
-      cleanup()
-      resolve(status)
-    })
-
-    timeoutHandle = setTimeout(() => {
-      if (settled) return
-      settled = true
-      cleanup()
-      reject(
-        new Error(
-          `脚本运行超过 ${Math.round(scriptExecutionTimeoutMs / 60000)} 分钟，可能仍在终端中执行，请检查输出。`
-        )
-      )
-    }, scriptExecutionTimeoutMs)
-  })
-
-  appStore.activeTab = targetTerminalId
-  appStore.setActiveView('sessions')
-  await nextTick()
-  terminalManager.requestScrollToBottom(targetTerminalId)
-  terminalManager.focus(targetTerminalId)
-  window.electronAPI.ssh.write(
-    targetTerminalId,
-    clearCurrentTerminalLine +
-      buildTerminalExecutePayload(command, instance.bracketedPasteEnabled)
-  )
-
+const copyRunCommand = async () => {
   try {
-    return await completion
+    const snapshot = captureScript()
+    const command =
+      snapshot.script.type === 'steps'
+        ? renderScriptText(snapshot.script.content, snapshot.values, snapshot.script.variables)
+        : buildScriptDeployment(snapshot.content, snapshot.script.fileName) +
+          ' &&\nbash ' +
+          snapshotPath(snapshot.script.fileName)
+    await navigator.clipboard.writeText(command)
+    await markUsed(snapshot.script.id)
+    ElMessage.success(snapshot.script.type === 'steps' ? '操作步骤已复制' : '同步并运行命令已复制')
+  } catch (error) {
+    ElMessage.error(safeError(error))
+  }
+}
+const assertConnection = async (id: string, interactive: boolean) => {
+  executionAbort?.signal.throwIfAborted()
+  const connection = await window.electronAPI.ssh.getConnection(id)
+  if (connection?.status !== 'connected') throw new Error('目标 SSH 未连接，请先完成连接')
+  if (interactive) {
+    const error = terminalReadinessError(terminalManager.get(id))
+    if (error) throw new Error(error)
+  }
+  executionAbort?.signal.throwIfAborted()
+}
+const stopWaiting = () => {
+  executionAbort?.abort()
+  cancelTargetTerminalSelection()
+}
+const performDefaultAction = () => {
+  const script = selectedScript.value
+  if (!script) return
+  if (script.type === 'steps' || script.runMode === 'copy') return copyRunCommand()
+  return script.runMode === 'paste' ? deployScript() : runScript()
+}
+const deployScript = () => executeScriptAction('deploy')
+const runScript = () => executeScriptAction('run')
+const executeScriptAction = async (action: 'deploy' | 'run') => {
+  if (executingScript.value || !validateTerminalReady()) return
+  executingScript.value = true
+  const controller = new AbortController()
+  executionAbort = controller
+  try {
+    // Capture all inputs before any dialog, IPC or deployment can yield control.
+    const snapshot = captureScript()
+    if (snapshot.script.type === 'steps') {
+      ElMessage.info('操作步骤请逐项确认，不会作为 Shell 执行')
+      return
+    }
+    executionName.value = snapshot.script.name
+    executionStatus.value = '选择目标终端'
+    const id = await requestTargetTerminal(action)
+    if (!id || controller.signal.aborted) return
+    if (action === 'run' && snapshot.script.riskLevel === 'high') {
+      await ElMessageBox.confirm(
+        `确认在 ${formatTargetTerminalName(id)} 运行高风险脚本「${snapshot.script.name}」？`,
+        '高风险确认',
+        { type: 'warning' }
+      )
+    }
+    await assertConnection(id, action === 'run' || snapshot.script.type === 'command')
+    if (action === 'deploy' && snapshot.script.type === 'command') {
+      if (snapshot.sensitive) throw new Error('包含密码参数的命令请使用“运行”，以便安全地隐藏输入')
+      const instance = terminalManager.get(id)!
+      if (snapshot.content.trim().includes('\n') && !instance.bracketedPasteEnabled)
+        throw new Error('此终端不支持安全的多行粘贴，请使用“运行”')
+      window.electronAPI.ssh.write(
+        id,
+        buildTerminalInsertPayload(snapshot.content.trim(), instance.bracketedPasteEnabled)
+      )
+      appStore.activeTab = id
+      appStore.setActiveView('sessions')
+      await markUsed(snapshot.script.id)
+      executionStatus.value = '已填入终端，尚未执行'
+      return
+    }
+    const token = createScriptRunToken()
+    const fileName = action === 'run' ? '.run-' + token + '.sh' : snapshot.script.fileName
+    executionStatus.value = '正在部署'
+    const cancelDeployment = () => {
+      void window.electronAPI.lazyScript.cancelDeployment(token)
+    }
+    controller.signal.addEventListener('abort', cancelDeployment, { once: true })
+    const deployed = await window.electronAPI.lazyScript
+      .deploy(
+        id,
+        token,
+        fileName,
+        snapshot.content,
+        action === 'run' ? snapshot.script.fileName : undefined
+      )
+      .finally(() => controller.signal.removeEventListener('abort', cancelDeployment))
+    if (!deployed.success) throw new Error(deployed.error || '部署失败')
+    controller.signal.throwIfAborted()
+    if (!deployed.data?.path) throw new Error('部署未返回实际脚本路径，已停止运行，请重新部署')
+    const deployedPath = validateDeployedScriptPath(deployed.data.path, fileName)
+    const savedPath = deployed.data.savedPath ? validateDeployedScriptPath(deployed.data.savedPath, snapshot.script.fileName) : undefined
+    if (action === 'deploy' || savedPath)
+      deployedScriptPaths[`${id}:${snapshot.script.fileName}`] = savedPath || deployedPath
+    if (action === 'deploy') {
+      await markUsed(snapshot.script.id)
+      executionStatus.value = '部署完成：' + deployedPath
+      ElMessage.success(`已部署到 ${formatTargetTerminalName(id)}`)
+      return
+    }
+    await assertConnection(id, true)
+    executionStatus.value = '正在运行'
+    const exitCode = await runScriptInInteractiveTerminal(
+      id,
+      deployedPath,
+      token,
+      snapshot.sensitive,
+      controller.signal
+    )
+    if (exitCode !== 0) throw new Error('脚本执行失败，退出码 ' + exitCode)
+    executionStatus.value = '执行成功'
+    await markUsed(snapshot.script.id)
+    ElMessage.success(`脚本执行完成：${snapshot.script.name}`)
+    await maybeUpdateActiveSessionPortAfterSuccessfulRun(snapshot.script, id, snapshot.values)
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') executionStatus.value = '已取消'
+    else {
+      executionStatus.value = controller.signal.aborted
+        ? '已停止等待，请在终端确认远程状态'
+        : safeError(error)
+      ElMessage.error(executionStatus.value)
+    }
   } finally {
-    terminalManager.focus(targetTerminalId)
+    executingScript.value = false
+    executionAbort = undefined
+  }
+}
+const runScriptInInteractiveTerminal = async (
+  id: string,
+  path: string,
+  token: string,
+  sensitive: boolean,
+  signal: AbortSignal
+) => {
+  let started = false
+  let finished = false
+  try {
+    if (sensitive) await window.electronAPI.ssh.protectInput(id, token, true)
+    return await waitForScriptCompletion({
+      token,
+      timeout: scriptExecutionTimeoutMs,
+      signal,
+      subscribe: (callback) => terminalManager.subscribeOutput(id, callback),
+      onDisconnect: (callback) =>
+        window.electronAPI.ssh.onClose((closedId) => {
+          if (closedId === id) callback()
+        }),
+      start: async (startSignal) => {
+        appStore.activeTab = id
+        appStore.setActiveView('sessions')
+        await nextTick()
+        await assertConnection(id, true)
+        if (signal.aborted || startSignal.aborted) throw new Error('已停止等待')
+        terminalManager.requestScrollToBottom(id)
+        terminalManager.focus(id)
+        const command = buildInteractiveScriptCommand(path, token, true)
+        started = true
+        window.electronAPI.ssh.write(
+          id,
+          buildTerminalExecutePayload(
+            command,
+            terminalManager.get(id)?.bracketedPasteEnabled ?? false
+          )
+        )
+      }
+    }).then((status) => {
+      finished = true
+      return status
+    })
+  } finally {
+    // If the task is still running, the backend keeps input private until its completion marker.
+    if (sensitive && (!started || finished))
+      await window.electronAPI.ssh.protectInput(id, token, false)
   }
 }
 
 const maybeUpdateActiveSessionPortAfterSuccessfulRun = async (
   script: LazyScript,
-  targetTerminalId: string
+  targetTerminalId: string,
+  values: Record<string, ExecutionValue>
 ) => {
   if (!isSshPortUpdateScript(script)) return
 
   const session = getTerminalTab(targetTerminalId)?.session || null
   if (!session || (session.type && session.type !== 'ssh')) return
 
-  const nextPort = parseSshPortVariable()
-  if (!nextPort || session.port === nextPort) return
+  const nextPort = Number(stringifyExecutionValue(values.ssh_port))
+  if (!Number.isInteger(nextPort) || nextPort < 1 || nextPort > 65535 || session.port === nextPort)
+    return
 
   try {
     await ElMessageBox.confirm(
@@ -1942,15 +2111,6 @@ const isSshPortUpdateScript = (script: LazyScript) => {
     scriptName === '修改 SSH 端口并重启' ||
     scriptName === '开启 SSH 密码登录'
   )
-}
-
-const parseSshPortVariable = () => {
-  const rawPort =
-    numberExecutionValues.ssh_port === undefined || numberExecutionValues.ssh_port === null
-      ? executionValues.ssh_port
-      : numberExecutionValues.ssh_port
-  const port = Number(String(rawPort || '').trim())
-  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null
 }
 
 const updateOpenTabsSessionPort = (sessionId: string, port: number) => {
@@ -2019,29 +2179,15 @@ const formatTargetTerminalName = (terminalId: string) => {
   return tab ? formatTerminalMeta(tab) : '目标终端'
 }
 
-const markUsed = async () => {
-  if (!selectedScript.value) return
-  await window.electronAPI.lazyScript.incrementUsage(selectedScript.value.id)
-  selectedScript.value.usageCount += 1
+const markUsed = async (id: string) => {
+  const result = await window.electronAPI.lazyScript.incrementUsage(id)
+  if (!result.success) ElMessage.warning('操作已完成，但使用次数保存失败')
 }
 
 const validateTerminalReady = () => {
   if (hasActiveTerminal.value) return true
   ElMessage.warning('请先打开一个 SSH 终端')
   return false
-}
-
-const validateRequiredVariables = () => {
-  const missing = selectedScript.value?.variables.filter(
-    (variable) => variable.required && isEmptyExecutionValue(executionValues[variable.name])
-  )
-
-  if (missing?.length) {
-    ElMessage.warning(`请填写变量：${missing.map((item) => item.label || item.name).join('、')}`)
-    return false
-  }
-
-  return true
 }
 
 const exportScripts = async () => {
@@ -2100,51 +2246,9 @@ const runModeLabel = (mode: LazyScriptRunMode, type: LazyScriptType) => {
   return labels[mode]
 }
 
-const buildRunCommand = () => {
-  if (selectedScript.value?.type === 'command') {
-    return renderedContent.value.trim()
-  }
-  return buildCheckedRunCommand()
-}
-
-const buildDeployCommand = () => {
-  const content = ensureTrailingNewline(renderedContent.value)
-  const delimiter = buildHeredocDelimiter(content)
-  return [
-    `mkdir -p ${remoteScriptsDir}`,
-    `cat > ${quotedRemoteScriptPath.value} <<'${delimiter}'`,
-    content.endsWith('\n') ? content.slice(0, -1) : content,
-    delimiter,
-    `chmod +x ${quotedRemoteScriptPath.value}`,
-    `echo "已部署/更新: ${remoteScriptPath.value}"`
-  ].join('\n')
-}
-
-const buildCheckedRunCommand = (options: { showSyncMessage?: boolean } = {}) => {
-  const content = ensureTrailingNewline(renderedContent.value)
-  const delimiter = buildHeredocDelimiter(content)
-  return [
-    '(',
-    '  set -e',
-    ...(options.showSyncMessage === false
-      ? []
-      : [`  echo "正在同步最新脚本: ${remoteScriptPath.value}"`]),
-    `  mkdir -p ${remoteScriptsDir}`,
-    `  cat > ${quotedRemoteScriptPath.value} <<'${delimiter}'`,
-    content.endsWith('\n') ? content.slice(0, -1) : content,
-    delimiter,
-    `  chmod +x ${quotedRemoteScriptPath.value}`,
-    `  bash ${quotedRemoteScriptPath.value}`,
-    ')'
-  ].join('\n')
-}
-
-const ensureTrailingNewline = (value: string) => (value.endsWith('\n') ? value : `${value}\n`)
-const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const stringifyExecutionValue = (value: ExecutionValue | undefined) =>
   Array.isArray(value) ? value.join(' ') : String(value || '')
-const isEmptyExecutionValue = (value: ExecutionValue | undefined) =>
-  Array.isArray(value) ? value.length === 0 : !String(value || '').trim()
+
 const parseMultiSelectDefault = (value: string) =>
   String(value || '')
     .split(/[\s,，;；]+/)
@@ -2188,15 +2292,7 @@ const setMultiSelectValue = (name: string, value: unknown) => {
     : []
 }
 const isValidVariableName = (value: string) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value.trim())
-const buildHeredocDelimiter = (content: string) => {
-  let delimiter = 'MSHELL_SCRIPT'
-  let index = 1
-  while (new RegExp(`^${delimiter}$`, 'm').test(content)) {
-    delimiter = `MSHELL_SCRIPT_${index}`
-    index++
-  }
-  return delimiter
-}
+
 const normalizeSshKey = (key: any): SSHKey => ({
   id: String(key.id || ''),
   name: String(key.name || ''),
@@ -2211,9 +2307,7 @@ const normalizeSshKey = (key: any): SSHKey => ({
 const isUsablePublicKey = (value: string) => {
   const publicKey = String(value || '').trim()
   return Boolean(
-    publicKey &&
-      publicKey !== 'Public key not available' &&
-      publicKey !== 'Public key not provided'
+    publicKey && publicKey !== 'Public key not available' && publicKey !== 'Public key not provided'
   )
 }
 const normalizeScriptFileName = (value: string) => {
@@ -2232,6 +2326,25 @@ const shellQuotePathSegment = (value: string) => `'${value.replace(/'/g, `'\\''`
 </script>
 
 <style scoped>
+.secret-input-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.manual-step-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.manual-step-list :deep(.el-checkbox) {
+  height: auto;
+  white-space: normal;
+}
+.run-hint [role='status'] {
+  display: block;
+  overflow-wrap: anywhere;
+}
 .lazy-script-shell {
   container: lazy-panel / inline-size;
   display: flex;
@@ -2441,7 +2554,11 @@ const shellQuotePathSegment = (value: string) => `'${value.replace(/'/g, `'\\''`
   scrollbar-gutter: stable;
   border-right: 0;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--primary-color) 8%, transparent), transparent 220px),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--primary-color) 8%, transparent),
+      transparent 220px
+    ),
     var(--bg-primary);
 }
 
@@ -2520,28 +2637,6 @@ const shellQuotePathSegment = (value: string) => `'${value.replace(/'/g, `'\\''`
   width: 34px;
   height: 34px;
   margin-left: 0;
-}
-
-.detail-actions :deep(.detail-delete-button) {
-  --el-button-bg-color: color-mix(in srgb, var(--danger-color) 10%, var(--bg-primary));
-  --el-button-border-color: color-mix(in srgb, var(--danger-color) 36%, transparent);
-  --el-button-text-color: var(--danger-color);
-  --el-button-hover-bg-color: color-mix(in srgb, var(--danger-color) 16%, var(--bg-primary));
-  --el-button-hover-border-color: var(--danger-color);
-  --el-button-hover-text-color: var(--danger-color);
-  --el-button-active-bg-color: color-mix(in srgb, var(--danger-color) 20%, var(--bg-primary));
-  --el-button-active-border-color: var(--danger-color);
-  --el-button-active-text-color: var(--danger-color);
-  border-color: color-mix(in srgb, var(--danger-color) 36%, transparent);
-  background: color-mix(in srgb, var(--danger-color) 10%, var(--bg-primary));
-  color: var(--danger-color);
-}
-
-.detail-actions :deep(.detail-delete-button:hover),
-.detail-actions :deep(.detail-delete-button:focus-visible) {
-  border-color: var(--danger-color);
-  background: color-mix(in srgb, var(--danger-color) 16%, var(--bg-primary));
-  color: var(--danger-color);
 }
 
 .run-actions {
@@ -3125,7 +3220,9 @@ const shellQuotePathSegment = (value: string) => `'${value.replace(/'/g, `'\\''`
 
 .variable-row {
   display: grid;
-  grid-template-columns: minmax(90px, 1fr) minmax(100px, 1fr) 110px minmax(100px, 1fr) minmax(120px, 1fr) 70px 36px;
+  grid-template-columns:
+    minmax(90px, 1fr) minmax(100px, 1fr) 110px minmax(100px, 1fr) minmax(120px, 1fr)
+    70px 36px;
   gap: 8px;
   align-items: center;
 }

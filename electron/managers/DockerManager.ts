@@ -1,463 +1,232 @@
+import { z } from 'zod'
 import { sshConnectionManager } from './SSHConnectionManager'
+import type {
+  DockerContainerAction,
+  DockerContainerActionOptions,
+  DockerOperationItem,
+  DockerOperationResult,
+  DockerOverview
+} from '../../src/types/docker'
+import {
+  buildDockerActionScript,
+  buildDockerCleanupScript,
+  buildDockerInstallScript,
+  buildDockerOverviewScript,
+  OPERATION_DONE,
+  OVERVIEW_END,
+  OVERVIEW_START,
+  RESULT_PREFIX
+} from '../utils/docker-scripts'
 
-export interface DockerEnvironment {
-  installed: boolean
-  dockerVersion: string
-  composeInstalled: boolean
-  composeVersion: string
-  serviceStatus: string
-  socketAccessible: boolean
-  needsSudo: boolean
-  os: {
-    id: string
-    versionId: string
-    prettyName: string
-    packageManager: string
+export type { DockerContainerAction, DockerContainerActionOptions } from '../../src/types/docker'
+const text = z.string()
+const overviewSchema = z.object({
+  environment: z.object({
+    installed: z.boolean(),
+    dockerVersion: text,
+    composeInstalled: z.boolean(),
+    composeVersion: text,
+    serviceStatus: text,
+    socketAccessible: z.boolean(),
+    needsSudo: z.boolean(),
+    accessError: text,
+    accessStatus: z.enum(['ready', 'not-installed', 'permission-denied', 'unavailable']),
+    os: z.object({ id: text, versionId: text, prettyName: text, packageManager: text })
+  }),
+  containers: z.array(
+    z.object({
+      id: text.regex(/^[a-f0-9]{64}$/i),
+      name: text,
+      image: text,
+      state: text,
+      status: text,
+      ports: text,
+      createdAt: text,
+      composeProject: text,
+      composeService: text,
+      composeWorkingDir: text,
+      composeConfigFiles: text
+    })
+  ),
+  stats: z.array(z.object({ ID: text, CPUPerc: text, MemUsage: text, NetIO: text })),
+  warnings: z.array(text)
+})
+const itemSchema = z.object({
+  kind: z.enum(['container', 'image', 'network', 'cleanup', 'installation', 'operation']),
+  target: text,
+  status: z.enum(['success', 'failed', 'skipped']),
+  message: text
+})
+const actions = new Set(['start', 'pause', 'unpause', 'restart', 'stop', 'remove'])
+type CommandClient = Pick<typeof sshConnectionManager, 'executeCommandDetailed'>
+
+export class DockerManager {
+  private busy = new Set<string>()
+  constructor(private ssh: CommandClient = sshConnectionManager) {}
+
+  private validateConnection(id: string) {
+    if (typeof id !== 'string' || !id.trim()) throw new Error('无效的 SSH 连接')
   }
-}
 
-export interface DockerContainer {
-  id: string
-  name: string
-  image: string
-  status: string
-  state: string
-  ports: string
-  createdAt: string
-  size: string
-  cpu: string
-  memory: string
-  netIO: string
-  composeProject: string
-  composeService: string
-  composeWorkingDir: string
-  composeConfigFiles: string
-}
-
-export interface DockerOverview {
-  environment: DockerEnvironment
-  containers: DockerContainer[]
-}
-
-export type DockerContainerAction = 'start' | 'pause' | 'unpause' | 'restart' | 'stop' | 'remove'
-
-export interface DockerContainerActionOptions {
-  removeImage?: boolean
-  removeNetworks?: boolean
-}
-
-const DOCKER_SENTINEL_START = '__MSHELL_DOCKER_JSON_START__'
-const DOCKER_SENTINEL_END = '__MSHELL_DOCKER_JSON_END__'
-
-class DockerManager {
   async getOverview(connectionId: string): Promise<DockerOverview> {
-    const output = await sshConnectionManager.executeCommand(
+    this.validateConnection(connectionId)
+    const result = await this.ssh.executeCommandDetailed(
       connectionId,
       buildDockerOverviewScript(),
-      30000
+      30000,
+      8 * 1024 * 1024
     )
-    return parseJsonPayload<DockerOverview>(output)
+    if (result.exitCode !== 0)
+      throw new Error(
+        [result.stderr, result.stdout].filter(Boolean).join('\n') || 'Docker 检测失败'
+      )
+    const start = result.stdout.indexOf(OVERVIEW_START)
+    const end = result.stdout.indexOf(OVERVIEW_END, start + OVERVIEW_START.length)
+    if (start < 0 || end < 0) throw new Error('Docker 检测输出不完整，请重新刷新')
+    let parsed: z.infer<typeof overviewSchema>
+    try {
+      parsed = overviewSchema.parse(
+        JSON.parse(result.stdout.slice(start + OVERVIEW_START.length, end))
+      )
+    } catch {
+      throw new Error('Docker 检测数据格式异常，未更新容器列表')
+    }
+    const stats = new Map(parsed.stats.map((row) => [row.ID, row]))
+    return {
+      environment: parsed.environment,
+      warnings: parsed.warnings,
+      containers: parsed.containers.map((row) => {
+        const sample = stats.get(row.id) || stats.get(row.id.slice(0, 12))
+        return {
+          ...row,
+          cpu: sample?.CPUPerc || '-',
+          memory: sample?.MemUsage || '-',
+          netIO: sample?.NetIO || '-'
+        }
+      })
+    }
   }
 
-  async install(connectionId: string): Promise<string> {
-    return await sshConnectionManager.executeCommand(connectionId, buildDockerInstallScript(), 180000)
+  private async operate(
+    connectionId: string,
+    script: string,
+    timeout: number,
+    installation = false
+  ): Promise<DockerOperationResult> {
+    this.validateConnection(connectionId)
+    if (this.busy.has(connectionId))
+      throw new Error('当前服务器已有 Docker 操作正在进行，请稍后刷新')
+    this.busy.add(connectionId)
+    try {
+      const result = await this.ssh.executeCommandDetailed(
+        connectionId,
+        script,
+        timeout,
+        8 * 1024 * 1024
+      )
+      const items: DockerOperationItem[] = []
+      const logs: string[] = []
+      let complete = false
+      let malformed = false
+      for (const line of result.stdout.split(/\r?\n/)) {
+        if (line === OPERATION_DONE) complete = true
+        else if (line.startsWith(RESULT_PREFIX)) {
+          try {
+            items.push(itemSchema.parse(JSON.parse(line.slice(RESULT_PREFIX.length))))
+          } catch {
+            logs.push(line)
+            malformed = true
+          }
+        } else if (line) logs.push(line)
+      }
+      if (result.stderr) logs.push(result.stderr)
+      if (
+        installation ||
+        !complete ||
+        malformed ||
+        (result.exitCode !== 0 && !items.some((item) => item.status === 'failed'))
+      ) {
+        items.push({
+          kind: installation ? 'installation' : 'operation',
+          target: installation ? 'Docker + Compose' : 'Docker',
+          status: complete && !malformed && result.exitCode === 0 ? 'success' : 'failed',
+          message: logs.join('\n') || '操作未完整结束，可能已有部分操作生效，请检查刷新后的状态'
+        })
+      }
+      if (!items.length)
+        items.push({
+          kind: 'operation',
+          target: 'Docker',
+          status: 'failed',
+          message: '未收到操作结果，请刷新确认'
+        })
+      const failures = items.filter((item) => item.status === 'failed').length
+      const status = failures
+        ? items.some((item) => item.status === 'success')
+          ? 'partial'
+          : 'failed'
+        : 'success'
+      const labels = { success: '成功', failed: '失败', skipped: '跳过' }
+      return {
+        status,
+        items,
+        output: [
+          ...logs,
+          ...items.map((item) => `[${labels[item.status]}] ${item.target}\n${item.message}`)
+        ].join('\n')
+      }
+    } catch (error) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}；操作结果未确认，可能已有部分操作生效，请刷新检查`
+      )
+    } finally {
+      this.busy.delete(connectionId)
+    }
   }
 
-  async cleanupUnused(connectionId: string): Promise<string> {
-    return await sshConnectionManager.executeCommand(
-      connectionId,
-      buildDockerCleanupUnusedScript(),
-      180000
-    )
+  install(connectionId: string) {
+    return this.operate(connectionId, buildDockerInstallScript(), 600000, true)
   }
 
-  async executeContainerAction(
+  cleanupUnused(connectionId: string) {
+    return this.operate(connectionId, buildDockerCleanupScript(), 180000)
+  }
+
+  executeContainerAction(
     connectionId: string,
     action: DockerContainerAction,
-    containerId: string,
+    id: string,
     options: DockerContainerActionOptions = {}
-  ): Promise<string> {
-    return await this.executeContainerBatchAction(connectionId, action, [containerId], options)
+  ) {
+    return this.executeContainerBatchAction(connectionId, action, [id], options)
   }
 
   async executeContainerBatchAction(
     connectionId: string,
     action: DockerContainerAction,
-    containerIds: string[],
+    ids: string[],
     options: DockerContainerActionOptions = {}
-  ): Promise<string> {
-    const targets = containerIds.map(shellQuote).join(' ')
-    const command = action === 'remove'
-      ? buildDockerRemoveScript(targets, options)
-      : `set -e\n${buildDockerCommandPrefix()} ${getDockerActionCommand(action)} ${targets}`
-
-    const output = await sshConnectionManager.executeCommand(
+  ) {
+    if (!actions.has(action)) throw new Error('不支持的 Docker 操作')
+    if (
+      !Array.isArray(ids) ||
+      !ids.length ||
+      ids.length > 100 ||
+      ids.some((id) => typeof id !== 'string' || !/^[a-f0-9]{12,64}$/i.test(id))
+    ) {
+      throw new Error('容器 ID 无效或单次选择超过 100 个容器')
+    }
+    const targets = [...new Set(ids)]
+    const safeOptions = {
+      removeImage: options?.removeImage === true,
+      removeNetworks: options?.removeNetworks === true
+    }
+    return this.operate(
       connectionId,
-      command,
-      60000
+      buildDockerActionScript(action, targets, safeOptions),
+      Math.min(1800000, Math.max(60000, targets.length * 60000))
     )
-    return output.trim()
   }
-}
-
-function buildDockerOverviewScript(): string {
-  return `sh <<'MSHELL_DOCKER_SCRIPT'
-set +e
-
-json_escape() {
-  printf '%s' "$1" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g; s/\\t/\\\\t/g; s/\\r/\\\\r/g; s/$/\\\\n/' | tr -d '\\n' | sed 's/\\\\n$//'
-}
-
-json_bool() {
-  if [ "$1" = "true" ]; then
-    printf 'true'
-  else
-    printf 'false'
-  fi
-}
-
-read_os_field() {
-  key="$1"
-  if [ -f /etc/os-release ]; then
-    value="$(grep -E "^\${key}=" /etc/os-release | head -n 1 | cut -d= -f2- | sed 's/^"//; s/"$//')"
-    printf '%s' "$value"
-  fi
-}
-
-detect_package_manager() {
-  if command -v apt-get >/dev/null 2>&1; then echo "apt"
-  elif command -v dnf >/dev/null 2>&1; then echo "dnf"
-  elif command -v yum >/dev/null 2>&1; then echo "yum"
-  elif command -v apk >/dev/null 2>&1; then echo "apk"
-  elif command -v zypper >/dev/null 2>&1; then echo "zypper"
-  else echo "unknown"
-  fi
-}
-
-docker_cmd_prefix() {
-  if docker ps >/dev/null 2>&1; then
-    printf 'docker'
-  elif command -v sudo >/dev/null 2>&1 && sudo -n docker ps >/dev/null 2>&1; then
-    printf 'sudo -n docker'
-  else
-    printf 'docker'
-  fi
-}
-
-installed=false
-compose_installed=false
-socket_accessible=false
-needs_sudo=false
-docker_version=""
-compose_version=""
-service_status="unknown"
-
-if command -v docker >/dev/null 2>&1; then
-  installed=true
-  docker_version="$(docker --version 2>/dev/null | head -n 1)"
-  if docker ps >/dev/null 2>&1; then
-    socket_accessible=true
-  elif command -v sudo >/dev/null 2>&1 && sudo -n docker ps >/dev/null 2>&1; then
-    socket_accessible=true
-    needs_sudo=true
-  fi
-
-  if docker compose version >/dev/null 2>&1; then
-    compose_installed=true
-    compose_version="$(docker compose version 2>/dev/null | head -n 1)"
-  elif command -v docker-compose >/dev/null 2>&1; then
-    compose_installed=true
-    compose_version="$(docker-compose --version 2>/dev/null | head -n 1)"
-  fi
-
-  if command -v systemctl >/dev/null 2>&1; then
-    service_status="$(systemctl is-active docker 2>/dev/null || true)"
-  elif command -v service >/dev/null 2>&1; then
-    service docker status >/dev/null 2>&1 && service_status="active" || service_status="inactive"
-  fi
-fi
-
-os_id="$(read_os_field ID)"
-version_id="$(read_os_field VERSION_ID)"
-pretty_name="$(read_os_field PRETTY_NAME)"
-package_manager="$(detect_package_manager)"
-
-containers_json=""
-if [ "$installed" = "true" ] && [ "$socket_accessible" = "true" ]; then
-  docker_prefix="$(docker_cmd_prefix)"
-  ps_output="$($docker_prefix ps -a --no-trunc --size --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.CreatedAt}}|{{.Size}}' 2>/dev/null)"
-  stats_output="$($docker_prefix stats --no-stream --format '{{.ID}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}' 2>/dev/null)"
-
-  first=true
-  old_ifs="$IFS"
-  IFS='
-'
-  for line in $ps_output; do
-    [ -z "$line" ] && continue
-    id="$(printf '%s' "$line" | cut -d'|' -f1)"
-    name="$(printf '%s' "$line" | cut -d'|' -f2)"
-    image="$(printf '%s' "$line" | cut -d'|' -f3)"
-    status="$(printf '%s' "$line" | cut -d'|' -f4)"
-    ports="$(printf '%s' "$line" | cut -d'|' -f5)"
-    created_at="$(printf '%s' "$line" | cut -d'|' -f6)"
-    size="$(printf '%s' "$line" | cut -d'|' -f7-)"
-    short_id="$(printf '%s' "$id" | cut -c1-12)"
-    status_lower="$(printf '%s' "$status" | tr '[:upper:]' '[:lower:]')"
-    if printf '%s' "$status_lower" | grep -q 'paused'; then
-      state="paused"
-    elif printf '%s' "$status_lower" | grep -q '^up'; then
-      state="running"
-    elif printf '%s' "$status_lower" | grep -q '^exited'; then
-      state="exited"
-    elif printf '%s' "$status_lower" | grep -q '^created'; then
-      state="created"
-    elif printf '%s' "$status_lower" | grep -q '^restarting'; then
-      state="restarting"
-    else
-      state="$status_lower"
-    fi
-    stats_line="$(printf '%s\n' "$stats_output" | grep -E "^($id|$short_id)\\|" | head -n 1)"
-    cpu="$(printf '%s' "$stats_line" | cut -d'|' -f2)"
-    memory="$(printf '%s' "$stats_line" | cut -d'|' -f3)"
-    net_io="$(printf '%s' "$stats_line" | cut -d'|' -f4)"
-    labels_line="$($docker_prefix inspect -f '{{with index .Config.Labels "com.docker.compose.project"}}{{.}}{{end}}|{{with index .Config.Labels "com.docker.compose.service"}}{{.}}{{end}}|{{with index .Config.Labels "com.docker.compose.project.working_dir"}}{{.}}{{end}}|{{with index .Config.Labels "com.docker.compose.project.config_files"}}{{.}}{{end}}' "$id" 2>/dev/null)"
-    compose_project="$(printf '%s' "$labels_line" | cut -d'|' -f1)"
-    compose_service="$(printf '%s' "$labels_line" | cut -d'|' -f2)"
-    compose_working_dir="$(printf '%s' "$labels_line" | cut -d'|' -f3)"
-    compose_config_files="$(printf '%s' "$labels_line" | cut -d'|' -f4-)"
-
-    item="{\\"id\\":\\"$(json_escape "$id")\\",\\"name\\":\\"$(json_escape "$name")\\",\\"image\\":\\"$(json_escape "$image")\\",\\"status\\":\\"$(json_escape "$status")\\",\\"state\\":\\"$(json_escape "$state")\\",\\"ports\\":\\"$(json_escape "$ports")\\",\\"createdAt\\":\\"$(json_escape "$created_at")\\",\\"size\\":\\"$(json_escape "$size")\\",\\"cpu\\":\\"$(json_escape "\${cpu:--}")\\",\\"memory\\":\\"$(json_escape "\${memory:--}")\\",\\"netIO\\":\\"$(json_escape "\${net_io:--}")\\",\\"composeProject\\":\\"$(json_escape "$compose_project")\\",\\"composeService\\":\\"$(json_escape "$compose_service")\\",\\"composeWorkingDir\\":\\"$(json_escape "$compose_working_dir")\\",\\"composeConfigFiles\\":\\"$(json_escape "$compose_config_files")\\"}"
-    if [ "$first" = "true" ]; then
-      containers_json="$item"
-      first=false
-    else
-      containers_json="$containers_json,$item"
-    fi
-  done
-  IFS="$old_ifs"
-fi
-
-printf '%s\\n' '${DOCKER_SENTINEL_START}'
-printf '{'
-printf '"environment":{'
-printf '"installed":%s,' "$(json_bool "$installed")"
-printf '"dockerVersion":"%s",' "$(json_escape "$docker_version")"
-printf '"composeInstalled":%s,' "$(json_bool "$compose_installed")"
-printf '"composeVersion":"%s",' "$(json_escape "$compose_version")"
-printf '"serviceStatus":"%s",' "$(json_escape "$service_status")"
-printf '"socketAccessible":%s,' "$(json_bool "$socket_accessible")"
-printf '"needsSudo":%s,' "$(json_bool "$needs_sudo")"
-printf '"os":{"id":"%s","versionId":"%s","prettyName":"%s","packageManager":"%s"}' "$(json_escape "$os_id")" "$(json_escape "$version_id")" "$(json_escape "$pretty_name")" "$(json_escape "$package_manager")"
-printf '},'
-printf '"containers":[%s]' "$containers_json"
-printf '}\\n'
-printf '%s\\n' '${DOCKER_SENTINEL_END}'
-MSHELL_DOCKER_SCRIPT`
-}
-
-function buildDockerInstallScript(): string {
-  return `sh <<'MSHELL_DOCKER_INSTALL'
-set -e
-
-run_as_root() {
-  if [ "$(id -u)" -eq 0 ]; then
-    "$@"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
-  else
-    echo "需要 root 权限或 sudo 才能安装 Docker。"
-    exit 1
-  fi
-}
-
-start_docker() {
-  if command -v systemctl >/dev/null 2>&1; then
-    run_as_root systemctl enable docker 2>/dev/null || true
-    run_as_root systemctl start docker 2>/dev/null || true
-  elif command -v service >/dev/null 2>&1; then
-    run_as_root service docker start 2>/dev/null || true
-  fi
-}
-
-install_with_apt() {
-  run_as_root apt-get update
-  run_as_root apt-get install -y docker.io docker-compose-plugin || run_as_root apt-get install -y docker.io docker-compose
-}
-
-install_with_dnf() {
-  run_as_root dnf install -y docker docker-compose-plugin || run_as_root dnf install -y moby-engine docker-compose-plugin || run_as_root dnf install -y docker
-}
-
-install_with_yum() {
-  run_as_root yum install -y docker docker-compose-plugin || run_as_root yum install -y docker
-}
-
-install_with_apk() {
-  run_as_root apk add --no-cache docker docker-cli-compose
-}
-
-install_with_zypper() {
-  run_as_root zypper --non-interactive install docker docker-compose || run_as_root zypper --non-interactive install docker
-}
-
-if command -v docker >/dev/null 2>&1; then
-  echo "Docker 已安装：$(docker --version 2>/dev/null || true)"
-else
-  if command -v apt-get >/dev/null 2>&1; then
-    install_with_apt
-  elif command -v dnf >/dev/null 2>&1; then
-    install_with_dnf
-  elif command -v yum >/dev/null 2>&1; then
-    install_with_yum
-  elif command -v apk >/dev/null 2>&1; then
-    install_with_apk
-  elif command -v zypper >/dev/null 2>&1; then
-    install_with_zypper
-  else
-    echo "暂不支持当前系统的自动安装。请手动安装 docker 与 docker compose 插件。"
-    exit 1
-  fi
-fi
-
-start_docker
-
-echo "Docker: $(docker --version 2>/dev/null || echo '未检测到')"
-if docker compose version >/dev/null 2>&1; then
-  echo "Compose: $(docker compose version)"
-elif command -v docker-compose >/dev/null 2>&1; then
-  echo "Compose: $(docker-compose --version)"
-else
-  echo "Compose: 未检测到，请检查当前发行版是否提供 docker-compose-plugin。"
-fi
-MSHELL_DOCKER_INSTALL`
-}
-
-function buildDockerCommandPrefix(): string {
-  return `${buildDockerCommandResolverScript()}\n$DOCKER_CMD`
-}
-
-function buildDockerCommandResolverScript(): string {
-  return 'if docker ps >/dev/null 2>&1; then DOCKER_CMD="docker"; elif command -v sudo >/dev/null 2>&1 && sudo -n docker ps >/dev/null 2>&1; then DOCKER_CMD="sudo -n docker"; else DOCKER_CMD="docker"; fi'
-}
-
-function buildDockerCleanupUnusedScript(): string {
-  return `set +e
-${buildDockerCommandResolverScript()}
-failed=0
-
-echo "== 清理未使用镜像 =="
-$DOCKER_CMD image prune -af
-[ $? -eq 0 ] || failed=1
-
-echo
-echo "== 清理未使用卷 =="
-$DOCKER_CMD volume prune -f
-[ $? -eq 0 ] || failed=1
-
-echo
-echo "== 清理构建缓存 =="
-if $DOCKER_CMD builder prune --help >/dev/null 2>&1; then
-  $DOCKER_CMD builder prune -af
-  [ $? -eq 0 ] || failed=1
-else
-  echo "当前 Docker 版本不支持 builder prune，已跳过。"
-fi
-
-echo
-echo "== 当前 Docker 空间占用 =="
-$DOCKER_CMD system df 2>/dev/null || true
-
-exit "$failed"`
-}
-
-function buildDockerRemoveScript(
-  targets: string,
-  options: DockerContainerActionOptions
-): string {
-  const removeImage = options.removeImage ? 'true' : 'false'
-  const removeNetworks = options.removeNetworks ? 'true' : 'false'
-
-  return `set -e
-${buildDockerCommandResolverScript()}
-REMOVE_IMAGE=${removeImage}
-REMOVE_NETWORKS=${removeNetworks}
-IMAGES=""
-NETWORKS=""
-
-for TARGET in ${targets}; do
-  if [ "$REMOVE_IMAGE" = "true" ]; then
-    IMAGE_NAME="$($DOCKER_CMD inspect -f '{{.Config.Image}}' "$TARGET" 2>/dev/null || true)"
-    if [ -n "$IMAGE_NAME" ]; then
-      IMAGES="$IMAGES
-$IMAGE_NAME"
-    fi
-  fi
-
-  if [ "$REMOVE_NETWORKS" = "true" ]; then
-    TARGET_NETWORKS="$($DOCKER_CMD inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$TARGET" 2>/dev/null || true)"
-    if [ -n "$TARGET_NETWORKS" ]; then
-      NETWORKS="$NETWORKS
-$TARGET_NETWORKS"
-    fi
-  fi
-
-  $DOCKER_CMD rm -f "$TARGET"
-done
-
-if [ "$REMOVE_IMAGE" = "true" ] && [ -n "$IMAGES" ]; then
-  printf '%s\\n' "$IMAGES" | sort -u | while IFS= read -r image; do
-    [ -z "$image" ] && continue
-    if $DOCKER_CMD rmi "$image"; then
-      echo "已删除镜像: $image"
-    else
-      echo "镜像删除失败或仍被其他容器使用: $image"
-    fi
-  done
-fi
-
-if [ "$REMOVE_NETWORKS" = "true" ] && [ -n "$NETWORKS" ]; then
-  printf '%s\\n' "$NETWORKS" | sort -u | while IFS= read -r network; do
-    [ -z "$network" ] && continue
-    case "$network" in
-      bridge|host|none)
-        echo "跳过默认网络: $network"
-        continue
-        ;;
-    esac
-    if $DOCKER_CMD network rm "$network"; then
-      echo "已删除网络: $network"
-    else
-      echo "网络删除失败或仍被其他容器使用: $network"
-    fi
-  done
-fi`
-}
-
-function getDockerActionCommand(action: DockerContainerAction): string {
-  const commands: Record<DockerContainerAction, string> = {
-    start: 'start',
-    pause: 'pause',
-    unpause: 'unpause',
-    restart: 'restart',
-    stop: 'stop',
-    remove: 'rm -f'
-  }
-  return commands[action]
-}
-
-function parseJsonPayload<T>(output: string): T {
-  const start = output.indexOf(DOCKER_SENTINEL_START)
-  const end = output.indexOf(DOCKER_SENTINEL_END)
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error('Docker 检测输出格式异常')
-  }
-
-  const json = output.slice(start + DOCKER_SENTINEL_START.length, end).trim()
-  return JSON.parse(json) as T
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 export const dockerManager = new DockerManager()

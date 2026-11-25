@@ -77,6 +77,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { CSSProperties } from 'vue'
 import VirtualScroll from './VirtualScroll.vue'
 import type { Column } from './virtual-table.types'
+import { createRowComparator } from './virtual-table-sort'
 
 type VirtualScrollExpose = {
   scrollToIndex: (index: number, behavior?: ScrollBehavior) => void
@@ -93,6 +94,11 @@ interface Props {
   selectedKey?: string
   resizable?: boolean
   storageKey?: string
+  /** 初始排序列（为空时保持数据原顺序，直到用户点击表头） */
+  defaultSortKey?: string
+  defaultSortOrder?: 'asc' | 'desc'
+  /** 排序分组：值越小越靠前，不受升降序影响（例如目录排在文件前面） */
+  rowRank?: (row: T) => number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -101,7 +107,10 @@ const props = withDefaults(defineProps<Props>(), {
   selectable: false,
   selectedKey: 'id',
   resizable: false,
-  storageKey: ''
+  storageKey: '',
+  defaultSortKey: '',
+  defaultSortOrder: 'asc',
+  rowRank: undefined
 })
 
 const emit = defineEmits<{
@@ -112,8 +121,8 @@ const emit = defineEmits<{
 }>()
 
 const virtualScrollRef = ref<VirtualScrollExpose>()
-const sortKey = ref<string>('')
-const sortOrder = ref<'asc' | 'desc'>('asc')
+const sortKey = ref<string>(props.defaultSortKey)
+const sortOrder = ref<'asc' | 'desc'>(props.defaultSortOrder)
 const selectedRows = ref<Set<any>>(new Set())
 const hoverIndex = ref(-1)
 const scrollbarWidth = ref(8) // 滚动条宽度
@@ -135,9 +144,13 @@ let previousBodyUserSelect = ''
 
 // 监听数据变化，清空选择并刷新
 watch(() => props.data, () => {
-  // 数据变化时清空选择
-  selectedRows.value.clear()
+  // 数据变化时清空选择，并通知父组件（否则父组件仍持有上一份数据中的选中项）
+  const hadSelection = selectedRows.value.size > 0
+  selectedRows.value = new Set()
   lastSelectedIndex.value = -1
+  if (hadSelection) {
+    emit('selectionChange', [])
+  }
   // 强制刷新虚拟滚动
   dataKey.value++
 }, { deep: false })
@@ -146,15 +159,10 @@ watch(() => props.data, () => {
 const sortedData = computed(() => {
   if (!sortKey.value) return props.data
 
-  return [...props.data].sort((a, b) => {
-    const aVal = getCellValue(a, sortKey.value)
-    const bVal = getCellValue(b, sortKey.value)
-
-    if (aVal === bVal) return 0
-
-    const comparison = aVal > bVal ? 1 : -1
-    return sortOrder.value === 'asc' ? comparison : -comparison
-  })
+  const key = sortKey.value
+  return [...props.data].sort(
+    createRowComparator((row: T) => getCellValue(row, key), sortOrder.value, props.rowRank)
+  )
 })
 
 // 获取单元格值

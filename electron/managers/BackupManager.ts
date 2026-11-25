@@ -897,6 +897,8 @@ export class BackupManager {
                 // 不存在，用原始 ID 创建
                 await sessionManager.createGroup(group.name, group.id)
               }
+              // Restore pin/order metadata as well as the group name and ID.
+              await sessionManager.syncUpsertGroup(group)
             } catch (error) {
               logger.logError('system', `Failed to restore group: ${group.name}`, error as Error)
             }

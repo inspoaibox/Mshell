@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+  <head><meta charset="UTF-8" /><title>命令智能 · 本地验证</title></head>
+  <body>
+    <main><section id="preview"></section><aside>
+      <h2>命令智能 · 本地验证</h2>
+      <p>真实终端组件，模拟 SSH 和 AI。不会连接服务器或执行系统命令。</p>
+      <p>试用：<code>ls</code>、<code>cat ./fi</code>、<code>?ls -la</code>、<code>#查看磁盘</code>、<code>#删除文件</code>。</p>
+      <button id="toggle">关闭命令智能</button><button id="editor">进入模拟 Vim</button><button id="shell">返回 Shell</button>
+      <p id="executed">尚未执行命令</p><p id="ai-requests">AI 请求：0</p>
+    </aside></main><div id="app-tool-dock-host"></div>
+    <script type="module">
+      import { createApp } from 'vue'
+      import { createPinia } from 'pinia'
+      import ElementPlus from 'element-plus'
+      import 'element-plus/dist/index.css'
+      import '/src/styles/variables.css'
+      import TerminalTab from '/src/components/Terminal/TerminalTab.vue'
+      import { useAppStore } from '/src/stores/app'
+      const listeners = new Map(), history = ['ls -lah /srv/demo', 'docker ps', 'df -h']
+      const settings = { ssh: { commandAutocomplete: true, aiCommandSuggest: true, commandExplain: true }, terminal: {}, general: {} }
+      const subscribe = (event, fn) => { const set = listeners.get(event) || new Set(); set.add(fn); listeners.set(event, set); return () => set.delete(fn) }
+      const emit = (event, ...args) => listeners.get(event)?.forEach(fn => fn(...args))
+      const prompt = 'root@demo:/srv/demo# '
+      let line = '', cursor = 0, requests = 0
+      const output = text => emit('data', 'fixture', text)
+      const write = (_id, data) => {
+        data = data.replace(/\x1b\[(?:200|201)~/g, '')
+        if (data === '\x1b[D') { cursor = Math.max(0, cursor - 1); output(data); return }
+        if (data === '\x1b[C') { cursor = Math.min(line.length, cursor + 1); output(data); return }
+        for (const char of data) {
+          if (char === '\x15') { line = line.slice(cursor); cursor = 0; output('\r\x1b[2K' + prompt + line) }
+          else if (char === '\x0b') { line = line.slice(0, cursor); output('\x1b[K') }
+          else if (char === '\x7f') { if (cursor) { line = line.slice(0, cursor - 1) + line.slice(cursor); cursor--; output('\b \b') } }
+          else if (char === '\r') { document.querySelector('#executed').textContent = '模拟执行：' + line; output('\r\n模拟执行完成\r\n' + prompt); line = ''; cursor = 0 }
+          else if (char === '\x03') { line = ''; cursor = 0; output('^C\r\n' + prompt) }
+          else { line = line.slice(0, cursor) + char + line.slice(cursor); cursor++; output(char) }
+        }
+      }
+      window.electronAPI = {
+        settings: { get: async () => settings, onChange: fn => subscribe('settings', fn) },
+        ssh: {
+          getConnection: async () => ({ status: 'connected' }), write, resize: () => {}, disconnect: async () => {},
+          onData: fn => { const off = subscribe('data', fn); setTimeout(() => output(prompt), 100); return off },
+          onError: fn => subscribe('error', fn), onClose: fn => subscribe('close', fn),
+          onReconnecting: fn => subscribe('reconnecting', fn), onReconnected: fn => subscribe('reconnected', fn), onReconnectFailed: fn => subscribe('failed', fn),
+          completePath: async () => ({ success: true, data: [{ name: 'file name.txt', directory: false }, { name: 'files', directory: true }] }),
+          executeCommand: async () => ({ success: true, data: '' })
+        },
+        commandHistory: {
+          getRecentUnique: async () => ({ success: true, data: [...history] }), onChanged: fn => subscribe('history', fn),
+          add: async item => { history.unshift(item.command); emit('history'); return { success: true } }
+        },
+        snippet: {
+          getAll: async () => ({ success: true, data: [{ id: 'ports', name: '查看端口', shortcut: '/ports', command: 'ss -lntp', tags: [] }] }),
+          searchByShortcut: async input => ({ success: true, data: '/ports'.startsWith(input) ? [{ id: 'ports', name: '查看端口', shortcut: '/ports', command: 'ss -lntp' }] : [] }),
+          incrementUsage: async () => ({ success: true })
+        },
+        ai: {
+          getConfig: async () => ({ success: true, data: { temperature: 0.5, maxTokens: 1000 } }),
+          request: async (_action, prompt) => {
+            document.querySelector('#ai-requests').textContent = 'AI 请求：' + (++requests)
+            await new Promise(resolve => setTimeout(resolve, 250))
+            return { success: true, data: prompt.includes('JSON 对象')
+              ? JSON.stringify({ command: prompt.includes('删除') ? 'rm /tmp/demo.txt' : 'df -h' })
+              : '**详细说明**\n`ls -la` 列出全部文件及其详细属性。\n<img src=x onerror="alert(1)"> 应显示为文本。' }
+          }
+        },
+        connectionStats: { updateTraffic: () => {}, incrementCommand: async () => {}, end: async () => {} },
+        portForward: { autoStart: async () => ({ success: true }) }, dialog: { showContextMenu: async () => undefined }
+      }
+      const pinia = createPinia(), store = useAppStore(pinia)
+      const session = { id: 'fixture', name: '本地模拟会话', host: 'demo.local', port: 22, username: 'root', type: 'ssh' }
+      store.addTab({ id: 'fixture', name: session.name, session })
+      createApp(TerminalTab, { connectionId: 'fixture', session, terminalOptions: { fontSize: 15, rendererType: 'dom' } }).use(pinia).use(ElementPlus).mount('#preview')
+      document.querySelector('#toggle').onclick = event => {
+        const enabled = !settings.ssh.commandAutocomplete
+        Object.assign(settings.ssh, { commandAutocomplete: enabled, commandExplain: enabled, aiCommandSuggest: enabled })
+        emit('settings', structuredClone(settings)); event.target.textContent = enabled ? '关闭命令智能' : '开启命令智能'
+      }
+      document.querySelector('#editor').onclick = () => output('\x1b[?1049h\x1b[2J\x1b[H模拟 Vim：输入 ? 或 # 不应触发智能功能\r\n')
+      document.querySelector('#shell').onclick = () => { line = ''; cursor = 0; output('\x1b[?1049l\r\n' + prompt) }
+    </script>
+    <style>
+      body { margin: 0; background: #101724; color: #dbe6f7; font-family: 'Segoe UI', sans-serif; }
+      main { display: flex; gap: 24px; padding: 24px; }
+      #preview { width: min(1000px, 72vw); height: calc(100vh - 48px); min-height: 500px; border: 1px solid #344053; border-radius: 10px; overflow: hidden; }
+      aside { max-width: 300px; line-height: 1.8; } aside button { padding: 8px; margin: 5px; }
+    </style>
+  </body>
+</html>

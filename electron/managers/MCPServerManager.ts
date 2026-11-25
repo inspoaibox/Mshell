@@ -145,6 +145,7 @@ class MCPServerManager {
   private httpServer: Server | null = null
   private activeRuntimeConfig: AgentMcpSettings | null = null
   private activeRequests = new Set<ActiveRequest>()
+  private activeWriteControllers = new Set<AbortController>()
   private pendingApprovals = new Map<string, PendingApproval>()
   private approvalQueue: Promise<void> = Promise.resolve()
   /** Bumped whenever approvals are cancelled, so requests queued before that are dropped. */
@@ -223,6 +224,9 @@ class MCPServerManager {
       }
     })
     this.rejectPendingApprovals()
+    if (permissionMode !== 'execute') {
+      this.cancelActiveWrites()
+    }
     auditLogManager.log(AuditAction.SETTINGS_UPDATE, {
       resource: 'agent-mcp-permission',
       details: { permissionMode },
@@ -629,11 +633,13 @@ class MCPServerManager {
       'execute_readonly_command',
       {
         title: 'Execute a read-only SSH query command',
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
         description:
           'Execute one restricted read-only query command on a currently connected SSH session and return its output. ' +
           'Shell pipelines, redirection, command chains, script interpreters, sudo, and modifying commands are rejected. ' +
           'Arguments are passed literally: the remote shell performs no glob, brace, tilde or variable expansion. ' +
           'The result contains stdout (output), stderr and exitCode; a non-zero exitCode is reported, not treated as a tool error. ' +
+          'This tool remains allowlisted in every permission mode; execute mode does not bypass its read-only program and argument checks. ' +
           'For database data and schema queries, use query_database instead. ' +
           `Supported programs: ${MCP_READ_ONLY_QUERY_PROGRAMS.join(', ')}.`,
         inputSchema: {
@@ -807,6 +813,7 @@ class MCPServerManager {
       'write_remote_file',
       {
         title: 'Write a remote UTF-8 text file',
+        annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
         description:
           'Create or overwrite one remote UTF-8 text file through SFTP. Query mode denies it, confirm mode waits for MShell approval, and execute mode runs it directly.',
         inputSchema: {
@@ -816,6 +823,7 @@ class MCPServerManager {
         }
       },
       async ({ connectionId, filePath, content }, extra) => {
+        const writeRequest = this.createWriteRequest(requestSignal, extra.signal)
         try {
           const bytes = Buffer.byteLength(content, 'utf8')
           if (bytes > MAX_WRITE_FILE_BYTES) {
@@ -831,11 +839,12 @@ class MCPServerManager {
               content,
               contentSha256: createHash('sha256').update(content).digest('hex')
             },
-            linkAbortSignals(requestSignal, extra.signal)
+            writeRequest.signal
           )
 
           await this.ensureSftp(connectionId)
-          await sftpManager.writeFile(connectionId, filePath, content)
+          this.throwIfAborted(writeRequest.signal)
+          await sftpManager.writeFile(connectionId, filePath, content, writeRequest.signal)
           const result = { connectionId, filePath, bytes, written: true }
           this.auditToolCall(
             'write_remote_file',
@@ -849,6 +858,8 @@ class MCPServerManager {
             { connectionId, filePath, bytes: Buffer.byteLength(content, 'utf8') },
             error
           )
+        } finally {
+          this.activeWriteControllers.delete(writeRequest.controller)
         }
       }
     )
@@ -857,6 +868,7 @@ class MCPServerManager {
       'execute_command',
       {
         title: 'Execute an explicitly authorized SSH command',
+        annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
         description:
           'Execute a command that may modify the remote server and return its stdout (output), stderr and exitCode. ' +
           'A non-zero exitCode is reported, not treated as a tool error. Query mode denies it, confirm mode waits for MShell approval, and execute mode runs it directly.',
@@ -867,11 +879,11 @@ class MCPServerManager {
         }
       },
       async ({ connectionId, command, timeoutMs }, extra) => {
+        const writeRequest = this.createWriteRequest(requestSignal, extra.signal)
         try {
           const normalizedCommand = command.trim()
           if (!normalizedCommand) throw new Error('执行命令不能为空')
           this.requireConnectedConnection(connectionId)
-          const signal = linkAbortSignals(requestSignal, extra.signal)
           const permissionMode = await this.requireWriteAccess(
             'execute_command',
             {
@@ -879,7 +891,7 @@ class MCPServerManager {
               command: normalizedCommand,
               timeoutMs: timeoutMs || DEFAULT_COMMAND_TIMEOUT_MS
             },
-            signal
+            writeRequest.signal
           )
 
           const execution = await sshConnectionManager.executeCommandDetailed(
@@ -888,7 +900,7 @@ class MCPServerManager {
             timeoutMs || DEFAULT_COMMAND_TIMEOUT_MS,
             MAX_COMMAND_CAPTURE_BYTES,
             undefined,
-            signal
+            writeRequest.signal
           )
           const output = this.formatCommandOutput(execution)
           this.auditToolCall(
@@ -913,6 +925,8 @@ class MCPServerManager {
             { connectionId, ...this.getCommandAuditDetails(command) },
             error
           )
+        } finally {
+          this.activeWriteControllers.delete(writeRequest.controller)
         }
       }
     )
@@ -925,6 +939,7 @@ class MCPServerManager {
     details: Record<string, unknown>,
     signal: AbortSignal
   ): Promise<AgentMcpPermissionMode> {
+    this.throwIfAborted(signal)
     const permissionMode = appSettingsManager.getSettings().agentMcp.permissionMode
     if (permissionMode === 'query') {
       throw new Error('Agent 当前为“查询”模式，写入和修改操作已被服务端拒绝')
@@ -932,7 +947,7 @@ class MCPServerManager {
     if (permissionMode === 'execute') return permissionMode
 
     const approved = await this.enqueueApproval(tool, details, signal)
-    if (signal.aborted) throw new Error('Agent 请求已取消，操作未执行')
+    this.throwIfAborted(signal)
     if (!approved) throw new Error('Agent 写操作未获得 MShell 用户批准')
     if (appSettingsManager.getSettings().agentMcp.permissionMode === 'query') {
       throw new Error('Agent 当前为“查询”模式，写入和修改操作已被服务端拒绝')
@@ -940,6 +955,29 @@ class MCPServerManager {
     // The session may have dropped while the user was deciding.
     this.requireConnectedConnection(String(details.connectionId || ''))
     return permissionMode
+  }
+
+  private createWriteRequest(
+    ...signals: Array<AbortSignal | undefined>
+  ): { controller: AbortController; signal: AbortSignal } {
+    const controller = new AbortController()
+    this.activeWriteControllers.add(controller)
+    return {
+      controller,
+      signal: linkAbortSignals(controller.signal, ...signals)
+    }
+  }
+
+  private cancelActiveWrites(): void {
+    for (const controller of this.activeWriteControllers) {
+      controller.abort()
+    }
+  }
+
+  private throwIfAborted(signal: AbortSignal): void {
+    if (signal.aborted) {
+      throw new Error('Agent 写操作已因权限模式切换或请求取消而终止')
+    }
   }
 
   private enqueueApproval(

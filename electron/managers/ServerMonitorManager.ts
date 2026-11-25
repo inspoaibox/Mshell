@@ -1,639 +1,361 @@
 import { EventEmitter } from 'node:events'
-import { Client } from 'ssh2'
+import type { Client, ClientChannel } from 'ssh2'
+import type {
+  ServerMetrics,
+  MonitorConfig,
+  MonitorConfigUpdate,
+  MetricSource,
+  DiskMetrics,
+  DockerContainerInfo
+} from '../../src/types/monitor'
+import { MONITOR_INTERVALS } from '../../src/types/monitor'
+import {
+  buildCoreMonitorCommand,
+  calculateCoreMetrics,
+  parseCoreSample,
+  parseDiskMetrics,
+  parseDockerMetrics,
+  DISK_MONITOR_COMMAND,
+  DOCKER_MONITOR_COMMAND,
+  type CoreSample
+} from '../utils/monitor-sampling'
 
-/**
- * 服务器监控数据接口
- */
-// 进程信息详情
-export interface ProcessInfo {
-  pid: number
-  user: string
-  cpu: number
-  memory: number
-  command: string
+export type {
+  ServerMetrics,
+  MonitorConfig,
+  ProcessInfo,
+  DockerContainerInfo
+} from '../../src/types/monitor'
+
+type Task = 'core' | 'disk' | 'docker'
+interface MonitorState {
+  id: string
+  client?: Client
+  config: MonitorConfig
+  controller: AbortController
+  timers: Partial<Record<Task, NodeJS.Timeout>>
+  pending: Map<Task, Promise<ServerMetrics | undefined>>
+  sources: Record<Task, MetricSource>
+  previous?: CoreSample
+  identity?: Omit<ServerMetrics['system'], 'uptime'>
+  latest?: ServerMetrics
+  disk: DiskMetrics | null
+  docker: DockerContainerInfo[]
+  closeListener?: () => void
 }
 
-// Docker 容器信息
-export interface DockerContainerInfo {
-  name: string
-  cpu: string
-  memory: string
-  netIO: string
-  status: string
-}
-
-export interface ServerMetrics {
-  sessionId: string
-  timestamp: string
-
-  // CPU 信息
-  cpu: {
-    usage: number // 使用率百分比
-    loadAverage: number[] // 1分钟、5分钟、15分钟负载
-    cores: number // CPU核心数
-  }
-
-  // 内存信息
-  memory: {
-    total: number // 总内存（字节）
-    used: number // 已用内存
-    free: number // 空闲内存
-    available: number // 可用内存
-    usage: number // 使用率百分比
-  }
-
-  // 磁盘信息
-  disk: {
-    total: number // 总空间（字节）
-    used: number // 已用空间
-    free: number // 空闲空间
-    usage: number // 使用率百分比
-    filesystems?: Array<{
-      filesystem: string
-      mount: string
-      total: number
-      used: number
-      free: number
-      usage: number
-    }>
-  }
-
-  // 网络信息
-  network: {
-    bytesIn: number // 接收字节数
-    bytesOut: number // 发送字节数
-    packetsIn: number // 接收包数
-    packetsOut: number // 发送包数
-    speedIn: number // 接收速率 (B/s)
-    speedOut: number // 发送速率 (B/s)
-  }
-
-  // 进程概览
-  processes: {
-    total: number // 总进程数
-    running: number // 运行中
-    sleeping: number // 休眠中
-    zombie: number // 僵尸进程
-  }
-
-  // Top 进程
-  topProcesses?: ProcessInfo[]
-
-  // Docker 容器
-  dockerContainers?: DockerContainerInfo[]
-
-  // 系统信息
-  system: {
-    uptime: number // 运行时间（秒）
-    hostname: string
-    platform: string
-    kernel: string
-  }
-}
-
-/**
- * 监控配置
- */
-export interface MonitorConfig {
-  interval: number // 监控间隔（毫秒）
-  enabled: boolean
-  metrics: {
-    cpu: boolean
-    memory: boolean
-    disk: boolean
-    network: boolean
-    processes: boolean
-    topProcesses?: boolean
-    docker?: boolean
-  }
-}
-
-/**
- * ServerMonitorManager - 服务器监控管理器
- */
 export class ServerMonitorManager extends EventEmitter {
-  private monitors: Map<string, NodeJS.Timeout>
-  private sshClients: Map<string, Client>
-  private configs: Map<string, MonitorConfig>
-  private latestMetrics: Map<string, ServerMetrics>
-  private lastNetworkStats: Map<string, { bytesIn: number; bytesOut: number; timestamp: number }>
-  private collectionPromises: Map<string, Promise<ServerMetrics | undefined>>
+  private states = new Map<string, MonitorState>()
 
-  constructor() {
-    super()
-    this.monitors = new Map()
-    this.sshClients = new Map()
-    this.configs = new Map()
-    this.latestMetrics = new Map()
-    this.lastNetworkStats = new Map()
-    this.collectionPromises = new Map()
-  }
-
-  /**
-   * 开始监控
-   */
-  startMonitoring(sessionId: string, sshClient: Client, config?: Partial<MonitorConfig>): void {
-    // 停止现有监控
-    this.stopMonitoring(sessionId)
-
-    // 合并配置
-    const fullConfig: MonitorConfig = {
-      interval: config?.interval || 3000,
-      enabled: config?.enabled !== false,
+  private configure(config: MonitorConfigUpdate = {}, previous?: MonitorConfig): MonitorConfig {
+    const interval = config.interval ?? previous?.interval ?? 1000
+    if (!(MONITOR_INTERVALS as readonly number[]).includes(interval))
+      throw new Error('刷新间隔必须是 1、2、3 或 5 秒')
+    return {
+      interval,
+      enabled: config.enabled ?? previous?.enabled ?? true,
       metrics: {
-        cpu: config?.metrics?.cpu !== false,
-        memory: config?.metrics?.memory !== false,
-        disk: config?.metrics?.disk !== false,
-        network: config?.metrics?.network !== false,
-        processes: config?.metrics?.processes !== false,
-        topProcesses: config?.metrics?.topProcesses !== false, // 默认开启
-        docker: config?.metrics?.docker !== false // 默认开启
-      }
-    }
-
-    this.configs.set(sessionId, fullConfig)
-    this.sshClients.set(sessionId, sshClient)
-
-    // 立即执行一次
-    void this.collectMetrics(sessionId)
-
-    // 设置定时器
-    const timer = setInterval(() => {
-      void this.collectMetrics(sessionId)
-    }, fullConfig.interval)
-
-    this.monitors.set(sessionId, timer)
-  }
-
-  /**
-   * 停止监控
-   */
-  stopMonitoring(sessionId: string): void {
-    const timer = this.monitors.get(sessionId)
-    if (timer) {
-      clearInterval(timer)
-      this.monitors.delete(sessionId)
-    }
-
-    this.sshClients.delete(sessionId)
-    this.configs.delete(sessionId)
-    this.collectionPromises.delete(sessionId)
-  }
-
-  /**
-   * 收集指标
-   */
-  private collectMetrics(sessionId: string): Promise<ServerMetrics | undefined> {
-    const existing = this.collectionPromises.get(sessionId)
-    if (existing) return existing
-
-    const promise = this.collectMetricsInternal(sessionId).finally(() => {
-      this.collectionPromises.delete(sessionId)
-    })
-    this.collectionPromises.set(sessionId, promise)
-    return promise
-  }
-
-  private async collectMetricsInternal(sessionId: string): Promise<ServerMetrics | undefined> {
-    const client = this.sshClients.get(sessionId)
-    const config = this.configs.get(sessionId)
-
-    if (!client || !config) return undefined
-
-    try {
-      const metrics: Partial<ServerMetrics> = {
-        sessionId
-      }
-
-      // 收集各项指标
-      if (config.metrics.cpu) {
-        metrics.cpu = await this.collectCPUMetrics(client)
-      }
-
-      if (config.metrics.memory) {
-        metrics.memory = await this.collectMemoryMetrics(client)
-      }
-
-      if (config.metrics.disk) {
-        metrics.disk = await this.collectDiskMetrics(client)
-      }
-
-      if (config.metrics.network) {
-        metrics.network = await this.collectNetworkMetrics(client)
-      }
-
-      if (config.metrics.processes) {
-        metrics.processes = await this.collectProcessMetrics(client)
-      }
-
-      if (config.metrics.topProcesses) {
-        metrics.topProcesses = await this.collectTopProcesses(client)
-      }
-
-      if (config.metrics.docker) {
-        metrics.dockerContainers = await this.collectDockerMetrics(client)
-      }
-
-      metrics.system = await this.collectSystemInfo(client)
-      metrics.timestamp = new Date().toISOString()
-
-      // 保存最新指标
-      this.latestMetrics.set(sessionId, metrics as ServerMetrics)
-
-      // 发送事件
-      this.emit('metrics', sessionId, metrics)
-      return metrics as ServerMetrics
-    } catch (error) {
-      console.error(`Failed to collect metrics for ${sessionId}:`, error)
-      this.emit('error', sessionId, error)
-      return undefined
-    }
-  }
-
-  /**
-   * 收集 CPU 指标
-   */
-  private async collectCPUMetrics(client: Client): Promise<ServerMetrics['cpu']> {
-    // CPU 使用率
-    const cpuUsage = await this.executeCommand(client,
-      "awk '/^cpu / {print $2,$3,$4,$5,$6,$7,$8}' /proc/stat; sleep 0.25; awk '/^cpu / {print $2,$3,$4,$5,$6,$7,$8}' /proc/stat"
-    )
-
-    // 负载平均值
-    const loadAvg = await this.executeCommand(client,
-      "cat /proc/loadavg | awk '{print $1,$2,$3}'"
-    )
-
-    // CPU 核心数
-    const cores = await this.executeCommand(client,
-      "nproc"
-    )
-
-    const loadValues = loadAvg.trim().split(' ').map(Number)
-    const cpuLines = cpuUsage.trim().split('\n')
-    let usage = 0
-    if (cpuLines.length >= 2) {
-      const first = cpuLines[0].trim().split(/\s+/).map(Number)
-      const second = cpuLines[1].trim().split(/\s+/).map(Number)
-      const idle1 = (first[3] || 0) + (first[4] || 0)
-      const idle2 = (second[3] || 0) + (second[4] || 0)
-      const total1 = first.reduce((sum, value) => sum + (value || 0), 0)
-      const total2 = second.reduce((sum, value) => sum + (value || 0), 0)
-      const totalDiff = total2 - total1
-      const idleDiff = idle2 - idle1
-      usage = totalDiff > 0 ? ((totalDiff - idleDiff) / totalDiff) * 100 : 0
-    }
-
-    return {
-      usage,
-      loadAverage: loadValues.length === 3 ? loadValues : [0, 0, 0],
-      cores: parseInt(cores.trim()) || 1
-    }
-  }
-
-  /**
-   * 收集内存指标
-   */
-  private async collectMemoryMetrics(client: Client): Promise<ServerMetrics['memory']> {
-    const memInfo = await this.executeCommand(client,
-      "free -b | grep Mem | awk '{print $2,$3,$4,$7}'"
-    )
-
-    const values = memInfo.trim().split(' ').map(Number)
-    const [total, used, free, available] = values
-
-    return {
-      total: total || 0,
-      used: used || 0,
-      free: free || 0,
-      available: available || 0,
-      usage: total > 0 ? (used / total) * 100 : 0
-    }
-  }
-
-  /**
-   * 收集磁盘指标
-   */
-  private async collectDiskMetrics(client: Client): Promise<ServerMetrics['disk']> {
-    const diskInfo = await this.executeCommand(client,
-      "df -B1 -P -x tmpfs -x devtmpfs -x squashfs -x overlay 2>/dev/null | awk 'NR>1 {print $1\"|\"$6\"|\"$2\"|\"$3\"|\"$4}'"
-    )
-
-    const filesystems = diskInfo
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-      .map(line => {
-        const [filesystem, mount, total, used, free] = line.split('|')
-        const totalValue = Number(total) || 0
-        const usedValue = Number(used) || 0
-        const freeValue = Number(free) || 0
-        return {
-          filesystem: filesystem || '',
-          mount: mount || '',
-          total: totalValue,
-          used: usedValue,
-          free: freeValue,
-          usage: totalValue > 0 ? (usedValue / totalValue) * 100 : 0
-        }
-      })
-
-    const total = filesystems.reduce((sum, item) => sum + item.total, 0)
-    const used = filesystems.reduce((sum, item) => sum + item.used, 0)
-    const free = filesystems.reduce((sum, item) => sum + item.free, 0)
-
-    return {
-      total: total || 0,
-      used: used || 0,
-      free: free || 0,
-      usage: total > 0 ? (used / total) * 100 : 0,
-      filesystems
-    }
-  }
-
-  /**
-   * 收集网络指标
-   */
-  private async collectNetworkMetrics(client: Client): Promise<ServerMetrics['network']> {
-    // 获取 sessionId
-    let sessionId = ''
-    for (const [id, c] of this.sshClients.entries()) {
-      if (c === client) {
-        sessionId = id
-        break
-      }
-    }
-
-    // 汇总所有非 lo 网络接口的流量数据
-    const netInfo = await this.executeCommand(client,
-      "cat /proc/net/dev | awk 'NR>2 {gsub(\":\", \"\", $1); if ($1 != \"lo\") {bi+=$2; pi+=$3; bo+=$10; po+=$11}} END {print bi,pi,bo,po}'"
-    )
-
-    const parts = netInfo.trim().split(/\s+/)
-    const bytesIn = parseInt(parts[0]) || 0
-    const packetsIn = parseInt(parts[1]) || 0
-    const bytesOut = parseInt(parts[2]) || 0
-    const packetsOut = parseInt(parts[3]) || 0
-
-    let speedIn = 0
-    let speedOut = 0
-
-    const now = Date.now()
-    const lastStat = this.lastNetworkStats.get(sessionId)
-
-    if (lastStat) {
-      const duration = (now - lastStat.timestamp) / 1000 // 秒
-      if (duration > 0) {
-        speedIn = Math.max(0, (bytesIn - lastStat.bytesIn) / duration)
-        speedOut = Math.max(0, (bytesOut - lastStat.bytesOut) / duration)
-      }
-    }
-
-    // 更新上一次状态
-    if (sessionId) {
-      this.lastNetworkStats.set(sessionId, {
-        bytesIn,
-        bytesOut,
-        timestamp: now
-      })
-    }
-
-    return {
-      bytesIn: bytesIn || 0,
-      bytesOut: bytesOut || 0,
-      packetsIn: packetsIn || 0,
-      packetsOut: packetsOut || 0,
-      speedIn,
-      speedOut
-    }
-  }
-
-  /**
-   * 收集进程指标
-   */
-  private async collectProcessMetrics(client: Client): Promise<ServerMetrics['processes']> {
-    const procInfo = await this.executeCommand(client,
-      "ps aux | awk 'NR>1 {print $8}' | sort | uniq -c | awk '{print $2,$1}'"
-    )
-
-    const lines = procInfo.trim().split('\n')
-    let total = 0
-    let running = 0
-    let sleeping = 0
-    let zombie = 0
-
-    lines.forEach(line => {
-      const [state, count] = line.trim().split(' ')
-      const num = parseInt(count) || 0
-      total += num
-
-      if (state.startsWith('R')) running += num
-      else if (state.startsWith('S') || state.startsWith('I')) sleeping += num
-      else if (state.startsWith('Z')) zombie += num
-    })
-
-    return { total, running, sleeping, zombie }
-  }
-
-  /**
-   * 收集系统信息
-   */
-  private async collectSystemInfo(client: Client): Promise<ServerMetrics['system']> {
-    const uptime = await this.executeCommand(client,
-      "cat /proc/uptime | awk '{print $1}'"
-    )
-
-    const hostname = await this.executeCommand(client,
-      "hostname"
-    )
-
-    const platform = await this.executeCommand(client,
-      "uname -s"
-    )
-
-    const kernel = await this.executeCommand(client,
-      "uname -r"
-    )
-
-    return {
-      uptime: parseFloat(uptime.trim()) || 0,
-      hostname: hostname.trim(),
-      platform: platform.trim(),
-      kernel: kernel.trim()
-    }
-  }
-
-  /**
-   * 执行命令
-   */
-  private executeCommand(client: Client, command: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      client.exec(command, (err, stream) => {
-        if (err) {
-          reject(err)
-          return
-        }
-
-        let output = ''
-        let errorOutput = ''
-
-        stream.on('data', (data: Buffer) => {
-          output += data.toString()
-        })
-
-        stream.stderr.on('data', (data: Buffer) => {
-          errorOutput += data.toString()
-        })
-
-        stream.on('close', (code: number) => {
-          // 即使退出码非零，如果有输出也返回（某些系统命令会返回非零但有有效数据）
-          if (output.trim()) {
-            resolve(output)
-          } else if (code !== 0) {
-            reject(new Error(`Command failed with code ${code}: ${errorOutput}`))
-          } else {
-            resolve(output)
-          }
-        })
-      })
-    })
-  }
-
-  /**
-   * 获取最新指标
-   */
-  getLatestMetrics(sessionId: string): ServerMetrics | undefined {
-    return this.latestMetrics.get(sessionId)
-  }
-
-  /**
-   * 立即刷新指标
-   */
-  async refreshMetrics(sessionId: string): Promise<ServerMetrics | undefined> {
-    return this.collectMetrics(sessionId)
-  }
-
-  /**
-   * 获取所有监控会话
-   */
-  getMonitoredSessions(): string[] {
-    return Array.from(this.monitors.keys())
-  }
-
-  /**
-   * 更新监控配置
-   */
-  updateConfig(sessionId: string, config: Partial<MonitorConfig>): void {
-    const currentConfig = this.configs.get(sessionId)
-    if (!currentConfig) return
-
-    const newConfig = {
-      ...currentConfig,
-      ...config,
-      metrics: {
-        ...currentConfig.metrics,
+        cpu: true,
+        memory: true,
+        disk: true,
+        network: true,
+        processes: true,
+        topProcesses: true,
+        docker: true,
+        ...previous?.metrics,
         ...config.metrics
       }
     }
+  }
 
-    this.configs.set(sessionId, newConfig)
+  startMonitoring(id: string, client: Client, config: MonitorConfigUpdate = {}): void {
+    const fullConfig = this.configure(config)
+    this.stopMonitoring(id)
+    if (!fullConfig.enabled) return
+    const state: MonitorState = {
+      id,
+      client,
+      config: fullConfig,
+      controller: new AbortController(),
+      timers: {},
+      pending: new Map(),
+      sources: { core: {}, disk: {}, docker: {} },
+      disk: null,
+      docker: []
+    }
+    this.states.set(id, state)
+    state.closeListener = () => {
+      if (this.states.get(id) === state) this.suspendMonitoring(id)
+    }
+    client.once('close', state.closeListener)
+    for (const task of ['core', 'disk', 'docker'] as const) void this.collect(state, task)
+  }
 
-    // 如果间隔改变，重启监控
-    if (config.interval && config.interval !== currentConfig.interval) {
-      const client = this.sshClients.get(sessionId)
-      if (client) {
-        this.startMonitoring(sessionId, client, newConfig)
+  private dispose(state: MonitorState): void {
+    for (const timer of Object.values(state.timers)) clearTimeout(timer)
+    state.timers = {}
+    if (state.closeListener) state.client?.removeListener('close', state.closeListener)
+    state.controller.abort()
+  }
+
+  stopMonitoring(id: string): void {
+    const state = this.states.get(id)
+    if (!state) return
+    this.states.delete(id)
+    this.dispose(state)
+  }
+
+  /** Retain the user's monitoring intent, but never poll an obsolete SSH client. */
+  suspendMonitoring(id: string): void {
+    const state = this.states.get(id)
+    if (!state || !state.client) return
+    this.dispose(state)
+    state.client = undefined
+    state.previous = undefined
+    state.sources.core.error = 'SSH 已断开，重连后自动恢复监控'
+    if (state.latest) {
+      state.latest = { ...state.latest, connection: 'waiting' }
+      this.publish(state)
+    } else {
+      this.reportError(id, state.sources.core.error)
+    }
+  }
+
+  resumeMonitoring(id: string, client: Client): void {
+    const state = this.states.get(id)
+    if (!state || state.client === client) return
+    this.startMonitoring(id, client, state.config)
+  }
+
+  getLatestMetrics(id: string): ServerMetrics | undefined {
+    return this.states.get(id)?.latest
+  }
+  getMonitoredSessions(): string[] {
+    return [...this.states.keys()]
+  }
+
+  updateConfig(id: string, config: MonitorConfigUpdate): void {
+    const state = this.states.get(id)
+    if (!state) throw new Error('监控尚未启动')
+    state.config = this.configure(config, state.config)
+    if (!state.config.enabled) {
+      this.stopMonitoring(id)
+      return
+    }
+    for (const task of ['core', 'disk', 'docker'] as const) {
+      clearTimeout(state.timers[task])
+      delete state.timers[task]
+      if (!state.pending.has(task)) void this.collect(state, task)
+    }
+  }
+
+  async refreshMetrics(id: string): Promise<ServerMetrics | undefined> {
+    const state = this.states.get(id)
+    if (!state?.client) throw new Error('SSH 未连接，无法刷新监控')
+    void this.collect(state, 'disk')
+    void this.collect(state, 'docker')
+    return this.collect(state, 'core')
+  }
+
+  private current(state: MonitorState): boolean {
+    return this.states.get(state.id) === state && !state.controller.signal.aborted && !!state.client
+  }
+  private enabled(state: MonitorState, task: Task): boolean {
+    return task === 'core' || state.config.metrics[task]
+  }
+  private period(state: MonitorState, task: Task): number {
+    return task === 'core' ? state.config.interval : task === 'disk' ? 10_000 : 5_000
+  }
+  private reportError(id: string, message: string): void {
+    if (this.listenerCount('error')) this.emit('error', id, message)
+  }
+
+  private publish(state: MonitorState): ServerMetrics | undefined {
+    if (this.states.get(state.id) !== state || !state.latest) return undefined
+    const metrics: ServerMetrics = {
+      ...state.latest,
+      interval: state.config.interval,
+      disk: state.disk,
+      dockerContainers: state.docker,
+      sources: {
+        core: { ...state.sources.core },
+        disk: { ...state.sources.disk },
+        docker: { ...state.sources.docker }
       }
     }
+    state.latest = metrics
+    this.emit('metrics', state.id, metrics)
+    return metrics
   }
 
-  /**
-   * 收集 Top 进程 (Top 5 by CPU)
-   */
-  private async collectTopProcesses(client: Client): Promise<ProcessInfo[]> {
-    try {
-      // PID, User, %CPU, %MEM, Command
-      // 注意：Command 需要处理空格，所以只取前一部分或者限制长度
-      const cmd = "ps -eo pid,user,%cpu,%mem,comm --sort=-%cpu | head -n 6 | tail -n 5 | awk '{print $1,$2,$3,$4,$5}'"
-      const result = await this.executeCommand(client, cmd)
-
-      return result.trim().split('\n')
-        .filter(line => line.trim())
-        .map(line => {
-          const [pid, user, cpu, mem, ...rest] = line.trim().split(/\s+/)
-          return {
-            pid: parseInt(pid),
-            user,
-            cpu: parseFloat(cpu),
-            memory: parseFloat(mem),
-            command: rest.join(' ') || 'unknown'
+  private collect(state: MonitorState, task: Task): Promise<ServerMetrics | undefined> {
+    if (!this.current(state) || !this.enabled(state, task)) return Promise.resolve(undefined)
+    const existing = state.pending.get(task)
+    if (existing) return existing
+    clearTimeout(state.timers[task])
+    delete state.timers[task]
+    const started = Date.now()
+    const promise = this.collectOnce(state, task)
+      .catch((error) => {
+        if (this.current(state) && this.enabled(state, task)) {
+          state.sources[task] = {
+            ...state.sources[task],
+            error: error instanceof Error ? error.message : String(error)
           }
-        })
-    } catch (e) {
-      // 可能是命令不支持
-      return []
-    }
+          this.publish(state)
+          if (task === 'core') this.reportError(state.id, state.sources.core.error!)
+        }
+        return undefined
+      })
+      .finally(() => {
+        state.pending.delete(task)
+        if (this.current(state) && this.enabled(state, task)) {
+          state.timers[task] = setTimeout(
+            () => {
+              void this.collect(state, task)
+            },
+            Math.max(100, this.period(state, task) - (Date.now() - started))
+          )
+        }
+      })
+    state.pending.set(task, promise)
+    return promise
   }
 
-  /**
-   * 收集 Docker 容器指标
-   */
-  private async collectDockerMetrics(client: Client): Promise<DockerContainerInfo[]> {
-    try {
-      // 检查 docker 是否存在
-      const checkCmd = 'which docker >/dev/null 2>&1 && echo "yes" || echo "no"'
-      const hasDocker = await this.executeCommand(client, checkCmd)
-
-      if (hasDocker.trim() !== 'yes') return []
-
-      const psResult = await this.executeCommand(
-        client,
-        'docker ps -a --format "{{.Names}}|{{.Status}}" 2>/dev/null'
-      ).catch(() => '')
-      if (!psResult.trim()) return []
-
-      const statsResult = await this.executeCommand(
-        client,
-        'docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}|{{.MemPerc}}|{{.NetIO}}" 2>/dev/null'
-      ).catch(() => '')
-
-      const statsMap = new Map<string, { cpu: string; memory: string; netIO: string }>()
-      statsResult
-        .trim()
-        .split('\n')
-        .filter(line => line.trim())
-        .forEach(line => {
-          const [name, cpu, mem, netIO] = line.split('|')
-          if (name) {
-            statsMap.set(name, {
-              cpu: cpu || '-',
-              memory: mem || '-',
-              netIO: netIO || '-'
-            })
-          }
-        })
-
-      return psResult
-        .trim()
-        .split('\n')
-        .filter(line => line.trim())
-        .map(line => {
-          const [name, status] = line.split('|')
-          const stats = statsMap.get(name)
-          return {
-            name: name || 'unknown',
-            cpu: stats?.cpu || '-',
-            memory: stats?.memory || '-',
-            netIO: stats?.netIO || '-',
-            status: status || 'unknown'
-          }
-        })
-        .slice(0, 10)
-    } catch (e) {
-      return []
+  private async collectOnce(state: MonitorState, task: Task): Promise<ServerMetrics | undefined> {
+    const started = Date.now()
+    const command =
+      task === 'core'
+        ? buildCoreMonitorCommand(
+            !state.identity,
+            state.config.metrics.processes || state.config.metrics.topProcesses
+          )
+        : task === 'disk'
+          ? DISK_MONITOR_COMMAND
+          : DOCKER_MONITOR_COMMAND
+    const output = await this.executeCommand(
+      state.client!,
+      command,
+      state.controller.signal,
+      task === 'disk' ? 5000 : 8000
+    )
+    if (!this.current(state) || !this.enabled(state, task)) return undefined
+    const timestamp = new Date().toISOString()
+    if (task === 'core') {
+      const sample = parseCoreSample(output)
+      const values = calculateCoreMetrics(sample, state.previous)
+      state.identity = {
+        hostname: sample.identity.hostname ?? state.identity?.hostname ?? '未知主机',
+        platform: sample.identity.platform ?? state.identity?.platform ?? 'Linux',
+        kernel: sample.identity.kernel ?? state.identity?.kernel ?? ''
+      }
+      state.latest = {
+        sessionId: state.id,
+        timestamp,
+        interval: state.config.interval,
+        connection: 'connected',
+        collectionDurationMs: Date.now() - started,
+        ...values,
+        disk: state.disk,
+        dockerContainers: state.docker,
+        sources: state.sources,
+        system: { ...state.identity, uptime: sample.uptime }
+      }
+      state.previous = sample
+    } else if (task === 'disk') {
+      state.disk = parseDiskMetrics(output)
+    } else {
+      const docker = parseDockerMetrics(output)
+      state.docker = docker.containers
+      state.sources.docker.available = docker.available
     }
+    state.sources[task] = { ...state.sources[task], timestamp, error: undefined }
+    return this.publish(state)
+  }
+
+  private executeCommand(
+    client: Client,
+    command: string,
+    signal: AbortSignal,
+    timeout: number
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      let settled = false
+      let channel: ClientChannel | undefined
+      const chunks: Buffer[] = []
+      let size = 0
+      let stderr = ''
+      const terminate = () => {
+        try {
+          channel?.signal('TERM')
+        } catch {}
+        try {
+          channel?.close()
+        } catch {}
+      }
+      const finish = (error?: Error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        signal.removeEventListener('abort', onAbort)
+        if (error) {
+          reject(error)
+          terminate()
+        } else resolve(Buffer.concat(chunks).toString('utf8'))
+      }
+      const onAbort = () => finish(new Error('监控采集已取消'))
+      const timer = setTimeout(
+        () => finish(new Error(`监控采集超时（${timeout / 1000} 秒），将自动重试`)),
+        timeout
+      )
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) {
+        onAbort()
+        return
+      }
+      try {
+        client.exec(command, (error, stream) => {
+          if (settled) {
+            if (stream) {
+              channel = stream
+              stream.on('error', () => {})
+              terminate()
+            }
+            return
+          }
+          if (error) {
+            finish(error)
+            return
+          }
+          channel = stream
+          stream.on('error', finish)
+          stream.on('data', (data: Buffer | string) => {
+            if (settled) return
+            const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data)
+            size += bytes.length
+            if (size > 2 * 1024 * 1024) {
+              finish(new Error('监控输出超过 2 MiB 上限'))
+              return
+            }
+            chunks.push(bytes)
+          })
+          stream.stderr.on('data', (data: Buffer) => {
+            if (!settled && stderr.length < 2048)
+              stderr += data.toString().slice(0, 2048 - stderr.length)
+          })
+          stream.on('close', (code: number) => {
+            finish(
+              code === 0
+                ? undefined
+                : new Error(stderr.trim() || `监控命令退出（${code ?? '连接关闭'}）`)
+            )
+          })
+        })
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(String(error)))
+      }
+    })
   }
 }
 
-// 导出单例
 export const serverMonitorManager = new ServerMonitorManager()

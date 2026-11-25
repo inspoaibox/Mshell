@@ -10,9 +10,12 @@
 import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
+import { TerminalSearchController, type TerminalSearchOptions, type TerminalSearchResult } from '@/utils/terminal-search'
 import { getTheme } from '@/utils/terminal-themes'
 import { terminalManager, isSensitiveInputPrompt } from '@/utils/terminal-manager'
 import { terminalShortcutsManager } from '@/utils/terminal-shortcuts'
+import { buildTerminalInsertPayload } from '@/utils/terminal-command-execution'
+import { isSingleLineCommand } from '@/utils/autocomplete/input'
 import { useAIStore } from '@/stores/ai'
 import { useAppStore } from '@/stores/app'
 import { ElMessage } from 'element-plus'
@@ -37,6 +40,8 @@ interface TerminalOptions {
 interface Props {
   connectionId: string
   sessionName?: string
+  searchVisible?: boolean
+  intelligence?: { commandExplain: boolean; aiCommandSuggest: boolean }
   options?: TerminalOptions
 }
 
@@ -59,6 +64,7 @@ const emit = defineEmits<{
   cursorPosition: [position: { x: number; y: number }]
   'ai-request': [text: string]
   'ssh-output': [output: string]
+  'search-result': [result: TerminalSearchResult]
 }>()
 
 const aiStore = useAIStore()
@@ -75,15 +81,11 @@ const hasBackgroundImage = computed(() => hasActiveTerminalBackground(props.opti
 const terminalContainer = ref<HTMLElement>()
 let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
-let searchAddon: any = null
+let searchController: TerminalSearchController | null = null
 let resizeObserver: ResizeObserver | null = null
-let currentLineBuffer = '' // 当前行的输入缓冲
-let currentCommand = ''
-let commandStartTime: number | null = null
 let scheduledFitTimers: ReturnType<typeof setTimeout>[] = []
 
 const normalizeDataForRemote = (data: string) => (data === '\b' ? '\x7F' : data)
-const removeLastInputCharacter = (value: string) => Array.from(value).slice(0, -1).join('')
 
 const getCurrentTerminalLine = () => {
   if (!terminal) return ''
@@ -151,7 +153,7 @@ const scheduleFitAndFocus = (delays = [50]) => {
 
           if (isVisibleActiveTerminal.value && hasUsableTerminalSize()) {
             terminalManager.reveal(props.connectionId)
-            terminal?.focus()
+            if (!props.searchVisible) terminal?.focus()
           }
         } catch (e) {
           console.error('Scheduled fit error:', e)
@@ -185,7 +187,8 @@ onMounted(() => {
 
   terminal = instance.terminal
   fitAddon = instance.fitAddon
-  searchAddon = instance.searchAddon
+  searchController = new TerminalSearchController(terminal, instance.searchAddon, result => emit('search-result', result))
+  terminalManager.setSearchActive(props.connectionId, props.searchVisible === true)
 
   // 每次组件挂载时，更新回调引用（解决闭包陷阱问题）
   // 这样即使组件重新挂载，回调也会指向正确的 emit 函数
@@ -206,140 +209,50 @@ onMounted(() => {
     emit('ssh-output', data)
   })
 
-  // 只在第一次创建时注册事件处理器
-  // 事件处理器内部通过回调引用调用，而不是直接捕获 emit
+  instance.terminalInputHandler = (data: string) => {
+    const inst = terminalManager.get(props.connectionId)
+    if (!inst) return
+    const term = inst.terminal
+    const sensitive = inst.echoEnabled === false || isSensitiveInputPrompt(getCurrentTerminalLine())
+    const shell = term.buffer.active.type === 'normal' && !sensitive
+    if (sensitive) inst.echoEnabled = false
+    if (!shell) inst.inputState.reset(false)
+    else if (!inst.inputState.ready) inst.inputState.observePrompt(getCurrentTerminalLine())
+    const snapshot = inst.inputState.snapshot()
+    if (shell && snapshot.ready && snapshot.valid && (data === '\r' || data === '\n')) {
+      if (props.intelligence?.commandExplain && snapshot.text.trimStart().startsWith('?')) {
+        window.electronAPI.ssh.write(props.connectionId, '\x15\x0b')
+        inst.inputState.replace('')
+        inst.inputCallback?.('', '')
+        return
+      }
+      if (props.intelligence?.aiCommandSuggest && snapshot.text.startsWith('#')) {
+        // AI generation and confirmation own Enter; never submit the query as a shell command.
+        return
+      }
+    }
+    const submitted = shell ? inst.inputState.feed(data) : undefined
+    if (submitted?.trim()) void recordCommand(submitted.trim())
+    inst.inputCallback?.(data, shell && inst.inputState.canSuggest ? inst.inputState.snapshot().text : '')
+    if (terminalContainer.value && inst.cursorCallback) {
+      const rect = terminalContainer.value.getBoundingClientRect()
+      const dims = (term as any)._core?._renderService?.dimensions
+      const cellWidth = dims?.css?.cell?.width || (term.options.fontSize || 14) * 0.6
+      const cellHeight = dims?.css?.cell?.height || (term.options.fontSize || 14) * 1.2
+      if (rect.width > 0 && rect.height > 0) inst.cursorCallback({
+        x: rect.left + 4 + term.buffer.active.cursorX * cellWidth,
+        y: rect.top + 4 + term.buffer.active.cursorY * cellHeight
+      })
+    }
+    const remoteData = normalizeDataForRemote(data)
+    if (!sensitive) inst.dataCallback?.(remoteData)
+    window.electronAPI.ssh.write(props.connectionId, remoteData, sensitive)
+    try { window.electronAPI.connectionStats?.updateTraffic?.(props.connectionId, 0, new Blob([remoteData]).size) } catch {}
+  }
+
   if (!instance.handlersRegistered) {
     instance.handlersRegistered = true
-    console.log(`[TerminalView] Registering event handlers for ${props.connectionId}`)
-
-    // Handle terminal input
-    terminal.onData((data) => {
-      // 获取终端实例
-      const inst = terminalManager.get(props.connectionId)
-      const isSensitiveInput =
-        inst?.echoEnabled === false || isSensitiveInputPrompt(getCurrentTerminalLine())
-
-      if (isSensitiveInput && inst) {
-        inst.echoEnabled = false
-      }
-
-      // 更新当前行缓冲（用于自动补全）
-      // 注意：当 echoEnabled=false（密码输入模式）时，不更新缓冲，避免密码被记录或触发补全
-      if (isSensitiveInput) {
-        // 密码输入模式：只处理 Enter（清空缓冲），不记录字符
-        if (data === '\r' || data === '\n') {
-          currentCommand = ''
-          currentLineBuffer = ''
-        }
-      } else if (data === '\r' || data === '\n') {
-        // 回车键 - 命令执行
-        if (currentCommand.trim()) {
-          commandStartTime = Date.now()
-          // 记录命令到历史
-          recordCommand(currentCommand.trim())
-        }
-        currentCommand = ''
-        currentLineBuffer = ''
-      } else if (data === '\x7F' || data === '\b') {
-        // 退格键
-        currentCommand = removeLastInputCharacter(currentCommand)
-        currentLineBuffer = removeLastInputCharacter(currentLineBuffer)
-      } else if (data === '\x03') {
-        // Ctrl+C - 取消命令
-        currentCommand = ''
-        currentLineBuffer = ''
-        commandStartTime = null
-      } else if (data === '\x15') {
-        // Ctrl+U - 清除整行
-        currentCommand = ''
-        currentLineBuffer = ''
-      } else if (data.charCodeAt(0) >= 32) {
-        // 可打印字符（包括中文等 Unicode 字符）
-        // 排除控制字符 (0-31) 和 DEL (127)
-        if (data.charCodeAt(0) !== 127) {
-          currentCommand += data
-          currentLineBuffer += data
-        }
-      }
-
-      // 通过回调引用发射输入事件（解决闭包陷阱）
-      // 仅在终端处于正常回显模式时触发补全（密码输入时 echoEnabled=false，禁用补全）
-      if (inst?.inputCallback && !isSensitiveInput) {
-        inst.inputCallback(data, currentLineBuffer)
-
-        // 发射光标位置（用于定位补全弹窗）
-        if (terminal && terminalContainer.value && inst.cursorCallback) {
-          try {
-            const rect = terminalContainer.value.getBoundingClientRect()
-
-            // 确保容器有有效尺寸，无效时跳过光标位置更新但不中断后续逻辑
-            if (rect.width <= 0 || rect.height <= 0) {
-              console.warn(
-                '[TerminalView] Container has invalid size, skipping cursor position update'
-              )
-            } else {
-              // 获取终端的实际单元格尺寸
-              // xterm.js 内部使用 _core._renderService.dimensions
-              const core = (terminal as any)._core
-              let cellWidth = 9
-              let cellHeight = 20
-
-              if (core?._renderService?.dimensions) {
-                const dims = core._renderService.dimensions
-                cellWidth = dims.css.cell.width || dims.actualCellWidth || cellWidth
-                cellHeight = dims.css.cell.height || dims.actualCellHeight || cellHeight
-              } else {
-                // 回退：使用字体大小估算
-                const fontSize = terminal.options.fontSize || 14
-                cellWidth = fontSize * 0.6
-                cellHeight = fontSize * 1.2
-              }
-
-              // 获取光标位置
-              const cursorX = terminal.buffer.active.cursorX
-              const cursorY = terminal.buffer.active.cursorY
-
-              // 计算光标在视口中的绝对位置
-              const padding = 4 // 终端内边距（xterm 默认较小）
-
-              // 计算位置
-              const x = rect.left + padding + cursorX * cellWidth
-              const y = rect.top + padding + cursorY * cellHeight
-
-              // 验证位置是否合理（在屏幕范围内）
-              if (x >= 0 && y >= 0 && x < window.innerWidth + 100 && y < window.innerHeight + 100) {
-                inst.cursorCallback({ x, y })
-              } else {
-                console.warn('[TerminalView] Cursor position out of bounds:', {
-                  x,
-                  y,
-                  cursorX,
-                  cursorY
-                })
-              }
-            }
-          } catch (e) {
-            console.error('[TerminalView] Error calculating cursor position:', e)
-          }
-        }
-      }
-
-      const remoteData = normalizeDataForRemote(data)
-
-      // 通过回调引用发射数据事件
-      if (inst?.dataCallback) {
-        inst.dataCallback(remoteData)
-      }
-
-      window.electronAPI.ssh.write(props.connectionId, remoteData)
-
-      try {
-        const bytesOut = new Blob([remoteData]).size
-        window.electronAPI.connectionStats?.updateTraffic?.(props.connectionId, 0, bytesOut)
-      } catch (error) {
-        // 忽略统计错误
-      }
-    })
+    terminal.onData(data => terminalManager.get(props.connectionId)?.terminalInputHandler?.(data))
 
     // Handle terminal resize
     terminal.onResize(({ cols, rows }) => {
@@ -431,7 +344,11 @@ onMounted(() => {
             ? `\x1b[200~${normalizedText}\x1b[201~`
             : normalizedText
           window.electronAPI.ssh.write(props.connectionId, pasteText)
-          recordPastedCommands(text)
+          if (inst) {
+            if (inst.echoEnabled && inst.terminal.buffer.active.type === 'normal') inst.inputState.feed(text)
+            else inst.inputState.reset(false)
+            inst.inputCallback?.('', inst.inputState.canSuggest ? inst.inputState.snapshot().text : '')
+          }
         }
       } else if (result === 'selectAll') {
         terminal?.selectAll()
@@ -498,7 +415,7 @@ onMounted(() => {
       if (!isVisibleActiveTerminal.value) return
       console.log(`[TerminalView] Delayed initial fit for ${props.connectionId}`)
       fitAndSyncRemote()
-      terminal?.focus() // 自动聚焦
+      if (!props.searchVisible) terminal?.focus() // 自动聚焦
     } catch (e) {
       console.error('Initial fit error:', e)
     }
@@ -512,6 +429,8 @@ onUnmounted(() => {
 
   // 清理回调引用
   console.log(`[TerminalView] Clearing callbacks for ${props.connectionId}`)
+  const instance = terminalManager.get(props.connectionId)
+  if (instance) instance.terminalInputHandler = null
   terminalManager.setInputCallback(props.connectionId, null)
   terminalManager.setCursorCallback(props.connectionId, null)
   terminalManager.setDataCallback(props.connectionId, null)
@@ -522,9 +441,11 @@ onUnmounted(() => {
     resizeObserver = null
   }
 
+  searchController?.dispose()
+  searchController = null
+  terminalManager.setSearchActive(props.connectionId, false)
   terminal = null
   fitAddon = null
-  searchAddon = null
 
   console.log(`[TerminalView] Unmount completed for ${props.connectionId}`)
 })
@@ -538,13 +459,12 @@ const recordCommand = async (command: string) => {
       return
     }
 
-    const duration = commandStartTime ? Date.now() - commandStartTime : undefined
 
     await window.electronAPI.commandHistory?.add?.({
       command,
       sessionId: props.connectionId,
       sessionName: props.sessionName || 'Unknown Session',
-      duration
+      duration: undefined
     })
 
     try {
@@ -554,30 +474,6 @@ const recordCommand = async (command: string) => {
     }
   } catch (error) {
     console.error('Failed to record command:', error)
-  }
-}
-
-// 记录粘贴的命令到历史
-const recordPastedCommands = async (text: string) => {
-  try {
-    // 按换行符分割命令
-    const lines = text.split(/\r?\n/)
-
-    for (const line of lines) {
-      const command = line.trim()
-
-      // 只记录非空命令
-      if (command) {
-        await window.electronAPI.commandHistory?.add?.({
-          command,
-          sessionId: props.connectionId,
-          sessionName: props.sessionName || 'Unknown Session',
-          duration: undefined
-        })
-      }
-    }
-  } catch (error) {
-    console.error('Failed to record pasted commands:', error)
   }
 }
 
@@ -689,6 +585,11 @@ watch(isVisibleActiveTerminal, async (visible) => {
 })
 
 // Expose methods for parent components
+watch(() => props.searchVisible, visible => {
+  terminalManager.setSearchActive(props.connectionId, visible === true)
+  if (!visible) searchController?.clear()
+})
+
 defineExpose({
   write: (data: string) => {
     if (terminal) {
@@ -709,53 +610,27 @@ defineExpose({
     fitAndSyncRemote()
   },
   // 更新当前命令缓冲（用于自动补全后同步状态）
-  updateCommandBuffer: (newCommand: string) => {
-    currentCommand = newCommand
-    currentLineBuffer = newCommand
+  updateCommandBuffer: (newCommand: string) => terminalManager.get(props.connectionId)?.inputState.replace(newCommand),
+  getCurrentCommand: () => terminalManager.get(props.connectionId)?.inputState.snapshot().text || '',
+  getInputSnapshot: () => terminalManager.get(props.connectionId)?.inputState.snapshot(),
+  canUseIntelligence: () => {
+    const inst = terminalManager.get(props.connectionId)
+    return !!inst && isVisibleActiveTerminal.value && inst.echoEnabled && inst.terminal.buffer.active.type === 'normal' && inst.inputState.canSuggest
   },
-  // 获取当前命令
-  getCurrentCommand: () => {
-    return currentCommand
+  replaceIntelligenceInput: (text: string, expected: string, execute = false) => {
+    const inst = terminalManager.get(props.connectionId)
+    if (!inst || !isVisibleActiveTerminal.value || !inst.echoEnabled || inst.terminal.buffer.active.type !== 'normal' ||
+      !inst.inputState.canSuggest || inst.inputState.snapshot().text !== expected || (text && !isSingleLineCommand(text))) return false
+    const erase = '\x15\x0b'
+    if (execute) { inst.inputState.reset(false); void recordCommand(text) }
+    else inst.inputState.replace(text)
+    window.electronAPI.ssh.write(props.connectionId, erase + buildTerminalInsertPayload(text, inst.bracketedPasteEnabled) + (execute ? '\r' : ''))
+    inst.inputCallback?.('', '')
+    return true
   },
-  search: (term: string, options?: { caseSensitive?: boolean; regex?: boolean }) => {
-    console.log(`[TerminalView] Searching for: "${term}"`, options)
-    if (searchAddon) {
-      try {
-        // 清除之前的搜索高亮
-        searchAddon.clearDecorations()
-
-        if (!term) return
-
-        // 从头开始搜索
-        const found = searchAddon.findNext(term, {
-          caseSensitive: options?.caseSensitive,
-          regex: options?.regex,
-          incremental: false
-        })
-        console.log(`[TerminalView] Search result found: ${found}`)
-      } catch (e) {
-        console.error('[TerminalView] Search error:', e)
-      }
-    } else {
-      console.warn('[TerminalView] SearchAddon not initialized')
-    }
-  },
-  findNext: (term: string, options?: { caseSensitive?: boolean; regex?: boolean }) => {
-    if (searchAddon) {
-      searchAddon.findNext(term, {
-        caseSensitive: options?.caseSensitive,
-        regex: options?.regex
-      })
-    }
-  },
-  findPrevious: (term: string, options?: { caseSensitive?: boolean; regex?: boolean }) => {
-    if (searchAddon) {
-      searchAddon.findPrevious(term, {
-        caseSensitive: options?.caseSensitive,
-        regex: options?.regex
-      })
-    }
-  }
+  search: (term: string, options?: TerminalSearchOptions) => searchController?.search(term, options),
+  findNext: () => searchController?.next(),
+  findPrevious: () => searchController?.previous()
 })
 </script>
 

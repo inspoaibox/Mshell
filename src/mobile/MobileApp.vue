@@ -865,7 +865,9 @@ const editorTitle = computed(() => {
   return `${action}${target}`
 })
 const sshSessions = computed(() =>
-  state.value.sessions.filter((session) => session.type !== 'rdp' && session.type !== 'vnc')
+  state.value.sessions.filter(
+    (session) => session.type !== 'rdp' && session.type !== 'vnc' && session.type !== 'ipmi'
+  )
 )
 const sessionGroupsWithCounts = computed(() =>
   state.value.sessionGroups.map((group) => ({

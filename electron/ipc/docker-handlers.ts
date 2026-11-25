@@ -4,6 +4,18 @@ import {
   type DockerContainerAction,
   type DockerContainerActionOptions
 } from '../managers/DockerManager'
+import type { DockerOperationResult } from '../../src/types/docker'
+
+const operationResponse = (data: DockerOperationResult) => ({
+  success: data.status === 'success',
+  data,
+  ...(data.status === 'success'
+    ? {}
+    : {
+        error:
+          data.status === 'partial' ? '部分操作失败，请查看逐项结果' : '操作失败，请查看逐项结果'
+      })
+})
 
 const allowedActions = new Set<DockerContainerAction>([
   'start',
@@ -27,7 +39,7 @@ export function registerDockerHandlers() {
   ipcMain.handle('docker:install', async (_event, connectionId: string) => {
     try {
       const output = await dockerManager.install(connectionId)
-      return { success: true, data: output }
+      return operationResponse(output)
     } catch (error: any) {
       return { success: false, error: error.message }
     }
@@ -36,7 +48,7 @@ export function registerDockerHandlers() {
   ipcMain.handle('docker:cleanupUnused', async (_event, connectionId: string) => {
     try {
       const output = await dockerManager.cleanupUnused(connectionId)
-      return { success: true, data: output }
+      return operationResponse(output)
     } catch (error: any) {
       return { success: false, error: error.message }
     }
@@ -59,12 +71,13 @@ export function registerDockerHandlers() {
           return { success: false, error: '无效的容器 ID' }
         }
 
-        const safeOptions: DockerContainerActionOptions = action === 'remove'
-          ? {
-              removeImage: Boolean(options?.removeImage),
-              removeNetworks: Boolean(options?.removeNetworks)
-            }
-          : {}
+        const safeOptions: DockerContainerActionOptions =
+          action === 'remove'
+            ? {
+                removeImage: options?.removeImage === true,
+                removeNetworks: options?.removeNetworks === true
+              }
+            : {}
 
         const output = await dockerManager.executeContainerAction(
           connectionId,
@@ -72,7 +85,7 @@ export function registerDockerHandlers() {
           containerId,
           safeOptions
         )
-        return { success: true, data: output }
+        return operationResponse(output)
       } catch (error: any) {
         return { success: false, error: error.message }
       }
@@ -95,16 +108,17 @@ export function registerDockerHandlers() {
         if (!Array.isArray(containerIds) || containerIds.length === 0) {
           return { success: false, error: '未选择容器' }
         }
-        if (containerIds.some(containerId => !/^[a-fA-F0-9]{12,64}$/.test(containerId))) {
+        if (containerIds.some((containerId) => !/^[a-fA-F0-9]{12,64}$/.test(containerId))) {
           return { success: false, error: '无效的容器 ID' }
         }
 
-        const safeOptions: DockerContainerActionOptions = action === 'remove'
-          ? {
-              removeImage: Boolean(options?.removeImage),
-              removeNetworks: Boolean(options?.removeNetworks)
-            }
-          : {}
+        const safeOptions: DockerContainerActionOptions =
+          action === 'remove'
+            ? {
+                removeImage: options?.removeImage === true,
+                removeNetworks: options?.removeNetworks === true
+              }
+            : {}
 
         const output = await dockerManager.executeContainerBatchAction(
           connectionId,
@@ -112,7 +126,7 @@ export function registerDockerHandlers() {
           containerIds,
           safeOptions
         )
-        return { success: true, data: output }
+        return operationResponse(output)
       } catch (error: any) {
         return { success: false, error: error.message }
       }

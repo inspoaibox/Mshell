@@ -258,6 +258,12 @@
                         :session="tab.session"
                         @close="handleCloseTab"
                       />
+                      <IPMITab
+                        v-else-if="tab.session.type === 'ipmi'"
+                        :connection-id="tab.id"
+                        :session="tab.session"
+                        @close="handleCloseTab"
+                      />
                       <TerminalTab
                         v-else
                         :connection-id="tab.id"
@@ -297,7 +303,10 @@
           </div>
 
           <div v-show="appStore.activeView === 'sftp'" class="content-panel">
-            <SFTPPanel />
+            <SFTPPanel
+              :visible="appStore.activeView === 'sftp'"
+              @transfer-count-change="sftpTransferCount = $event"
+            />
           </div>
 
           <div v-show="appStore.activeView === 'port-forward'" class="content-panel">
@@ -361,7 +370,7 @@
         <StatusBar
           :active-connections="appStore.tabs.length"
           :current-session="appStore.currentSession"
-          :transfer-count="0"
+          :transfer-count="sftpTransferCount"
           class="app-statusbar"
         />
       </div>
@@ -465,6 +474,7 @@ import BatchImport from './components/Session/BatchImport.vue'
 import TerminalTab from './components/Terminal/TerminalTab.vue'
 import SplitTerminalTab from './components/Terminal/SplitTerminalTab.vue'
 import VNCTab from './components/VNC/VNCTab.vue'
+import IPMITab from './components/IPMI/IPMITab.vue'
 import DraggableTab from './components/Terminal/DraggableTab.vue'
 import TerminalSettings from './components/Terminal/TerminalSettings.vue'
 import SettingsPanel from './components/Common/SettingsPanel.vue'
@@ -490,6 +500,8 @@ const { t } = useLocale()
 
 // 使用 store - 集中管理所有状态
 const appStore = useAppStore()
+// 文件传输页面中进行中 + 排队中的传输数量（状态栏显示）
+const sftpTransferCount = ref(0)
 const aiStore = useAIStore()
 
 // 锁定状态
@@ -592,7 +604,7 @@ const gridStyle = computed(() => {
 // 计算属性：获取所有SSH终端标签（排除分屏标签）
 const sshTerminals = computed(() => {
   return appStore.tabs
-    .filter((tab) => !tab.isSplit)
+    .filter((tab) => !tab.isSplit && (!tab.session.type || tab.session.type === 'ssh'))
     .map((tab) => ({
       id: tab.id,
       name: tab.name,

@@ -9,8 +9,8 @@ import {
 describe('terminal script execution', () => {
   it('builds a one-line PTY command that always reports the script exit status', () => {
     const token = '12345678-1234-1234-1234-123456789abc'
-    const command = buildInteractiveScriptCommand("~/.mshell/scripts/'check.sh'", token)
-    expect(command).toContain("bash ~/.mshell/scripts/'check.sh'; mshell_status=$?")
+    const command = buildInteractiveScriptCommand('/home/john/.mshell/scripts/check.sh', token)
+    expect(command).toContain("bash '/home/john/.mshell/scripts/check.sh'; mshell_status=$?")
     expect(command).toContain(`mshell-script-done;${token};%s`)
     expect(command).toContain('"$mshell_status"')
     expect(command).not.toContain('\n')
@@ -40,11 +40,21 @@ describe('terminal script execution', () => {
     vi.stubGlobal('crypto', { randomUUID: () => '12345678-1234-1234-1234-123456789abc' })
     expect(createScriptRunToken()).toBe('12345678-1234-1234-1234-123456789abc')
     expect(() =>
-      buildInteractiveScriptCommand("~/.mshell/scripts/'check.sh'", 'bad;touch')
+      buildInteractiveScriptCommand('/home/john/.mshell/scripts/check.sh', 'bad;touch')
     ).toThrow()
     expect(() =>
-      buildInteractiveScriptCommand("'/tmp/check.sh'", '12345678-1234-1234-1234-123456789abc')
+      buildInteractiveScriptCommand(
+        "~/.mshell/scripts/'check.sh'",
+        '12345678-1234-1234-1234-123456789abc'
+      )
     ).toThrow()
+    expect(() =>
+      buildInteractiveScriptCommand(
+        '/home/john/.mshell/scripts/check.sh',
+        '12345678-1234-1234-1234-123456789abc',
+        true
+      )
+    ).toThrow('临时脚本')
     vi.unstubAllGlobals()
   })
 })

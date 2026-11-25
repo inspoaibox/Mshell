@@ -12,6 +12,9 @@ describe('validateMcpReadOnlyCommand', () => {
     'docker stats --no-stream',
     'journalctl -n 100 --no-pager',
     'ip address show',
+    'pm2 list',
+    'pm2 jlist',
+    'pm2 describe api',
     'find /var/log -type f -name "*.log"'
   ])('allows the read-only query %s', (command) => {
     expect(validateMcpReadOnlyCommand(command)).toBe(command)
@@ -69,7 +72,13 @@ describe('validateMcpReadOnlyCommand', () => {
     'ufw status reset',
     'docker logs -tf app',
     'docker stats',
-    'file -C -m /tmp/magic'
+    'file -C -m /tmp/magic',
+    'pm2 start api',
+    'pm2 stop api',
+    'pm2 restart api',
+    'pm2 delete api',
+    'pm2 list api',
+    'pm2 describe'
   ])('rejects the non-query command %s', (command) => {
     expect(() => validateMcpReadOnlyCommand(command)).toThrow()
   })

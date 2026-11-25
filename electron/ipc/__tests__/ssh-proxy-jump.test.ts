@@ -3,29 +3,43 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => Promise<any>>(),
+  events: new Map<string, (...args: any[]) => void>(),
+  logSessionData: vi.fn(),
   connect: vi.fn(),
   destroy: vi.fn(),
-  processKeys: vi.fn(async config => config)
+  processKeys: vi.fn(async (config) => config)
 }))
 vi.mock('electron', () => ({
-  ipcMain: { handle: (name: string, handler: any) => mocks.handlers.set(name, handler), on: vi.fn() },
+  ipcMain: {
+    handle: (name: string, handler: any) => mocks.handlers.set(name, handler),
+    on: (name: string, handler: any) => mocks.handlers.set(name, handler)
+  },
   BrowserWindow: { getAllWindows: () => [] }
 }))
 vi.mock('../../managers/SSHConnectionManager', () => ({
-  sshConnectionManager: { on: vi.fn() }, HostKeyChallengeError: class extends Error {}
+  sshConnectionManager: {
+    on: (name: string, callback: any) => mocks.events.set(name, callback),
+    write: vi.fn()
+  },
+  HostKeyChallengeError: class extends Error {}
 }))
 vi.mock('../../managers/PortForwardManager', () => ({ portForwardManager: {} }))
 vi.mock('../../managers/AuditLogManager', () => ({ auditLogManager: {}, AuditAction: {} }))
-vi.mock('../../utils/logger', () => ({ logger: { logError: vi.fn() } }))
+vi.mock('../../utils/logger', () => ({
+  logger: { logError: vi.fn(), logSessionData: mocks.logSessionData }
+}))
 vi.mock('../../utils/known-hosts', () => ({ knownHostsManager: {} }))
 vi.mock('../../utils/ssh-connect-options', () => ({
-  processProxyJumpPrivateKeys: mocks.processKeys, prepareSSHConnectionOptions: vi.fn()
+  processProxyJumpPrivateKeys: mocks.processKeys,
+  prepareSSHConnectionOptions: vi.fn()
 }))
-vi.mock('../../utils/proxy-jump', () => ({ ProxyJumpHelper: {
-  validateProxyConfig: () => ({ valid: true }),
-  connectThroughProxy: mocks.connect,
-  getProxyChainDescription: () => 'jump:22'
-} }))
+vi.mock('../../utils/proxy-jump', () => ({
+  ProxyJumpHelper: {
+    validateProxyConfig: () => ({ valid: true }),
+    connectThroughProxy: mocks.connect,
+    getProxyChainDescription: () => 'jump:22'
+  }
+}))
 import { registerSSHHandlers } from '../ssh-handlers'
 
 describe('jump connection test IPC', () => {
@@ -35,6 +49,23 @@ describe('jump connection test IPC', () => {
     mocks.connect.mockResolvedValue({ destroy: mocks.destroy })
   })
   const invoke = (...args: any[]) => mocks.handlers.get('ssh:testProxyJump')!({}, ...args)
+
+  it('does not log hidden input, and releases execution privacy after a split completion marker', async () => {
+    const token = '12345678-1234-1234-1234-123456789abc'
+    const write = mocks.handlers.get('ssh:write')!
+    await write({}, 'session', 'typed-secret', true)
+    expect(mocks.logSessionData).not.toHaveBeenCalled()
+    await mocks.handlers.get('ssh:protectInput')!({}, 'session', token, true)
+    await write({}, 'session', 'secret-during-run')
+    expect(mocks.logSessionData).not.toHaveBeenCalled()
+    const marker = `\x1b]777;mshell-script-done;${token};0\x07`
+    mocks.events.get('data')!('session', marker.slice(0, 30))
+    mocks.events.get('data')!('session', marker.slice(30))
+    await write({}, 'session', 'ordinary command')
+    expect(mocks.logSessionData.mock.calls.filter((call) => call[1] === 'input')).toEqual([
+      ['session', 'input', 'ordinary command']
+    ])
+  })
 
   it('tests forwarding to the supplied target through the supplied network proxy', async () => {
     const jump = { enabled: true, host: 'jump', port: 22 }
@@ -54,7 +85,8 @@ describe('jump connection test IPC', () => {
 
   it('returns forwarding failures to the renderer', async () => {
     mocks.connect.mockRejectedValueOnce(new Error('forward denied'))
-    expect(await invoke({ host: 'jump', port: 22 }, undefined, { host: 'target', port: 21800 }))
-      .toMatchObject({ success: false, error: 'forward denied' })
+    expect(
+      await invoke({ host: 'jump', port: 22 }, undefined, { host: 'target', port: 21800 })
+    ).toMatchObject({ success: false, error: 'forward denied' })
   })
 })

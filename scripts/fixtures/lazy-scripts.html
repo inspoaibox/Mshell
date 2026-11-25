@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <title>懒人脚本 · 本地验证</title>
+  </head>
+  <body>
+    <header>
+      懒人脚本 · 本地模拟验证（不连接服务器） <button id="failure">模拟部署失败</button>
+      <button id="editor">模拟 Vim 状态</button> <button id="restore">恢复正常</button>
+      <button id="library">模拟同步导入</button>
+    </header>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp } from 'vue'
+      import { createPinia, setActivePinia } from 'pinia'
+      import ElementPlus from 'element-plus'
+      import 'element-plus/dist/index.css'
+      import '/src/styles/main.css'
+      import Panel from '/src/components/LazyScripts/LazyScriptPanel.vue'
+      import { useAppStore } from '/src/stores/app'
+      import { terminalManager } from '/src/utils/terminal-manager'
+      let failure = false,
+        editor = false,
+        output = () => {},
+        listeners = new Set()
+      const base = {
+        category: '本地验证',
+        tags: [],
+        riskLevel: 'low',
+        type: 'shell',
+        runMode: 'execute',
+        usageCount: 0,
+        updatedAt: '2026-10-16',
+        description: '用于验证页面行为的本地模拟脚本'
+      }
+      const scripts = [
+        {
+          ...base,
+          id: 'password',
+          name: '修改用户密码',
+          fileName: 'change-password.sh',
+          content:
+            'TARGET="{{username}}"\nPASSWORD="{{password}}"\nprintf "%s:%s\\n" "$TARGET" "$PASSWORD" | chpasswd',
+          variables: [
+            {
+              name: 'username',
+              label: '用户名',
+              type: 'text',
+              defaultValue: 'deploy',
+              required: true
+            },
+            { name: 'password', label: '新密码', type: 'password', required: true }
+          ]
+        },
+        {
+          ...base,
+          id: 'check',
+          name: '系统检查',
+          fileName: 'check.sh',
+          content: 'printf "%s\\n" "{{message}}"',
+          variables: [
+            {
+              name: 'message',
+              label: '测试文本',
+              type: 'text',
+              defaultValue: 'literal $$ $& "quotes"'
+            }
+          ]
+        },
+        {
+          ...base,
+          id: 'steps',
+          name: '部署后检查清单',
+          type: 'steps',
+          runMode: 'copy',
+          fileName: 'steps.sh',
+          content: '确认服务状态正常\n检查端口监听\n另开窗口验证登录',
+          variables: []
+        }
+      ]
+      window.electronAPI = {
+        lazyScript: {
+          getAll: async () => ({ success: true, data: structuredClone(scripts) }),
+          onChanged: (fn) => {
+            listeners.add(fn)
+            return () => listeners.delete(fn)
+          },
+          incrementUsage: async (id) => {
+            const script = scripts.find((s) => s.id === id)
+            if (script) script.usageCount++
+            listeners.forEach((fn) => fn())
+            return { success: true }
+          },
+          deploy: async (_id, _token, fileName, _content, copyTo) => ({
+            success: !failure,
+            error: failure ? '模拟磁盘写入失败' : undefined,
+            data: failure ? undefined : { path: '/home/john/.mshell/scripts/' + fileName, ...(copyTo ? { savedPath: '/home/john/.mshell/scripts/' + copyTo } : {}) }
+          }),
+          cancelDeployment: async () => {}
+        },
+        ssh: {
+          getConnection: async () => ({ status: 'connected' }),
+          protectInput: async () => {},
+          onClose: () => () => {},
+          write: (_id, command) => {
+            const token = command.match(/mshell-script-done;([a-f0-9-]+);/)?.[1]
+            if (token) setTimeout(() => output(`\x1b]777;mshell-script-done;${token};0\x07`), 100)
+          }
+        },
+        sshKey: { getAll: async () => ({ success: true, data: [] }) }
+      }
+      Object.assign(terminalManager, {
+        get: () => ({
+          echoEnabled: true,
+          bracketedPasteEnabled: true,
+          terminal: {
+            buffer: {
+              active: {
+                type: editor ? 'alternate' : 'normal',
+                baseY: 0,
+                cursorY: 0,
+                getLine: () => ({ translateToString: () => 'root@preview:~# ' })
+              }
+            }
+          }
+        }),
+        subscribeOutput: (_id, fn) => {
+          output = fn
+          return () => {
+            output = () => {}
+          }
+        },
+        focus: () => {},
+        requestScrollToBottom: () => {}
+      })
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const store = useAppStore()
+      store.tabs = [
+        {
+          id: 'preview',
+          name: '本地模拟服务器',
+          session: {
+            id: 'fixture',
+            type: 'ssh',
+            name: '本地模拟服务器',
+            username: 'root',
+            host: 'preview.invalid',
+            port: 22
+          }
+        }
+      ]
+      store.activeTab = 'preview'
+      store.activeView = 'lazy-scripts'
+      createApp(Panel).use(pinia).use(ElementPlus).mount('#app')
+      document.querySelector('#failure').onclick = () => (failure = true)
+      document.querySelector('#editor').onclick = () => (editor = true)
+      document.querySelector('#restore').onclick = () => {
+        failure = false
+        editor = false
+      }
+      document.querySelector('#library').onclick = () => {
+        if (!scripts.find((s) => s.id === 'imported'))
+          scripts.push({
+            ...base,
+            id: 'imported',
+            name: '同步导入的脚本',
+            fileName: 'imported.sh',
+            content: 'echo imported',
+            variables: []
+          })
+        listeners.forEach((fn) => fn())
+      }
+    </script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font:
+          14px 'Segoe UI',
+          sans-serif;
+        color: var(--text-primary);
+        background: var(--bg-main);
+      }
+      header {
+        height: 52px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 20px;
+        border-bottom: 1px solid var(--border-color);
+      }
+      header button {
+        padding: 6px 10px;
+        color: var(--text-primary);
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+      }
+      #app {
+        height: calc(100vh - 52px);
+      }
+    </style>
+  </body>
+</html>

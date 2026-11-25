@@ -6,8 +6,9 @@
     @dragover="handleDragOver"
     @drop="handleDrop"
   >
-    <slot v-if="!isDragOver"></slot>
-    
+    <!-- 拖拽时内容保持挂载（保留排序、滚动和选中状态），遮罩覆盖在上面 -->
+    <slot></slot>
+
     <div v-if="isDragOver" class="drop-overlay">
       <div class="drop-content">
         <div class="drop-icon">📤</div>
@@ -19,7 +20,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 
 interface Props {
   disabled?: boolean
@@ -34,7 +35,8 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<{
-  upload: [files: File[], remotePath: string]
+  /** skippedDirectories：拖入的文件夹名称（暂不支持上传文件夹，已从 files 中剔除） */
+  upload: [files: File[], remotePath: string, skippedDirectories: string[]]
 }>()
 
 const isDragOver = ref(false)
@@ -42,28 +44,35 @@ const dragCounter = ref(0) // 用于处理嵌套元素的拖拽事件
 
 const dropMessage = computed(() => {
   if (props.multiple) {
-    return '支持多文件上传'
+    return '支持多文件上传（暂不支持文件夹）'
   }
   return '单文件上传'
 })
 
+const resetDragState = () => {
+  dragCounter.value = 0
+  isDragOver.value = false
+}
+
+const hasFiles = (event: DragEvent) =>
+  Array.from(event.dataTransfer?.types || []).includes('Files')
+
 const handleDragEnter = (event: DragEvent) => {
   event.preventDefault()
-  
-  if (props.disabled) return
-  
+
+  if (props.disabled || !hasFiles(event)) return
+
   dragCounter.value++
-  
-  if (event.dataTransfer?.types.includes('Files')) {
-    isDragOver.value = true
-  }
+  isDragOver.value = true
 }
 
 const handleDragLeave = (event: DragEvent) => {
   event.preventDefault()
-  
-  dragCounter.value--
-  
+
+  if (props.disabled || dragCounter.value === 0) return
+
+  dragCounter.value = Math.max(0, dragCounter.value - 1)
+
   if (dragCounter.value === 0) {
     isDragOver.value = false
   }
@@ -71,26 +80,69 @@ const handleDragLeave = (event: DragEvent) => {
 
 const handleDragOver = (event: DragEvent) => {
   event.preventDefault()
-  
+
   if (props.disabled) return
-  
+
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = 'copy'
   }
 }
 
+// 拖拽被取消（Esc、拖出窗口、窗口失焦）时不会触发 dragleave/drop，需要兜底复位
+onMounted(() => {
+  window.addEventListener('blur', resetDragState)
+  window.addEventListener('dragend', resetDragState)
+  window.addEventListener('drop', resetDragState)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('blur', resetDragState)
+  window.removeEventListener('dragend', resetDragState)
+  window.removeEventListener('drop', resetDragState)
+})
+
+watch(
+  () => props.disabled,
+  (disabled) => {
+    if (disabled) resetDragState()
+  }
+)
+
+/** 识别拖入的文件夹：必须在 drop 事件同步阶段读取 DataTransferItem */
+const collectDirectoryFlags = (dataTransfer: DataTransfer | null, count: number): boolean[] => {
+  const flags = new Array<boolean>(count).fill(false)
+  const items = Array.from(dataTransfer?.items || []).filter((item) => item.kind === 'file')
+  if (items.length !== count) return flags
+
+  items.forEach((item, index) => {
+    const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null
+    flags[index] = Boolean(entry?.isDirectory)
+  })
+  return flags
+}
+
 const handleDrop = (event: DragEvent) => {
   event.preventDefault()
-  
-  isDragOver.value = false
-  dragCounter.value = 0
-  
+
+  resetDragState()
+
   if (props.disabled) return
-  
-  const files = Array.from(event.dataTransfer?.files || [])
-  
-  if (files.length === 0) return
-  
+
+  const droppedFiles = Array.from(event.dataTransfer?.files || [])
+
+  if (droppedFiles.length === 0) return
+
+  const directoryFlags = collectDirectoryFlags(event.dataTransfer, droppedFiles.length)
+  const skippedDirectories = droppedFiles
+    .filter((_file, index) => directoryFlags[index])
+    .map((file) => file.name)
+  const files = droppedFiles.filter((_file, index) => !directoryFlags[index])
+
+  if (files.length === 0) {
+    emit('upload', [], '.', skippedDirectories)
+    return
+  }
+
   // 过滤文件
   let validFiles = files
   
@@ -123,10 +175,10 @@ const handleDrop = (event: DragEvent) => {
     validFiles = [validFiles[0]]
   }
   
-  if (validFiles.length > 0) {
+  if (validFiles.length > 0 || skippedDirectories.length > 0) {
     // 获取当前远程路径（从父组件传入或使用默认值）
     const remotePath = '.' // 默认当前目录
-    emit('upload', validFiles, remotePath)
+    emit('upload', validFiles, remotePath, skippedDirectories)
   }
 }
 </script>

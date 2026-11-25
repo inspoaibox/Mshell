@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow } from 'electron'
+import { buildPathCompletionScript, parsePathCompletions } from '../utils/completion-paths'
 import {
   HostKeyChallengeError,
   sshConnectionManager,
@@ -15,17 +16,26 @@ import {
   processProxyJumpPrivateKeys
 } from '../utils/ssh-connect-options'
 import { portForwardManager } from '../managers/PortForwardManager'
+import { serverMonitorManager } from '../managers/ServerMonitorManager'
 
 /**
  * 注册 SSH IPC 处理器
  */
 export function registerSSHHandlers() {
+  const privateInputs = new Map<string, { token: string; tail: string }>()
+  ipcMain.handle('ssh:protectInput', (_event, id: string, token: string, enabled: boolean) => {
+    if (!/^[a-f0-9-]{16,64}$/i.test(token)) throw new Error('Invalid execution token')
+    if (enabled) privateInputs.set(id, { token, tail: '' })
+    else if (privateInputs.get(id)?.token === token) privateInputs.delete(id)
+  })
   // 连接 SSH
   ipcMain.handle('ssh:connect', async (_event, id: string, options: any) => {
     try {
       const connectOptions = await prepareSSHConnectionOptions({ ...options, openShell: true })
 
       await sshConnectionManager.connect(id, connectOptions)
+      const connected = sshConnectionManager.getConnection(id)
+      if (connected) serverMonitorManager.resumeMonitoring(id, connected.client)
       logger.logConnection(
         id,
         options.sessionName || 'Unknown',
@@ -129,10 +139,10 @@ export function registerSSHHandlers() {
   })
 
   // 写入数据
-  ipcMain.on('ssh:write', (_event, id: string, data: string) => {
+  ipcMain.on('ssh:write', (_event, id: string, data: string, sensitive = false) => {
     try {
       sshConnectionManager.write(id, data)
-      logger.logSessionData(id, 'input', data)
+      if (!sensitive && !privateInputs.has(id)) logger.logSessionData(id, 'input', data)
     } catch (error: any) {
       logger.logError('connection', `Failed to write to session ${id}`, error)
     }
@@ -157,7 +167,7 @@ export function registerSSHHandlers() {
       } catch (error: any) {
         logger.logError(
           'connection',
-          `Failed to execute command on session ${id}: ${command}`,
+          `Failed to execute command on session ${id}`,
           error
         )
         return { success: false, error: error.message }
@@ -166,6 +176,18 @@ export function registerSSHHandlers() {
   )
 
   // 获取终端当前工作目录
+  ipcMain.handle('ssh:completePath', async (_event, id: string, input: string, cwd?: string) => {
+    try {
+      if (typeof id !== 'string' || !id) throw new Error('无效的 SSH 连接')
+      const command = buildPathCompletionScript(input, cwd)
+      const result = await sshConnectionManager.executeCommandDetailed(id, command, 3000, 256 * 1024)
+      if (result.exitCode !== 0) throw new Error(result.stderr || '无法读取补全目录')
+      return { success: true, data: parsePathCompletions(result.stdout) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('ssh:getCurrentDirectory', async (_event, id: string) => {
     try {
       const dir = await sshConnectionManager.getCurrentDirectory(id)
@@ -255,6 +277,12 @@ export function registerSSHHandlers() {
 
   // 转发 SSH 事件到渲染进程
   sshConnectionManager.on('data', (id: string, data: string) => {
+    const privacy = privateInputs.get(id)
+    if (privacy) {
+      const text = privacy.tail + data
+      if (text.includes(`\x1b]777;mshell-script-done;${privacy.token};`)) privateInputs.delete(id)
+      else privacy.tail = text.slice(-256)
+    }
     logger.logSessionData(id, 'output', data)
     const windows = BrowserWindow.getAllWindows()
     windows.forEach((win) => {
@@ -271,6 +299,7 @@ export function registerSSHHandlers() {
   })
 
   sshConnectionManager.on('close', (id: string, details?: SSHCloseDetails) => {
+    privateInputs.delete(id)
     logger.logInfo(
       'connection',
       `SSH closed for session ${id}`,
@@ -296,6 +325,8 @@ export function registerSSHHandlers() {
   })
 
   sshConnectionManager.on('reconnected', (id: string) => {
+    const connection = sshConnectionManager.getConnection(id)
+    if (connection) serverMonitorManager.resumeMonitoring(id, connection.client)
     const windows = BrowserWindow.getAllWindows()
     windows.forEach((win) => {
       win.webContents.send('ssh:reconnected', id)

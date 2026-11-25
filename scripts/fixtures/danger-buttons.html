@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN" class="light-theme app-appearance-modern">
+  <head><meta charset="UTF-8" /><title>危险按钮 · 对比度验证</title></head>
+  <body>
+    <main id="app"></main>
+    <script type="module">
+      import { createApp, h, ref } from 'vue'
+      import ElementPlus, { ElButton } from 'element-plus'
+      import { Delete } from '@element-plus/icons-vue'
+      import 'element-plus/dist/index.css'
+      import '/src/styles/main.css'
+      import { applyAppShellTheme } from '/src/utils/app-appearance'
+      createApp({
+        setup() {
+          const theme = ref('light'), appearance = ref('modern')
+          const apply = () => applyAppShellTheme({ theme: theme.value, appearance: appearance.value })
+          const button = (id, props, label) => h(ElButton, { 'data-testid': id, ...props }, () => label)
+          return () => h('div', { class: 'preview' }, [
+            h('header', [h('h1', '危险按钮 · 对比度验证'), h('p', '与正式应用使用同一套全局样式，所有按钮仅供显示。'),
+              h('label', ['主题 ', h('select', { 'aria-label': '主题', value: theme.value, onChange: e => { theme.value = e.target.value; apply() } }, [h('option', { value: 'light' }, '浅色'), h('option', { value: 'dark' }, '深色')])]),
+              h('label', ['外观 ', h('select', { 'aria-label': '外观', value: appearance.value, onChange: e => { appearance.value = e.target.value; apply() } }, ['modern', 'terminal', 'minimal', 'aurora'].map(value => h('option', { value }, value)))])
+            ]),
+            h('section', { class: 'rule' }, [h('div', [h('strong', '端口 443  TCP'), h('p', '允许 · 来源：所有来源'), h('small', '永久配置')]), button('firewall-delete', { type: 'danger', plain: true, circle: true, icon: Delete, 'aria-label': '删除规则' })]),
+            h('section', { class: 'samples' }, [
+              button('solid', { type: 'danger', icon: Delete }, '删除'),
+              button('plain', { type: 'danger', plain: true, icon: Delete }, '删除规则'),
+              button('link', { type: 'danger', link: true }, '删除连接'),
+              button('text', { type: 'danger', text: true }, '清空记录'),
+              button('confirm', { type: 'primary', class: 'el-button--danger' }, '确认删除'),
+              button('disabled-solid', { type: 'danger', disabled: true }, '不可删除'),
+              button('disabled-plain', { type: 'danger', plain: true, disabled: true }, '受保护规则'),
+              button('loading', { type: 'danger', loading: true }, '删除中')
+            ])
+          ])
+        }
+      }).use(ElementPlus).mount('#app')
+    </script>
+    <style>
+      #app { overflow: auto; padding: 40px; }
+      .preview { max-width: 850px; margin: auto; }
+      header { margin-bottom: 28px; }
+      header p { margin: 12px 0 18px; color: var(--text-secondary); }
+      label { margin-right: 24px; }
+      select { padding: 6px 10px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-strong); border-radius: 6px; }
+      .rule { display: flex; align-items: center; justify-content: space-between; padding: 24px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); }
+      .rule p { margin: 8px 0; color: var(--text-secondary); }
+      .rule small { color: var(--text-secondary); }
+      .samples { margin-top: 24px; display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
+      .samples .el-button { margin: 0; }
+    </style>
+  </body>
+</html>

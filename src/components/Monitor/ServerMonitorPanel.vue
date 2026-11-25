@@ -5,341 +5,722 @@
       <div class="header-actions">
         <button
           @click="toggleMonitoring"
-          :class="['btn-toggle', { active: isMonitoring }]"
-          title="开启/暂停监控"
+          :class="['btn-toggle', { active: wanted }]"
+          :aria-label="wanted ? '暂停监控' : '开始监控'"
+          :title="wanted ? '暂停监控' : '开始监控'"
         >
-          {{ isMonitoring ? '⏸' : '▶' }}
+          {{ wanted ? '⏸' : '▶' }}
         </button>
         <button
           @click="refreshMetrics"
           class="btn-refresh"
           :disabled="!isMonitoring || refreshing"
-          title="刷新"
+          aria-label="立即刷新监控"
+          title="立即刷新"
         >
-          🔄
+          ↻
         </button>
-        <button @click="$emit('close')" class="btn-close" title="关闭监控">
+        <button @click="$emit('close')" class="btn-close" aria-label="关闭监控" title="关闭监控">
           ×
         </button>
       </div>
     </div>
-
-    <div v-if="errorMessage" class="monitor-error">
-      {{ errorMessage }}
+    <div class="monitor-controls">
+      <label
+        >刷新
+        <select v-model.number="interval" aria-label="监控刷新间隔" @change="changeInterval">
+          <option v-for="value in MONITOR_INTERVALS" :key="value" :value="value">
+            {{ value / 1000 }} 秒
+          </option>
+        </select>
+      </label>
+      <span :class="['monitor-status', { stale: isStale }]" role="status">{{ statusText }}</span>
     </div>
-
-    <div v-if="!isMonitoring" class="monitor-empty">
-      <div class="empty-icon">📊</div>
-      <p>点击开始监控</p>
+    <div v-if="errorMessage" class="monitor-error" role="alert">{{ errorMessage }}</div>
+    <div v-if="!metrics" class="monitor-empty">
+      <div v-if="wanted && !errorMessage" class="spinner"></div>
+      <p>{{ wanted ? '等待第一份监控数据' : '监控已暂停' }}</p>
     </div>
-
-    <div v-else-if="!metrics" class="monitor-loading">
-      <div class="spinner"></div>
-    </div>
-
     <div v-else class="monitor-content compact">
-      <!-- CPU -->
       <div class="metric-card compact">
         <div class="metric-header">
-          <span class="metric-title">CPU</span>
-          <span class="metric-value">{{ metrics.cpu.usage.toFixed(1) }}%</span>
+          <span class="metric-title">CPU</span
+          ><span class="metric-value">{{ percent(metrics.cpu.usage) }}</span>
         </div>
         <div class="progress-bar mini">
           <div
             class="progress-fill"
-            :style="{ width: `${metrics.cpu.usage}%`, background: getCPUColor(metrics.cpu.usage) }"
+            :style="{ width: (metrics.cpu.usage ?? 0) + '%', background: 'var(--primary-color)' }"
           ></div>
         </div>
-        <div class="metric-info">{{ metrics.cpu.cores }}核 · 负载 {{ metrics.cpu.loadAverage[0].toFixed(2) }}</div>
+        <svg
+          viewBox="0 0 100 32"
+          preserveAspectRatio="none"
+          class="metric-trend"
+          role="img"
+          aria-label="CPU 最近 60 次采样趋势"
+        >
+          <polyline :points="trendPoints('cpu')" />
+        </svg>
+        <div class="metric-info">
+          {{ metrics.cpu.cores }} 核 · 负载 {{ metrics.cpu.loadAverage[0].toFixed(2) }}
+        </div>
       </div>
-
-      <!-- 内存 -->
       <div class="metric-card compact">
         <div class="metric-header">
-          <span class="metric-title">内存</span>
-          <span class="metric-value">{{ metrics.memory.usage.toFixed(1) }}%</span>
+          <span class="metric-title">内存</span
+          ><span class="metric-value">{{ percent(metrics.memory.usage) }}</span>
         </div>
         <div class="progress-bar mini">
           <div
             class="progress-fill"
-            :style="{ width: `${metrics.memory.usage}%`, background: getMemoryColor(metrics.memory.usage) }"
+            :style="{ width: metrics.memory.usage + '%', background: 'var(--success-color)' }"
           ></div>
         </div>
-        <div class="metric-info">{{ formatBytes(metrics.memory.used) }} / {{ formatBytes(metrics.memory.total) }}</div>
+        <svg
+          viewBox="0 0 100 32"
+          preserveAspectRatio="none"
+          class="metric-trend memory-trend"
+          role="img"
+          aria-label="内存最近 60 次采样趋势"
+        >
+          <polyline :points="trendPoints('memory')" />
+        </svg>
+        <div class="metric-info">
+          {{ formatBytes(metrics.memory.used) }} / {{ formatBytes(metrics.memory.total) }}
+        </div>
+        <div class="metric-info">已用 = 总量 − 可用 · 趋势为最近 60 次采样</div>
       </div>
-
-      <!-- 磁盘 -->
       <div class="metric-card compact">
         <div class="metric-header">
-          <span class="metric-title">磁盘</span>
-          <span class="metric-value">{{ metrics.disk.usage.toFixed(1) }}%</span>
+          <span class="metric-title">磁盘</span
+          ><span class="metric-value">{{ metrics.disk ? percent(metrics.disk.usage) : '—' }}</span>
         </div>
-        <div class="progress-bar mini">
-          <div
-            class="progress-fill"
-            :style="{ width: `${metrics.disk.usage}%`, background: getDiskColor(metrics.disk.usage) }"
-          ></div>
+        <div v-if="metrics.disk" class="metric-info">
+          {{ formatBytes(metrics.disk.free) }} 可用 · {{ metrics.disk.filesystems.length }} 挂载
         </div>
-        <div class="metric-info">{{ formatDiskInfo(metrics.disk) }}</div>
+        <div class="metric-info">每 10 秒 · {{ ageLabel(metrics.sources.disk.timestamp) }}</div>
+        <div v-if="metrics.sources.disk.error" class="source-error">
+          {{ metrics.sources.disk.error }}
+        </div>
       </div>
-
-      <!-- 系统信息 -->
       <div class="metric-card compact">
-        <div class="metric-header">
-          <span class="metric-title">系统</span>
-        </div>
+        <div class="metric-header"><span class="metric-title">系统</span></div>
         <div class="system-info">
           <div class="info-row">
-            <span class="info-label">运行</span>
-            <span class="info-value">{{ formatUptime(metrics.system.uptime) }}</span>
+            <span class="info-label">运行</span
+            ><span class="info-value">{{ formatUptime(metrics.system.uptime) }}</span>
           </div>
           <div class="info-row">
-            <span class="info-label">进程</span>
-            <span class="info-value">{{ metrics.processes.total }} ({{ metrics.processes.running }} 运行)</span>
+            <span class="info-label">进程</span
+            ><span class="info-value"
+              >{{ metrics.processes.total }}（{{ metrics.processes.running }} 运行）</span
+            >
+          </div>
+          <div class="info-row">
+            <span class="info-label">主机</span
+            ><span class="info-value" :title="metrics.system.hostname">{{
+              metrics.system.hostname
+            }}</span>
           </div>
         </div>
       </div>
-
-      <!-- 网络 -->
       <div class="metric-card compact full-width">
         <div class="metric-header">
-          <span class="metric-title">网络</span>
+          <span class="metric-title">网络</span><span class="metric-info">非 lo 接口合计</span>
         </div>
-        <div class="network-compact">
-          <div class="network-row">
-            <span class="network-label">⬇️ 接收</span>
-            <div class="network-stats">
-              <span class="network-speed" v-if="metrics.network.speedIn !== undefined">{{ formatSpeed(metrics.network.speedIn) }}</span>
-              <span class="network-total">{{ formatBytes(metrics.network.bytesIn) }}</span>
-            </div>
+        <div class="network-row">
+          <span class="network-label">↓ 接收</span>
+          <div class="network-stats">
+            <span class="network-speed">{{ speed(metrics.network.speedIn) }}</span
+            ><span class="network-total">{{ formatBytes(metrics.network.bytesIn) }}</span>
           </div>
-          <div class="network-row">
-            <span class="network-label">⬆️ 发送</span>
-             <div class="network-stats">
-              <span class="network-speed" v-if="metrics.network.speedOut !== undefined">{{ formatSpeed(metrics.network.speedOut) }}</span>
-              <span class="network-total">{{ formatBytes(metrics.network.bytesOut) }}</span>
-            </div>
+        </div>
+        <div class="network-row">
+          <span class="network-label">↑ 发送</span>
+          <div class="network-stats">
+            <span class="network-speed">{{ speed(metrics.network.speedOut) }}</span
+            ><span class="network-total">{{ formatBytes(metrics.network.bytesOut) }}</span>
           </div>
         </div>
       </div>
-
-      <!-- Top 进程 -->
-      <div class="metric-card compact full-width" v-if="metrics.topProcesses && metrics.topProcesses.length > 0">
+      <div
+        class="metric-card compact full-width security-card"
+        :class="{ 'has-risk': untrustedSources.length > 0 }"
+        role="button"
+        tabindex="0"
+        title="查看在线会话、连接来源、登录历史和认证日志"
+        @click="openSecurityDetails()"
+        @keydown.enter="openSecurityDetails()"
+      >
         <div class="metric-header">
-          <span class="metric-title">Top 进程</span>
+          <span class="metric-title">安全</span>
+          <span
+            :class="['security-status', untrustedSources.length ? 'risk' : security ? 'ok' : '']"
+            >{{ securityStatusText }}</span
+          >
         </div>
+        <div v-if="securityError" class="source-error">{{ securityError }}</div>
+        <template v-if="security">
+          <div class="security-grid">
+            <div class="security-stat">
+              <span class="info-label">在线用户</span>
+              <strong>{{ onlineUsers }}</strong>
+              <small>{{ security.sessions.length }} 个会话</small>
+            </div>
+            <div class="security-stat">
+              <span class="info-label">远程连接</span>
+              <strong>{{ security.connections.length }}</strong>
+              <small>{{ sourceIps.length }} 个来源 IP</small>
+            </div>
+            <div class="security-stat" :class="{ danger: untrustedSources.length }">
+              <span class="info-label">非信任 IP</span>
+              <strong>{{ untrustedSources.length }}</strong>
+              <small>{{ trustRules.length }} 条信任规则</small>
+            </div>
+            <div
+              class="security-stat"
+              :class="{ warn: (security.failedLastHour ?? 0) >= 10 }"
+              @click.stop="openSecurityDetails('failed')"
+            >
+              <span class="info-label">1 小时失败</span>
+              <strong>{{ security.failedLastHour ?? '—' }}</strong>
+              <small>{{ security.failedLastHour === null ? '无日志权限' : '次认证失败' }}</small>
+            </div>
+          </div>
+          <div v-if="sourceIps.length" class="security-sources">
+            <span
+              v-for="source in sourceIps.slice(0, 6)"
+              :key="source.ip"
+              :class="['source-chip', source.level]"
+              :title="sourceTitle(source)"
+              >{{ source.ip }}</span
+            >
+            <span v-if="sourceIps.length > 6" class="source-chip more"
+              >+{{ sourceIps.length - 6 }}</span
+            >
+          </div>
+          <div class="metric-info">
+            每 15 秒 · {{ ageLabel(security.collectedAt) }} · 点击查看登录详情与日志
+          </div>
+        </template>
+        <div v-else-if="!securityError" class="metric-info">正在采集安全信息…</div>
+      </div>
+      <div class="metric-card compact full-width">
+        <div class="metric-header">
+          <span class="metric-title">实时进程</span
+          ><span class="metric-info"
+            >{{ visibleProcesses.length }} / {{ filteredProcesses.length }}</span
+          >
+        </div>
+        <div class="process-controls">
+          <input v-model="processQuery" placeholder="筛选进程 / PID" aria-label="筛选监控进程" />
+          <select v-model="sortBy" aria-label="进程排序">
+            <option value="cpu">CPU ↓</option>
+            <option value="memory">内存 ↓</option>
+            <option value="pid">PID ↑</option>
+          </select>
+          <select v-model.number="processLimit" aria-label="进程显示数量">
+            <option :value="20">20 条</option>
+            <option :value="50">50 条</option>
+            <option :value="100">100 条</option>
+          </select>
+        </div>
+        <div class="metric-info">CPU 为采样期间占用；单核满载 100%，多线程可超过 100%。</div>
         <table class="compact-table">
           <thead>
             <tr>
-              <th style="text-align: left;">进程</th>
-              <th style="text-align: right;">CPU</th>
-              <th style="text-align: right;">MEM</th>
+              <th style="width: 45%; text-align: left">进程 / PID</th>
+              <th>CPU</th>
+              <th>MEM</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="proc in metrics.topProcesses" :key="proc.pid">
-              <td class="truncate" :title="proc.command">{{ proc.command }}</td>
-              <td style="text-align: right;">{{ proc.cpu }}%</td>
-              <td style="text-align: right;">{{ proc.memory }}%</td>
+            <tr v-for="proc in visibleProcesses" :key="proc.pid">
+              <td
+                class="truncate"
+                :title="proc.command + ' · PID ' + proc.pid + ' · 用户 ' + proc.user"
+              >
+                {{ proc.command }}<small class="process-pid">{{ proc.pid }}</small>
+              </td>
+              <td>{{ percent(proc.cpu, '—') }}</td>
+              <td>{{ percent(proc.memory) }}</td>
             </tr>
           </tbody>
         </table>
+        <div v-if="!visibleProcesses.length" class="metric-info">没有匹配的进程</div>
       </div>
-
-      <!-- Docker 容器 -->
-      <div class="metric-card compact full-width" v-if="metrics.dockerContainers && metrics.dockerContainers.length > 0">
+      <div class="metric-card compact full-width">
         <div class="metric-header">
-          <span class="metric-title">Docker</span>
+          <span class="metric-title">Docker</span
+          ><span class="metric-info"
+            >每 5 秒 · {{ ageLabel(metrics.sources.docker.timestamp) }}</span
+          >
         </div>
-        <table class="compact-table">
+        <div v-if="metrics.sources.docker.error" class="source-error">
+          {{ metrics.sources.docker.error }}
+        </div>
+        <div v-else-if="metrics.sources.docker.available === false" class="metric-info">
+          未安装 Docker
+        </div>
+        <table v-else-if="metrics.dockerContainers.length" class="compact-table">
           <thead>
             <tr>
-              <th style="text-align: left;">容器</th>
-              <th style="text-align: right;">状态</th>
-              <th style="text-align: right;">CPU</th>
-              <th style="text-align: right;">MEM</th>
+              <th>容器</th>
+              <th>状态</th>
+              <th>CPU</th>
+              <th>MEM</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="container in metrics.dockerContainers" :key="container.name">
               <td class="truncate" :title="container.name">{{ container.name }}</td>
-              <td class="truncate" style="text-align: right;" :title="container.status">{{ container.status }}</td>
-              <td style="text-align: right;">{{ container.cpu }}</td>
-              <td style="text-align: right;">{{ container.memory }}</td>
+              <td class="truncate" :title="container.status">{{ container.status }}</td>
+              <td>{{ container.cpu }}</td>
+              <td>{{ container.memory }}</td>
             </tr>
           </tbody>
         </table>
+        <div v-else class="metric-info">
+          {{ metrics.sources.docker.timestamp ? '暂无容器' : '正在采集容器数据…' }}
+        </div>
       </div>
-
-      <!-- 更新时间 -->
-      <div class="update-time full-width">{{ formatTime(metrics.timestamp) }}</div>
+      <SecurityDetailsDialog
+        v-if="securityDialogMounted"
+        v-model="securityDialogVisible"
+        :session-id="sessionId"
+        :summary="security"
+        :rules="trustRules"
+        :initial-tab="securityDialogTab"
+        @update:rules="updateTrustRules"
+      />
+      <div class="update-time full-width">
+        基础指标：{{ ageLabel(metrics.timestamp) }} · {{ formatTime(metrics.timestamp) }}<br />
+        {{
+          metrics.sampleIntervalMs === null
+            ? '正在建立采样基线'
+            : '实际采样间隔 ' + (metrics.sampleIntervalMs / 1000).toFixed(1) + ' 秒'
+        }}
+        · 耗时 {{ metrics.collectionDurationMs }} ms
+      </div>
     </div>
   </div>
 </template>
 
+<script lang="ts">
+// Share lifecycle ordering across panel instances during rapid tab switches/remounts.
+let monitorOperationQueue = Promise.resolve()
+</script>
+
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { MONITOR_INTERVALS, type ServerMetrics } from '@/types/monitor'
+import type { SecuritySummary } from '@/types/security'
+import {
+  collectSourceIps,
+  loadTrustRules,
+  saveTrustRules,
+  trustLabel,
+  type SourceIp
+} from '@/utils/security-trust'
+import SecurityDetailsDialog from './SecurityDetailsDialog.vue'
 
-interface Props {
-  sessionId: string
-}
-
-const props = defineProps<Props>()
-defineEmits<{
-  close: []
-}>()
-
+const props = withDefaults(
+  defineProps<{ sessionId: string; active?: boolean; hostKey?: string }>(),
+  { active: true }
+)
+defineEmits<{ close: [] }>()
+const wanted = ref(true)
 const isMonitoring = ref(false)
-const metrics = ref<any>(null)
+const metrics = ref<ServerMetrics | null>(null)
 const errorMessage = ref('')
 const refreshing = ref(false)
-let metricsUnsubscribe: (() => void) | null = null
-let errorUnsubscribe: (() => void) | null = null
-
-const formatMonitorError = (error: any) => {
-  return error?.message || String(error || '监控采集失败')
+const interval = ref(1000)
+try {
+  const saved = Number(localStorage.getItem('mshell-monitor-interval'))
+  if ((MONITOR_INTERVALS as readonly number[]).includes(saved)) interval.value = saved
+} catch {}
+const now = ref(Date.now())
+const pageVisible = ref(!document.hidden)
+const processQuery = ref('')
+const sortBy = ref<'cpu' | 'memory' | 'pid'>('cpu')
+const processLimit = ref(20)
+const history = ref<Array<{ timestamp: string; cpu: number | null; memory: number }>>([])
+const filteredProcesses = computed(() => {
+  const query = processQuery.value.trim().toLowerCase()
+  return (metrics.value?.topProcesses || [])
+    .filter(
+      (proc) =>
+        !query || proc.command.toLowerCase().includes(query) || String(proc.pid).includes(query)
+    )
+    .slice()
+    .sort((a, b) =>
+      sortBy.value === 'pid'
+        ? a.pid - b.pid
+        : (b[sortBy.value] ?? -1) - (a[sortBy.value] ?? -1) || a.pid - b.pid
+    )
+})
+const visibleProcesses = computed(() => filteredProcesses.value.slice(0, processLimit.value))
+const age = (timestamp?: string) =>
+  timestamp ? Math.max(0, Math.floor((now.value - new Date(timestamp).getTime()) / 1000)) : null
+const ageLabel = (timestamp?: string) => {
+  const seconds = age(timestamp)
+  return seconds === null ? '等待更新' : seconds === 0 ? '刚刚更新' : seconds + ' 秒前更新'
 }
+const isStale = computed(
+  () =>
+    wanted.value &&
+    isMonitoring.value &&
+    (age(metrics.value?.timestamp) ?? 0) > Math.max(5, interval.value / 500)
+)
+const statusText = computed(() => {
+  if (!wanted.value) return '已暂停'
+  if (!props.active || !pageVisible.value) return '页面隐藏，已暂停'
+  if (metrics.value?.connection === 'waiting') return '等待 SSH 重连'
+  if (errorMessage.value) return '采集异常'
+  if (!isMonitoring.value) return '正在启动'
+  return isStale.value ? '数据延迟' : '自动监控'
+})
+const formatMonitorError = (error: unknown) =>
+  error instanceof Error ? error.message : String(error || '监控采集失败')
+let disposed = false
+let runningSession = ''
+let appliedInterval = 0
+let clock: ReturnType<typeof setInterval> | undefined
+const unsubscribers: Array<() => void> = []
 
-const startMonitoring = async () => {
-  errorMessage.value = ''
-  const result = await window.electronAPI.serverMonitor?.start?.(props.sessionId, {
-    interval: 3000
-  })
-  if (result?.success === false) {
-    errorMessage.value = result.error || '监控启动失败'
-    isMonitoring.value = false
+const handleMetricsUpdate = (sessionId: string, data: ServerMetrics) => {
+  if (
+    disposed ||
+    !wanted.value ||
+    !props.active ||
+    !pageVisible.value ||
+    sessionId !== props.sessionId ||
+    data.sessionId !== props.sessionId
+  )
     return
-  }
-
-  isMonitoring.value = true
-}
-
-// 切换监控
-const toggleMonitoring = async () => {
-  if (isMonitoring.value) {
-    await window.electronAPI.serverMonitor?.stop?.(props.sessionId)
-    isMonitoring.value = false
-  } else {
-    await startMonitoring()
+  const changed = data.timestamp !== metrics.value?.timestamp
+  metrics.value = data
+  errorMessage.value = data.sources.core.error || ''
+  now.value = Date.now()
+  if (changed) {
+    if (data.cpu.usage === null) history.value = []
+    history.value = [
+      ...history.value,
+      { timestamp: data.timestamp, cpu: data.cpu.usage, memory: data.memory.usage }
+    ].slice(-60)
   }
 }
 
-// 刷新指标
-const refreshMetrics = async () => {
-  if (!isMonitoring.value) return
-  refreshing.value = true
-  errorMessage.value = ''
+// Serialize start/stop/update requests; a late start response must still be stopped after unmount.
+const reconcile = () => {
+  monitorOperationQueue = monitorOperationQueue
+    .then(async () => {
+      const api = window.electronAPI.serverMonitor
+      const shouldRun = wanted.value && props.active && pageVisible.value && !disposed
+      if (runningSession && (!shouldRun || runningSession !== props.sessionId)) {
+        const result = await api?.stop(runningSession)
+        if (result?.success === false) throw new Error(result.error || '监控暂停失败')
+        runningSession = ''
+        isMonitoring.value = false
+      }
+      if (!shouldRun) return
+      if (!api) throw new Error('当前环境不支持服务器监控')
+      if (!runningSession) {
+        errorMessage.value = ''
+        const id = props.sessionId
+        const requestedInterval = interval.value
+        const result = await api.start(id, { interval: requestedInterval })
+        if (!result.success) throw new Error(result.error || '监控启动失败')
+        runningSession = id
+        appliedInterval = requestedInterval
+        isMonitoring.value = true
+      } else if (appliedInterval !== interval.value) {
+        const requestedInterval = interval.value
+        const result = await api.updateConfig(runningSession, { interval: requestedInterval })
+        if (!result.success) throw new Error(result.error || '修改刷新间隔失败')
+        appliedInterval = requestedInterval
+      }
+    })
+    .catch((error) => {
+      if (!disposed) errorMessage.value = formatMonitorError(error)
+      if (!runningSession) {
+        isMonitoring.value = false
+        wanted.value = false
+      }
+    })
+  return monitorOperationQueue
+}
+const toggleMonitoring = () => {
+  wanted.value = !wanted.value
+  void reconcile()
+}
+const changeInterval = () => {
   try {
-    const result = await window.electronAPI.serverMonitor?.refresh?.(props.sessionId)
-    if (result?.success && result.data) {
-      metrics.value = result.data
-    } else if (result?.success === false) {
-      errorMessage.value = result.error || '监控刷新失败'
-    }
-  } catch (error: any) {
-    errorMessage.value = formatMonitorError(error)
-    console.error('Failed to refresh metrics:', error)
+    localStorage.setItem('mshell-monitor-interval', String(interval.value))
+  } catch {}
+  void reconcile()
+}
+const refreshMetrics = async () => {
+  if (!isMonitoring.value || refreshing.value) return
+  refreshing.value = true
+  const sessionId = props.sessionId
+  try {
+    const result = await window.electronAPI.serverMonitor?.refresh(sessionId)
+    if (!result?.success || !result.data) throw new Error(result?.error || '监控刷新失败')
+    handleMetricsUpdate(sessionId, result.data)
+  } catch (error) {
+    if (!disposed && wanted.value) errorMessage.value = formatMonitorError(error)
   } finally {
     refreshing.value = false
   }
 }
-
-// 监听指标更新
-const handleMetricsUpdate = (sessionId: string, data: any) => {
-  if (sessionId === props.sessionId) {
-    errorMessage.value = ''
-    metrics.value = data
+const onVisibility = () => {
+  pageVisible.value = !document.hidden
+  void reconcile()
+}
+watch(
+  () => props.active,
+  () => {
+    void reconcile()
   }
-}
-
-const handleMonitorError = (sessionId: string, error: any) => {
-  if (sessionId === props.sessionId) {
-    errorMessage.value = formatMonitorError(error)
+)
+watch(
+  () => props.sessionId,
+  () => {
+    metrics.value = null
+    history.value = []
+    void reconcile()
   }
-}
-
-// 格式化字节
-const formatBytes = (bytes: number): string => {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
-}
-
-// 格式化速度
-const formatSpeed = (bytesPerSecond: number): string => {
-  return `${formatBytes(bytesPerSecond)}/s`
-}
-
-const formatDiskInfo = (disk: any): string => {
-  const filesystems = Array.isArray(disk?.filesystems) ? disk.filesystems : []
-  if (filesystems.length === 0) {
-    return `${formatBytes(disk.free)} 可用`
-  }
-
-  const busiest = [...filesystems].sort((a, b) => (b.usage || 0) - (a.usage || 0))[0]
-  const mountInfo = busiest?.mount ? ` · 最高 ${busiest.mount} ${Number(busiest.usage || 0).toFixed(0)}%` : ''
-  return `${formatBytes(disk.free)} 可用 · ${filesystems.length} 挂载${mountInfo}`
-}
-
-// 格式化运行时间
-const formatUptime = (seconds: number): string => {
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor((seconds % 86400) / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  if (days > 0) return `${days}天 ${hours}小时`
-  if (hours > 0) return `${hours}小时 ${minutes}分钟`
-  return `${minutes}分钟`
-}
-
-// 格式化时间
-const formatTime = (timestamp: string): string => {
-  return new Date(timestamp).toLocaleTimeString('zh-CN')
-}
-
-// 获取颜色
-const getCPUColor = (usage: number): string => {
-  if (usage < 50) return '#10b981'
-  if (usage < 80) return '#f59e0b'
-  return '#ef4444'
-}
-
-const getMemoryColor = (usage: number): string => {
-  if (usage < 70) return '#10b981'
-  if (usage < 90) return '#f59e0b'
-  return '#ef4444'
-}
-
-const getDiskColor = (usage: number): string => {
-  if (usage < 80) return '#10b981'
-  if (usage < 95) return '#f59e0b'
-  return '#ef4444'
-}
-
+)
 onMounted(() => {
-  const unsub = window.electronAPI.serverMonitor?.onMetrics?.(handleMetricsUpdate)
-  if (unsub) metricsUnsubscribe = unsub
-  const unsubError = window.electronAPI.serverMonitor?.onError?.(handleMonitorError)
-  if (unsubError) errorUnsubscribe = unsubError
-  void startMonitoring()
+  const api = window.electronAPI.serverMonitor
+  const metricsOff = api?.onMetrics(handleMetricsUpdate)
+  const errorOff = api?.onError((id, error) => {
+    if (id === props.sessionId && wanted.value && !disposed)
+      errorMessage.value = formatMonitorError(error)
+  })
+  if (metricsOff) unsubscribers.push(metricsOff)
+  if (errorOff) unsubscribers.push(errorOff)
+  document.addEventListener('visibilitychange', onVisibility)
+  clock = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+  void reconcile()
 })
+// 安全信息：与基础指标独立，每 15 秒轮询；监控暂停或页面隐藏时停止
+const SECURITY_INTERVAL = 15000
+const security = ref<SecuritySummary | null>(null)
+const securityError = ref('')
+const securityDialogVisible = ref(false)
+const securityDialogTab = ref('sources')
+// 首次打开时才挂载详情弹窗
+const securityDialogMounted = ref(false)
+const trustHostKey = computed(
+  () => props.hostKey || metrics.value?.system.hostname || props.sessionId
+)
+const trustRules = ref<string[]>([])
+let securityTimer: ReturnType<typeof setTimeout> | undefined
+let securityRequest = 0
+
+watch(
+  trustHostKey,
+  (key) => {
+    trustRules.value = loadTrustRules(key)
+  },
+  { immediate: true }
+)
+const updateTrustRules = (rules: string[]) => {
+  saveTrustRules(trustHostKey.value, rules)
+  trustRules.value = loadTrustRules(trustHostKey.value)
+}
+const sourceIps = computed(() =>
+  security.value ? collectSourceIps(security.value, trustRules.value) : []
+)
+const untrustedSources = computed(() =>
+  sourceIps.value.filter((source) => source.level === 'untrusted')
+)
+const onlineUsers = computed(
+  () => new Set((security.value?.sessions || []).map((session) => session.user)).size
+)
+const securityStatusText = computed(() => {
+  if (!security.value) return securityError.value ? '采集失败' : '检测中'
+  if (untrustedSources.value.length) return `发现 ${untrustedSources.value.length} 个非信任 IP`
+  return '来源均可信'
+})
+const sourceTitle = (source: SourceIp) =>
+  `${trustLabel[source.level]} · ${source.connections} 个连接` +
+  (source.users.length ? ' · ' + source.users.join(', ') : '')
+const securityShouldRun = () =>
+  !disposed && wanted.value && isMonitoring.value && props.active && pageVisible.value
+const stopSecurityPolling = () => {
+  if (securityTimer) clearTimeout(securityTimer)
+  securityTimer = undefined
+}
+const pollSecurity = async () => {
+  stopSecurityPolling()
+  if (!securityShouldRun()) return
+  const id = props.sessionId
+  const current = ++securityRequest
+  try {
+    const result = await window.electronAPI.serverMonitor?.getSecurity(id)
+    if (current !== securityRequest || id !== props.sessionId || disposed) return
+    if (!result?.success || !result.data) throw new Error(result?.error || '安全信息采集失败')
+    security.value = result.data
+    securityError.value = ''
+  } catch (error) {
+    if (current !== securityRequest || id !== props.sessionId || disposed) return
+    securityError.value = formatMonitorError(error)
+  } finally {
+    if (current === securityRequest && securityShouldRun()) {
+      securityTimer = setTimeout(() => void pollSecurity(), SECURITY_INTERVAL)
+    }
+  }
+}
+watch(
+  () => [wanted.value, isMonitoring.value, props.active, pageVisible.value] as const,
+  () => {
+    if (securityShouldRun()) {
+      if (!securityTimer) void pollSecurity()
+    } else {
+      securityRequest++
+      stopSecurityPolling()
+    }
+  }
+)
+watch(
+  () => props.sessionId,
+  () => {
+    securityRequest++
+    stopSecurityPolling()
+    security.value = null
+    securityError.value = ''
+    securityDialogVisible.value = false
+    if (securityShouldRun()) void pollSecurity()
+  }
+)
+const openSecurityDetails = (tab = untrustedSources.value.length ? 'sources' : 'sessions') => {
+  securityDialogTab.value = tab
+  securityDialogMounted.value = true
+  securityDialogVisible.value = true
+}
 
 onUnmounted(() => {
-  if (isMonitoring.value) {
-    window.electronAPI.serverMonitor?.stop?.(props.sessionId)
-  }
-  if (metricsUnsubscribe) {
-    metricsUnsubscribe()
-    metricsUnsubscribe = null
-  }
-  if (errorUnsubscribe) {
-    errorUnsubscribe()
-    errorUnsubscribe = null
-  }
+  disposed = true
+  securityRequest++
+  stopSecurityPolling()
+  clearInterval(clock)
+  document.removeEventListener('visibilitychange', onVisibility)
+  unsubscribers.forEach((unsubscribe) => unsubscribe())
+  void reconcile()
 })
-</script>
 
+const percent = (value: number | null, empty = '采样中') =>
+  value === null ? empty : value.toFixed(1) + '%'
+const formatBytes = (value: number) => {
+  if (value < 1024) return value.toFixed(0) + ' B'
+  if (value < 1024 ** 2) return (value / 1024).toFixed(1) + ' KB'
+  if (value < 1024 ** 3) return (value / 1024 ** 2).toFixed(1) + ' MB'
+  return (value / 1024 ** 3).toFixed(1) + ' GB'
+}
+const speed = (value: number | null) => (value === null ? '采样中' : formatBytes(value) + '/s')
+const formatTime = (value: string) => new Date(value).toLocaleTimeString('zh-CN')
+const formatUptime = (value: number) => {
+  const days = Math.floor(value / 86400),
+    hours = Math.floor((value % 86400) / 3600),
+    minutes = Math.floor((value % 3600) / 60)
+  return days
+    ? days + '天 ' + hours + '小时'
+    : hours
+      ? hours + '小时 ' + minutes + '分钟'
+      : minutes + '分钟'
+}
+const trendPoints = (key: 'cpu' | 'memory') =>
+  history.value
+    .flatMap((point, i) =>
+      point[key] === null
+        ? []
+        : [`${(i / 59) * 100},${31 - (Math.min(100, Math.max(0, point[key]!)) / 100) * 30}`]
+    )
+    .join(' ')
+</script>
 <style scoped>
+.monitor-controls,
+.process-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.monitor-controls {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  justify-content: space-between;
+}
+.monitor-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.process-controls {
+  margin-bottom: 8px;
+  gap: 5px;
+}
+.process-controls input {
+  flex: 1 1 100px;
+  min-width: 0;
+}
+.monitor-controls select,
+.process-controls select,
+.process-controls input {
+  min-height: 28px;
+  padding: 3px 6px;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.monitor-status {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.monitor-status.stale,
+.source-error {
+  color: var(--warning-color);
+}
+.source-error {
+  font-size: 12px;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+.metric-trend {
+  width: 100%;
+  height: 36px;
+  margin: 6px 0;
+}
+.metric-trend polyline {
+  fill: none;
+  stroke: var(--primary-color);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.memory-trend polyline {
+  stroke: var(--success-color);
+}
+.process-pid {
+  display: block;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.compact-table td:not(:first-child),
+.compact-table th:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.metric-info {
+  line-height: 1.5;
+}
 .server-monitor-panel {
   display: flex;
   flex-direction: column;
@@ -408,6 +789,7 @@ onUnmounted(() => {
 }
 
 .monitor-error {
+  overflow-wrap: anywhere;
   margin: 10px 12px 0;
   padding: 8px 10px;
   border: 1px solid rgba(239, 68, 68, 0.28);
@@ -450,15 +832,18 @@ onUnmounted(() => {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .monitor-content.compact {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
   align-content: start;
 }
@@ -469,6 +854,7 @@ onUnmounted(() => {
 }
 
 .metric-card.compact {
+  min-width: 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -505,7 +891,7 @@ onUnmounted(() => {
 
 .progress-fill {
   height: 100%;
-  transition: width 0.5s ease;
+  transition: none;
 }
 
 .metric-info {
@@ -805,5 +1191,100 @@ onUnmounted(() => {
 :global(:root.app-appearance-terminal .server-monitor-panel .spinner) {
   border-color: var(--border-color);
   border-top-color: var(--primary-color);
+}
+.security-card {
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.security-card:hover,
+.security-card:focus-visible {
+  border-color: var(--primary-color);
+  outline: none;
+}
+
+.security-card.has-risk {
+  border-color: var(--danger-color, #dc2626);
+}
+
+.security-status {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.security-status.ok {
+  color: var(--success-color, #16a34a);
+}
+
+.security-status.risk {
+  color: var(--danger-color, #dc2626);
+  font-weight: 600;
+}
+
+.security-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.security-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.security-stat strong {
+  font-size: var(--text-base);
+}
+
+.security-stat small {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.security-stat.danger strong {
+  color: var(--danger-color, #dc2626);
+}
+
+.security-stat.warn strong {
+  color: var(--warning-color, #d97706);
+}
+
+.security-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.source-chip {
+  padding: 0 6px;
+  border-radius: 3px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--text-secondary);
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.source-chip.untrusted {
+  color: var(--danger-color, #dc2626);
+  background: rgba(220, 38, 38, 0.12);
+}
+
+.source-chip.trusted {
+  color: var(--success-color, #16a34a);
+  background: rgba(22, 163, 74, 0.12);
+}
+
+@media (max-width: 420px) {
+  .security-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

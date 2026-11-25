@@ -96,6 +96,29 @@ export function registerFsHandlers() {
     }
   })
 
+  // 列出可用的根目录：Windows 为存在的盘符（如 ['C:', 'D:']），其它系统为 ['/']
+  ipcMain.handle('fs:listDrives', async () => {
+    try {
+      if (process.platform !== 'win32') {
+        return { success: true, drives: ['/'] }
+      }
+      const letters = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i))
+      const probes = await Promise.all(
+        letters.map(async (letter) => {
+          try {
+            await fs.access(`${letter}:\\`)
+            return `${letter}:`
+          } catch {
+            return null
+          }
+        })
+      )
+      return { success: true, drives: probes.filter((drive): drive is string => !!drive) }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
   // 写入文件
   ipcMain.handle('fs:writeFile', async (_event, filePath: string, content: string) => {
     try {

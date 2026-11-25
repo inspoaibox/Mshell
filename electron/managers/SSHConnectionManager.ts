@@ -310,6 +310,8 @@ export class SSHConnectionManager extends EventEmitter {
       })
 
       client.on('close', () => {
+        // 通知依附于该 Client 的子通道（如 SFTP）立即失效，避免请求永远挂起。
+        this.emitClientClosed(id, client)
         if (!connectSettled) {
           rejectWhileConnecting(new Error(connection.lastError || 'SSH 连接在就绪前关闭'))
           return
@@ -518,6 +520,20 @@ export class SSHConnectionManager extends EventEmitter {
       connection.socket.destroy()
     }
     this.connections.delete(id)
+    this.emitClientClosed(id, connection.client)
+  }
+
+  /**
+   * 'client-closed' (id, client)：某个连接的 SSH Client 已关闭或被替换（断开/自动重连）。
+   * 依附于该 Client 的通道（SFTP 等）应当立即关闭，否则其上的请求不会再回调。
+   * 携带 client 实例，监听方可据此判断是否仍是自己绑定的那个 Client。
+   */
+  private emitClientClosed(id: string, client: Client): void {
+    try {
+      this.emit('client-closed', id, client)
+    } catch (error) {
+      console.error(`[SSHConnectionManager] client-closed listener failed for ${id}:`, error)
+    }
   }
 
   /**
@@ -551,83 +567,19 @@ export class SSHConnectionManager extends EventEmitter {
     maxOutputBytes?: number,
     stdin?: string
   ): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const connection = this.connections.get(id)
-      if (!connection || !connection.client) {
-        reject(new Error(`Connection not found: ${id}`))
-        return
-      }
-
-      let output = ''
-      let errorOutput = ''
-      let outputBytes = 0
-      let settled = false
-      let timeoutHandle: NodeJS.Timeout | undefined
-      connection.client.exec(command, (err, stream) => {
-        if (err) {
-          reject(err)
-          return
-        }
-
-        const rejectOnce = (error: Error) => {
-          if (settled) return
-          settled = true
-          if (timeoutHandle) clearTimeout(timeoutHandle)
-          reject(error)
-        }
-
-        const appendOutput = (data: Buffer, stderr = false) => {
-          if (settled) return
-          outputBytes += data.length
-          if (maxOutputBytes && outputBytes > maxOutputBytes) {
-            rejectOnce(new Error(`Command output exceeded limit of ${maxOutputBytes} bytes`))
-            stream.close()
-            return
-          }
-
-          if (stderr) {
-            errorOutput += data.toString('utf8')
-          } else {
-            output += data.toString('utf8')
-          }
-        }
-
-        // 设置超时
-        timeoutHandle = setTimeout(() => {
-          rejectOnce(new Error(`Command execution timeout: ${command}`))
-          stream.close()
-        }, timeout)
-
-        stream.on('data', (data: Buffer) => {
-          appendOutput(data)
-        })
-
-        stream.stderr.on('data', (data: Buffer) => {
-          appendOutput(data, true)
-        })
-
-        stream.on('close', (code: number) => {
-          if (settled) return
-          settled = true
-          if (timeoutHandle) clearTimeout(timeoutHandle)
-          connection.lastActivity = new Date()
-
-          if (code === 0) {
-            resolve(output)
-          } else {
-            reject(new Error(`Command failed with code ${code}: ${errorOutput || output}`))
-          }
-        })
-
-        stream.on('error', (err: Error) => {
-          rejectOnce(err)
-        })
-
-        if (stdin !== undefined) stream.end(stdin)
-      })
-    })
+    const result = await this.executeCommandDetailed(
+      id,
+      command,
+      timeout,
+      maxOutputBytes ?? 8 * 1024 * 1024,
+      stdin
+    )
+    if (result.exitCode !== 0)
+      throw new Error(
+        `Command failed with code ${result.exitCode}: ${result.stderr || result.stdout}`
+      )
+    return result.stdout
   }
-
   /**
    * 执行命令并分别返回 stdout、stderr 和退出码；非 0 退出码不视为失败。
    * signal 中止时会关闭远程通道。
@@ -656,67 +608,87 @@ export class SSHConnectionManager extends EventEmitter {
       let outputBytes = 0
       let settled = false
       let timeoutHandle: NodeJS.Timeout | undefined
-      let channel: { close: () => void } | undefined
+      let channel: { close: () => void; signal?: (signal: string) => void } | undefined
 
       const cleanup = () => {
         if (timeoutHandle) clearTimeout(timeoutHandle)
         signal?.removeEventListener('abort', onAbort)
+        connection.client.removeListener('close', onClose)
       }
       const rejectOnce = (error: Error) => {
         if (settled) return
         settled = true
         cleanup()
         reject(error)
-        channel?.close()
+        try {
+          channel?.signal?.('TERM')
+        } catch {}
+        try {
+          channel?.close()
+        } catch {}
       }
       function onAbort() {
         rejectOnce(new Error('Command cancelled'))
       }
+      function onClose() {
+        rejectOnce(new Error('SSH connection closed'))
+      }
 
+      connection.client.once('close', onClose)
       signal?.addEventListener('abort', onAbort, { once: true })
       timeoutHandle = setTimeout(() => {
         rejectOnce(new Error(`Command execution timed out after ${timeout} ms`))
       }, timeout)
 
-      connection.client.exec(command, (err, stream) => {
-        if (err) {
-          rejectOnce(err)
-          return
-        }
-        if (settled) {
-          stream.close()
-          return
-        }
-        channel = stream
-
-        const appendOutput = (data: Buffer, target: Buffer[]) => {
-          if (settled) return
-          outputBytes += data.length
-          if (outputBytes > maxOutputBytes) {
-            rejectOnce(new Error(`Command output exceeded limit of ${maxOutputBytes} bytes`))
+      try {
+        connection.client.exec(command, (err, stream) => {
+          if (err) {
+            rejectOnce(err)
             return
           }
-          target.push(data)
-        }
+          if (settled) {
+            stream.on('error', () => {})
+            try {
+              stream.signal('TERM')
+            } catch {}
+            try {
+              stream.close()
+            } catch {}
+            return
+          }
+          channel = stream
 
-        stream.on('data', (data: Buffer) => appendOutput(data, stdoutChunks))
-        stream.stderr.on('data', (data: Buffer) => appendOutput(data, stderrChunks))
-        stream.on('close', (code: number | null, exitSignal?: string) => {
-          if (settled) return
-          settled = true
-          cleanup()
-          connection.lastActivity = new Date()
-          resolve({
-            stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-            stderr: Buffer.concat(stderrChunks).toString('utf8'),
-            exitCode: typeof code === 'number' ? code : null,
-            ...(exitSignal ? { signal: exitSignal } : {})
+          const appendOutput = (data: Buffer, target: Buffer[]) => {
+            if (settled) return
+            outputBytes += data.length
+            if (outputBytes > maxOutputBytes) {
+              rejectOnce(new Error(`Command output exceeded limit of ${maxOutputBytes} bytes`))
+              return
+            }
+            target.push(data)
+          }
+
+          stream.on('data', (data: Buffer) => appendOutput(data, stdoutChunks))
+          stream.stderr.on('data', (data: Buffer) => appendOutput(data, stderrChunks))
+          stream.on('close', (code: number | null, exitSignal?: string) => {
+            if (settled) return
+            settled = true
+            cleanup()
+            connection.lastActivity = new Date()
+            resolve({
+              stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+              stderr: Buffer.concat(stderrChunks).toString('utf8'),
+              exitCode: typeof code === 'number' ? code : null,
+              ...(exitSignal ? { signal: exitSignal } : {})
+            })
           })
-        })
-        stream.on('error', (error: Error) => rejectOnce(error))
+          stream.on('error', (error: Error) => rejectOnce(error))
 
-        if (stdin !== undefined) stream.end(stdin)
-      })
+          if (stdin !== undefined) stream.end(stdin)
+        })
+      } catch (error) {
+        rejectOnce(error instanceof Error ? error : new Error(String(error)))
+      }
     })
   }
 

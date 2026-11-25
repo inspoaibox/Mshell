@@ -9,6 +9,7 @@ import { WebglAddon } from 'xterm-addon-webgl'
 import { SearchAddon } from 'xterm-addon-search'
 import { WebLinksAddon } from 'xterm-addon-web-links'
 import { terminalShortcutsManager } from './terminal-shortcuts'
+import { TerminalInputState } from './terminal-input-state'
 
 // 输入回调类型
 export type InputCallback = (data: string, lineBuffer: string) => void
@@ -137,6 +138,8 @@ interface TerminalInstance {
   unsubscribers: Array<() => void> // 存储取消订阅函数，销毁时调用
   // 可更新的回调引用 - 解决闭包陷阱问题
   inputCallback: InputCallback | null
+  inputState: TerminalInputState
+  terminalInputHandler: ((data: string) => void) | null
   cursorCallback: ((position: { x: number; y: number }) => void) | null
   dataCallback: ((data: string) => void) | null
   outputCallback: ((data: string) => void) | null // SSH 输出回调（用于错误检测等）
@@ -147,6 +150,7 @@ interface TerminalInstance {
   echoEnabled: boolean // 终端是否处于回显模式（false = 密码输入等无回显场景）
   pendingViewportRefresh: boolean // 终端隐藏期间收到输出后，重新显示时刷新 viewport
   pendingScrollToBottom: boolean // 终端隐藏期间位于底部，重新显示时恢复到底部
+  searchActive: boolean
   lastCloseNoticeAt: number
   lastCloseNoticeKey: string
 }
@@ -184,6 +188,7 @@ class TerminalManager {
       scrollback: options.scrollback || 10000,
       theme: options.theme,
       allowProposedApi: true,
+      overviewRulerWidth: 8,
       allowTransparency: true,
       convertEol: false, // 关闭自动换行转换，由服务端PTY的ONLCR处理，避免双重转换导致显示错位
       windowsMode: false, // SSH 目标通常是 Linux/Unix，不应使用 Windows 模式
@@ -228,8 +233,11 @@ class TerminalManager {
                   : normalizedText
                 window.electronAPI.ssh.write(connectionId, pasteText)
 
-                // 记录粘贴的命令到历史
-                recordPastedCommands(connectionId, text)
+                if (inst) {
+                  if (inst.echoEnabled && inst.terminal.buffer.active.type === 'normal') inst.inputState.feed(text)
+                  else inst.inputState.reset(false)
+                  inst.inputCallback?.('', inst.inputState.canSuggest ? inst.inputState.snapshot().text : '')
+                }
               }
             })
             .catch((err) => {
@@ -320,6 +328,8 @@ class TerminalManager {
       unsubscribers: [],
       // 初始化可更新的回调引用
       inputCallback: null,
+      inputState: new TerminalInputState(),
+      terminalInputHandler: null,
       cursorCallback: null,
       dataCallback: null,
       outputCallback: null,
@@ -329,6 +339,7 @@ class TerminalManager {
       echoEnabled: true, // 默认回显开启
       pendingViewportRefresh: false,
       pendingScrollToBottom: false,
+      searchActive: false,
       lastCloseNoticeAt: 0,
       lastCloseNoticeKey: ''
     }
@@ -341,6 +352,33 @@ class TerminalManager {
     if (options.copyOnSelect) {
       this.setupCopyOnSelect(instance)
     }
+
+    const parsedInput = terminal.onWriteParsed(() => {
+      const buffer = terminal.buffer.active
+      if (buffer.type !== 'normal' || !instance.echoEnabled) {
+        instance.inputState.reset(false)
+        instance.inputCallback?.('', '')
+      } else {
+        const line = buffer.getLine(buffer.baseY + buffer.cursorY)?.translateToString(true) || ''
+        instance.inputState.observePrompt(line)
+      }
+      if (instance.container && instance.cursorCallback && instance.inputState.canSuggest) {
+        const rect = instance.container.getBoundingClientRect()
+        const dims = (terminal as any)._core?._renderService?.dimensions?.css?.cell
+        if (rect.width > 0 && rect.height > 0) instance.cursorCallback({
+          x: rect.left + 4 + buffer.cursorX * (dims?.width || 9),
+          y: rect.top + 4 + buffer.cursorY * (dims?.height || 20)
+        })
+      }
+    })
+    const directoryMarker = terminal.parser.registerOscHandler(7, value => {
+      try {
+        const url = new URL(value)
+        if (url.protocol === 'file:') instance.inputState.setDirectory(decodeURIComponent(url.pathname))
+      } catch { /* Ignore malformed shell directory markers. */ }
+      return false
+    })
+    instance.unsubscribers.push(() => parsedInput.dispose(), () => directoryMarker.dispose())
 
     // 注册 SSH 事件监听器 (Data Layer)
     // 这样即使 UI 组件被销毁重建，数据处理也不会中断
@@ -468,6 +506,8 @@ class TerminalManager {
     // 3. SSH Close
     const unsubClose = window.electronAPI.ssh.onClose((id: string, details?: SSHCloseDetails) => {
       if (id === connectionId) {
+        instance.inputState.reset(false)
+        instance.inputCallback?.('', '')
         const now = Date.now()
         const closeKey =
           details?.closedAt || `${details?.source || 'unknown'}:${details?.reason || ''}`
@@ -543,11 +583,18 @@ class TerminalManager {
     }
   }
 
+  setSearchActive(connectionId: string, active: boolean): void {
+    const instance = this.instances.get(connectionId)
+    if (!instance) return
+    instance.searchActive = active
+    if (active) instance.pendingScrollToBottom = false
+  }
+
   reveal(connectionId: string, options: { scrollToBottom?: boolean } = {}): void {
     const instance = this.instances.get(connectionId)
     if (!instance || !this.hasVisibleContainer(instance)) return
 
-    const shouldScrollToBottom = options.scrollToBottom || instance.pendingScrollToBottom
+    const shouldScrollToBottom = !instance.searchActive && (options.scrollToBottom || instance.pendingScrollToBottom)
     this.syncTerminalViewport(instance, shouldScrollToBottom)
 
     instance.pendingViewportRefresh = false
@@ -602,14 +649,14 @@ class TerminalManager {
     instance.terminal.write(data, () => {
       if (!this.hasVisibleContainer(instance)) {
         instance.pendingViewportRefresh = true
-        if (wasScrolledToBottom) {
+        if (wasScrolledToBottom && !instance.searchActive) {
           instance.pendingScrollToBottom = true
         }
         return
       }
 
       if (wasScrolledToBottom || !wasVisible || instance.pendingViewportRefresh) {
-        this.syncTerminalViewport(instance, wasScrolledToBottom || instance.pendingScrollToBottom)
+        this.syncTerminalViewport(instance, !instance.searchActive && (wasScrolledToBottom || instance.pendingScrollToBottom))
         instance.pendingViewportRefresh = false
         instance.pendingScrollToBottom = false
       }
@@ -703,7 +750,7 @@ class TerminalManager {
 
     // 监听选中变化事件
     instance.selectionDisposable = instance.terminal.onSelectionChange(() => {
-      if (instance.copyOnSelect) {
+      if (instance.copyOnSelect && !instance.searchActive) {
         const selection = instance.terminal.getSelection()
         if (selection && selection.trim()) {
           navigator.clipboard
@@ -930,38 +977,4 @@ class TerminalManager {
   }
 }
 
-/**
- * 记录粘贴的命令到历史
- * 解析粘贴文本中的命令（按换行符分割）并记录
- */
-async function recordPastedCommands(connectionId: string, text: string): Promise<void> {
-  try {
-    // 获取终端实例以获取会话名称
-    const instance = terminalManager.get(connectionId)
-    if (!instance) return
-
-    // 按换行符分割命令
-    const lines = text.split(/\r?\n/)
-
-    for (const line of lines) {
-      const command = line.trim()
-
-      // 只记录非空命令
-      if (command) {
-        // 使用类型断言访问 commandHistory API
-        const api = (window as any).electronAPI
-        await api.commandHistory?.add?.({
-          command,
-          sessionId: connectionId,
-          sessionName: 'Terminal Session', // 可以从实例中获取更准确的名称
-          duration: undefined // 粘贴的命令没有执行时长
-        })
-      }
-    }
-  } catch (error) {
-    console.error('[TerminalManager] Failed to record pasted commands:', error)
-  }
-}
-
-// 导出单例
 export const terminalManager = new TerminalManager()

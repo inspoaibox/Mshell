@@ -197,18 +197,6 @@ h5, h6 { font-size: var(--text-sm); }
   border-color: #d97706;
 }
 
-/* 危险按钮 */
-.el-button--danger {
-  background: var(--error-color);
-  border-color: var(--error-color);
-}
-
-.el-button--danger:hover,
-.el-button--danger:focus {
-  background: #dc2626;
-  border-color: #dc2626;
-}
-
 .el-button.is-text {
   color: var(--text-secondary);
 }
@@ -3095,4 +3083,80 @@ h5, h6 { font-size: var(--text-sm); }
 .el-loading-spinner .el-loading-text {
   color: var(--text-secondary);
   font-size: var(--text-sm);
+}
+
+/* Keep danger variants after appearance overrides. Setting only the background
+   turns plain buttons into red-on-red controls; foreground and surface must match.
+   !important also covers confirmation buttons carrying both primary and danger. */
+:root .el-button.el-button--danger:not(.is-disabled),
+:root .el-button.el-button--danger.is-disabled {
+  --el-button-text-color: var(--danger-on-solid);
+  --el-button-bg-color: var(--danger-solid-bg);
+  --el-button-border-color: var(--danger-solid-bg);
+  --el-button-hover-text-color: var(--danger-on-solid);
+  --el-button-hover-bg-color: var(--danger-solid-hover);
+  --el-button-hover-border-color: var(--danger-solid-hover);
+  --el-button-active-text-color: var(--danger-on-solid);
+  --el-button-active-bg-color: var(--danger-solid-active);
+  --el-button-active-border-color: var(--danger-solid-active);
+  --el-button-disabled-text-color: var(--danger-disabled-text);
+  --el-button-disabled-bg-color: var(--danger-disabled-bg);
+  --el-button-disabled-border-color: var(--danger-disabled-border);
+  --el-button-outline-color: var(--danger-border);
+  color: var(--el-button-text-color) !important;
+  background: var(--el-button-bg-color) !important;
+  border-color: var(--el-button-border-color) !important;
+  box-shadow: none !important;
+}
+
+:root .el-button.el-button--danger.is-plain {
+  --el-button-text-color: var(--danger-color);
+  --el-button-bg-color: var(--danger-soft-bg);
+  --el-button-border-color: var(--danger-border);
+  --el-button-hover-text-color: var(--danger-color);
+  --el-button-hover-bg-color: var(--danger-soft-hover);
+  --el-button-hover-border-color: var(--danger-color);
+  --el-button-active-text-color: var(--danger-color);
+  --el-button-active-bg-color: var(--danger-soft-active);
+  --el-button-active-border-color: var(--danger-color);
+}
+
+:root .el-button.el-button--danger:is(.is-text, .is-link) {
+  --el-button-text-color: var(--danger-color);
+  --el-button-bg-color: transparent;
+  --el-button-border-color: transparent;
+  --el-button-hover-text-color: var(--danger-color);
+  --el-button-hover-bg-color: var(--danger-soft-hover);
+  --el-button-hover-border-color: transparent;
+  --el-button-active-text-color: var(--danger-color);
+  --el-button-active-bg-color: var(--danger-soft-active);
+  --el-button-active-border-color: transparent;
+  --el-button-disabled-bg-color: transparent;
+  --el-button-disabled-border-color: transparent;
+}
+
+:root .el-button.el-button--danger:is(:hover, :focus-visible):not(.is-disabled) {
+  color: var(--el-button-hover-text-color) !important;
+  background: var(--el-button-hover-bg-color) !important;
+  border-color: var(--el-button-hover-border-color) !important;
+}
+
+:root .el-button.el-button--danger:active:not(.is-disabled) {
+  color: var(--el-button-active-text-color) !important;
+  background: var(--el-button-active-bg-color) !important;
+  border-color: var(--el-button-active-border-color) !important;
+}
+
+:root .el-button.el-button--danger.is-disabled {
+  color: var(--el-button-disabled-text-color) !important;
+  background: var(--el-button-disabled-bg-color) !important;
+  border-color: var(--el-button-disabled-border-color) !important;
+}
+
+:root .el-button.el-button--danger .el-icon {
+  color: inherit;
+}
+
+:root .el-button.el-button--danger.is-loading::before {
+  background: transparent;
 }

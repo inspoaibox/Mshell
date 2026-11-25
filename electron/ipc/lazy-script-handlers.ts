@@ -1,5 +1,7 @@
-import { ipcMain } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import { promises as fs } from 'fs'
+import { sshConnectionManager } from '../managers/SSHConnectionManager'
+import { buildScriptDeployment, parseScriptDeploymentPath } from '../../src/utils/lazy-script-template'
 import {
   lazyScriptManager,
   type LazyScript,
@@ -58,6 +60,54 @@ const serializeScript = (script: LazyScript) => ({
 const ensureLazyScriptManagerInitialized = () => lazyScriptManager.initialize()
 
 export function registerLazyScriptHandlers() {
+  const deployments = new Map<string, AbortController>()
+  ipcMain.handle('lazyScript:cancelDeployment', (event, token: string) => {
+    deployments.get(`${event.sender.id}:${token}`)?.abort()
+  })
+  ipcMain.handle(
+    'lazyScript:deploy',
+    async (event, id: string, token: string, fileName: string, content: string, copyTo?: string) => {
+      const key = `${event.sender.id}:${token}`
+      if (
+        !/^[a-f0-9-]{16,64}$/i.test(token) ||
+        typeof content !== 'string' ||
+        content.length > 2 * 1024 * 1024 ||
+        deployments.has(key)
+      )
+        return { success: false, error: '无效或重复的部署请求' }
+      if (sshConnectionManager.getConnection(id)?.status !== 'connected')
+        return { success: false, error: 'SSH 未连接' }
+      const controller = new AbortController()
+      deployments.set(key, controller)
+      const cancel = () => controller.abort()
+      event.sender.once('destroyed', cancel)
+      try {
+        const result = await sshConnectionManager.executeCommandDetailed(
+          id,
+          buildScriptDeployment(content, fileName, copyTo, true),
+          30000,
+          1024 * 1024,
+          undefined,
+          controller.signal
+        )
+        if (result.exitCode !== 0)
+          return { success: false, error: result.stderr || `部署失败，退出码 ${result.exitCode}` }
+        const path = parseScriptDeploymentPath(result.stdout, fileName)
+        const savedPath = copyTo === undefined ? undefined : path.slice(0, path.lastIndexOf('/') + 1) + copyTo
+        return { success: true, data: { path, ...(savedPath ? { savedPath } : {}) } }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : '部署失败' }
+      } finally {
+        deployments.delete(key)
+        event.sender.removeListener('destroyed', cancel)
+      }
+    }
+  )
+  lazyScriptManager.onChanged(() => {
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) window.webContents.send('lazyScript:changed')
+    })
+  })
   lazyScriptManager.initialize().catch(console.error)
 
   ipcMain.handle('lazyScript:getAll', async () => {
@@ -218,14 +268,15 @@ export function registerLazyScriptHandlers() {
         throw new Error('无效的懒人脚本文件格式')
       }
 
-      const currentScripts = lazyScriptManager.getAll()
       let imported = 0
       let updated = 0
 
       for (const script of importData.lazyScripts) {
         if (!script.name || !script.content) continue
 
-        const existing = currentScripts.find((item) => item.id === script.id || item.name === script.name)
+        const existing = lazyScriptManager
+          .getAll()
+          .find((item) => item.id === script.id || item.name === script.name)
         const cleanData = cleanScriptData(script)
 
         if (existing) {

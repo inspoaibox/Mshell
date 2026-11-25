@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <title>防火墙管理 · 本地验证</title>
+  </head>
+  <body>
+    <main>
+      <section id="preview"></section>
+      <aside>
+        <h1>防火墙管理 · 本地验证</h1>
+        <p>本页使用模拟数据，不连接服务器、不修改防火墙。</p>
+        <p>
+          当前 SSH 网卡属于 external，public 是默认 zone。列表包含仅运行时、仅保存和永久生效规则。
+        </p>
+        <button id="failure">模拟写入失败</button><button id="read-failure">模拟检测失败</button
+        ><button id="normal">恢复正常</button><button id="inactive">模拟待启用</button
+        ><button id="theme">切换深浅色</button>
+      </aside>
+    </main>
+    <script type="module">
+      import { createApp } from 'vue'
+      import ElementPlus from 'element-plus'
+      import 'element-plus/dist/index.css'
+      import '/src/styles/main.css'
+      import Panel from '/src/components/Firewall/FirewallPanel.vue'
+      import { firewallOverview, zoneLines } from '/src/utils/__tests__/firewall-fixtures'
+      let failure = false,
+        readFailure = false,
+        listeners = new Set()
+      let state = firewallOverview(
+        [...zoneLines('runtime', '80/tcp 8080/tcp'), ...zoneLines('permanent', '80/tcp 9443/tcp')],
+        'firewalld'
+      )
+      state.osName = 'Rocky Linux · 模拟服务器'
+      const snapshot = () => ({ ...structuredClone(state), capturedAt: Date.now() })
+      window.electronAPI = {
+        firewall: {
+          inspect: async () =>
+            readFailure
+              ? { success: false, error: '模拟读取失败：权限不足，状态未知' }
+              : { success: true, data: snapshot() },
+          onChanged: (fn) => {
+            listeners.add(fn)
+            return () => listeners.delete(fn)
+          },
+          apply: async (_id, action) => {
+            if (failure)
+              return { success: false, error: '模拟永久配置写入失败，本次运行时变更已回滚' }
+            if (action.type === 'allow') {
+              const d = action.draft,
+                source =
+                  d.sourceMode === 'current'
+                    ? state.sshClientIp
+                    : d.sourceMode === 'custom'
+                      ? d.customSources
+                      : ''
+              state.rules.push({
+                key: 'added-' + Date.now(),
+                tool: d.tool,
+                raw: `rule source address="${source}" port port="${d.ports}" protocol="${d.protocol}" accept`,
+                action: 'allow',
+                actionLabel: '允许',
+                summary: d.ports,
+                port: d.ports,
+                protocol: d.protocol,
+                source,
+                zone: d.zone,
+                kind: 'rich',
+                deletable: true,
+                runtime: true,
+                persistent: true
+              })
+            }
+            if (action.type === 'delete')
+              state.rules = state.rules.filter((rule) => rule.key !== action.key)
+            if (action.type === 'enable') {
+              state.tools.find((tool) => tool.id === action.tool).active = true
+              return {
+                success: true,
+                data: {
+                  overview: snapshot(),
+                  output: '模拟启用成功',
+                  pending: { token: crypto.randomUUID(), expiresAt: Date.now() + 85000 }
+                }
+              }
+            }
+            if (action.type === 'disable')
+              state.tools.find((tool) => tool.id === action.tool).active = false
+            return { success: true, data: { overview: snapshot(), output: '模拟操作成功并已验证' } }
+          },
+          confirm: async () => ({ success: true, data: snapshot() })
+        },
+        ssh: { onClose: () => () => {}, onReconnected: () => () => {} }
+      }
+      createApp(Panel, { connectionId: 'preview' }).use(ElementPlus).mount('#preview')
+      const changed = () => listeners.forEach((fn) => fn('preview'))
+      document.querySelector('#failure').onclick = () => (failure = true)
+      document.querySelector('#read-failure').onclick = () => {
+        readFailure = true
+        changed()
+      }
+      document.querySelector('#normal').onclick = () => {
+        failure = false
+        readFailure = false
+        changed()
+      }
+      document.querySelector('#inactive').onclick = () => {
+        state.tools.find((t) => t.id === 'firewalld').active = false
+        changed()
+      }
+      document.querySelector('#theme').onclick = () =>
+        document.documentElement.classList.toggle('light-theme')
+    </script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg-main);
+        color: var(--text-primary);
+        font:
+          14px 'Segoe UI',
+          sans-serif;
+      }
+      main {
+        display: flex;
+        justify-content: center;
+        gap: 32px;
+        padding: 24px;
+      }
+      #preview {
+        width: 460px;
+        height: calc(100vh - 48px);
+        min-height: 640px;
+        border: 1px solid var(--border-color);
+      }
+      aside {
+        width: 340px;
+      }
+      p {
+        line-height: 1.7;
+        color: var(--text-secondary);
+      }
+      button {
+        cursor: pointer;
+      }
+      aside button {
+        margin: 0 8px 10px 0;
+        padding: 8px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+    </style>
+  </body>
+</html>

@@ -1,7 +1,7 @@
 import type { TerminalBackgroundConfig } from './terminal-background'
 
 // 会话类型
-export type SessionType = 'ssh' | 'rdp' | 'vnc'
+export type SessionType = 'ssh' | 'rdp' | 'vnc' | 'ipmi'
 
 export interface SessionConfig {
   id: string
@@ -21,6 +21,7 @@ export interface SessionConfig {
   terminalBackground?: TerminalBackgroundConfig
   color?: string
   sortOrder?: number // 用于拖拽排序
+  isPinned?: boolean // 在所属分组内置顶
   // Proxy Jump (跳板机) Configuration
   proxyJump?: ProxyJumpConfig
   // Proxy (代理) Configuration
@@ -42,6 +43,8 @@ export interface SessionConfig {
   rdpOptions?: RDPOptions
   // VNC 特有配置
   vncOptions?: VNCOptions
+  // IPMI / Redfish 带外管理配置
+  ipmiOptions?: IPMIOptions
 }
 
 // RDP 连接选项
@@ -82,6 +85,13 @@ export interface VNCOptions {
   sharedConnection?: boolean // 共享连接
 }
 
+export interface IPMIOptions {
+  transport?: 'redfish' | 'lanplus'
+  redfishHttps?: boolean
+  verifyCertificate?: boolean
+  basePath?: string
+}
+
 export interface ProxyJumpConfig {
   enabled: boolean
   host: string
@@ -109,4 +119,10 @@ export interface SessionGroup {
   id: string
   name: string
   sessions: string[] // For compatibility, populated dynamically
+  isPinned?: boolean
+  sortOrder?: number
 }
+
+export type SessionGroupOrderAction = 'pin' | 'unpin' | 'up' | 'down'
+
+export type SessionOrderAction = { type: 'pin' | 'unpin' } | { type: 'move'; targetId: string }

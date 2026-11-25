@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { sessionManager } from '../managers/SessionManager'
 import { auditLogManager, AuditAction } from '../managers/AuditLogManager'
+import type { SessionGroupOrderAction, SessionOrderAction } from '../../src/types/session'
 
 // Session IPC handlers
 export function registerSessionHandlers() {
@@ -20,6 +21,16 @@ export function registerSessionHandlers() {
   ipcMain.handle('session:get', async (_event, id: string) => {
     await sessionManager.initialize()
     return sessionManager.getSession(id)
+  })
+
+  ipcMain.handle('session:updateOrder', async (_event, id: string, action: SessionOrderAction) => {
+    try {
+      await sessionManager.initialize()
+      const sessions = await sessionManager.updateSessionOrder(id, action)
+      return { success: true, data: sessions }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
   })
 
   ipcMain.handle('session:create', async (_event, config: any) => {
@@ -129,6 +140,16 @@ export function registerSessionHandlers() {
   ipcMain.handle('session:getAllGroups', async () => {
     await sessionManager.initialize()
     return sessionManager.getAllGroups()  // 直接返回数组，保持前端兼容性
+  })
+
+  ipcMain.handle('session:updateGroupOrder', async (_event, groupId: string, action: SessionGroupOrderAction) => {
+    try {
+      await sessionManager.initialize()
+      const groups = await sessionManager.updateGroupOrder(groupId, action)
+      return { success: true, data: groups }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
   })
 
   ipcMain.handle('session:addToGroup', async (_event, sessionId: string, groupId: string) => {
