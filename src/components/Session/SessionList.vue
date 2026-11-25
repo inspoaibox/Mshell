@@ -358,6 +358,7 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAppStore } from '@/stores/app'
+import i18n from '@/i18n'
 import type { SessionConfig, SessionGroup } from '@/types/session'
 import * as FlagIcons from 'country-flag-icons/string/3x2'
 import VirtualList from '../Common/VirtualList.vue'
@@ -368,6 +369,7 @@ import { sortSessions } from '@/utils/session-order'
 
 // 使用 store - 不需要 props!
 const appStore = useAppStore()
+const t = (key: string) => i18n.global.t(key as never)
 
 const emit = defineEmits<{
   connect: [session: SessionConfig]
@@ -543,14 +545,17 @@ const handleContextMenu = async (session: SessionConfig, event: MouseEvent) => {
   if (isUpdatingSessionOrder.value) return
   
   const items = [
-    { label: '连接', action: 'connect' },
-    { label: session.isPinned ? '取消置顶' : '置顶', action: session.isPinned ? 'unpin' : 'pin' },
+    { label: t('session.contextMenu.connect'), action: 'connect' },
+    {
+      label: session.isPinned ? t('session.contextMenu.unpin') : t('session.contextMenu.pin'),
+      action: session.isPinned ? 'unpin' : 'pin'
+    },
     { type: 'separator' },
-    { label: '编辑', action: 'edit' },
-    { label: '复制会话', action: 'copy' },
-    { label: '移动到分组..', action: 'move' },
+    { label: t('session.contextMenu.edit'), action: 'edit' },
+    { label: t('session.contextMenu.duplicate'), action: 'copy' },
+    { label: t('session.contextMenu.moveToGroup'), action: 'move' },
     { type: 'separator' },
-    { label: '删除', action: 'delete' }
+    { label: t('session.contextMenu.delete'), action: 'delete' }
   ]
   
   try {
@@ -732,12 +737,19 @@ const handleGroupContextMenu = async (group: SessionGroup, event: MouseEvent) =>
   const index = peers.findIndex(item => item.id === group.id)
   
   const menuItems = [
-    { label: group.isPinned ? '取消置顶' : '置顶', action: group.isPinned ? 'unpin' : 'pin' },
-    { label: '上移', action: 'up', enabled: index > 0 },
-    { label: '下移', action: 'down', enabled: index >= 0 && index < peers.length - 1 },
+    {
+      label: group.isPinned ? t('session.contextMenu.unpin') : t('session.contextMenu.pin'),
+      action: group.isPinned ? 'unpin' : 'pin'
+    },
+    { label: t('session.contextMenu.moveUp'), action: 'up', enabled: index > 0 },
+    {
+      label: t('session.contextMenu.moveDown'),
+      action: 'down',
+      enabled: index >= 0 && index < peers.length - 1
+    },
     { type: 'separator' },
-    { label: '重命名', action: 'rename' },
-    { label: '删除', action: 'delete' }
+    { label: t('session.contextMenu.rename'), action: 'rename' },
+    { label: t('session.contextMenu.delete'), action: 'delete' }
   ]
   
   try {

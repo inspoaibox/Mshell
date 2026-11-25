@@ -86,7 +86,19 @@ export default {
     newGroup: '新建分组',
     groupName: '分组名称',
     deleteGroup: '删除分组',
-    renameGroup: '重命名分组'
+    renameGroup: '重命名分组',
+    contextMenu: {
+      connect: '连接',
+      pin: '置顶',
+      unpin: '取消置顶',
+      edit: '编辑',
+      duplicate: '复制会话',
+      moveToGroup: '移动到分组..',
+      delete: '删除',
+      moveUp: '上移',
+      moveDown: '下移',
+      rename: '重命名'
+    }
   },
   
   terminal: {

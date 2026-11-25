@@ -86,7 +86,19 @@ export default {
     newGroup: 'New Group',
     groupName: 'Group Name',
     deleteGroup: 'Delete Group',
-    renameGroup: 'Rename Group'
+    renameGroup: 'Rename Group',
+    contextMenu: {
+      connect: 'Connect',
+      pin: 'Pin',
+      unpin: 'Unpin',
+      edit: 'Edit',
+      duplicate: 'Duplicate Session',
+      moveToGroup: 'Move to Group...',
+      delete: 'Delete',
+      moveUp: 'Move Up',
+      moveDown: 'Move Down',
+      rename: 'Rename'
+    }
   },
   
   terminal: {

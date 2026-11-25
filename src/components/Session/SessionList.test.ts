@@ -3,6 +3,7 @@ import { createApp, isProxy, nextTick, type App } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import ElementPlus, { ElMessage } from 'element-plus'
 import { useAppStore } from '@/stores/app'
+import i18n from '@/i18n'
 import SessionList from './SessionList.vue'
 
 describe('session group context menu', () => {
@@ -44,6 +45,7 @@ describe('session group context menu', () => {
     await nextTick()
   })
   afterEach(() => {
+    i18n.global.locale.value = 'zh-CN'
     app.unmount()
     host.remove()
     vi.restoreAllMocks()
@@ -89,6 +91,19 @@ describe('session group context menu', () => {
   it('does nothing when the menu is dismissed', async () => {
     await openMenu(1)
     expect(updateGroupOrder).not.toHaveBeenCalled()
+  })
+
+  it('uses the active locale for the native group context menu', async () => {
+    i18n.global.locale.value = 'en-US'
+    const menu = await openMenu(1)
+
+    expect(menu).toEqual(expect.arrayContaining([
+      { label: 'Pin', action: 'pin' },
+      { label: 'Move Up', action: 'up', enabled: false },
+      { label: 'Move Down', action: 'down', enabled: true },
+      { label: 'Rename', action: 'rename' },
+      { label: 'Delete', action: 'delete' }
+    ]))
   })
 
   const seedSessions = async (group?: string) => {
