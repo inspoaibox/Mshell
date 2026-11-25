@@ -9,5 +9,5 @@ const app = createApp(MobileApp)
 app.use(i18n)
 app.config.globalProperties.$legacyT = translateLegacy
 app.mount('#app')
-document.documentElement.lang = i18n.global.locale
+document.documentElement.lang = i18n.global.locale.value
 installDomTranslator(document.body)

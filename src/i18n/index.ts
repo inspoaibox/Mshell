@@ -4,7 +4,7 @@ import enUS from './locales/en-US'
 
 export type MessageSchema = typeof zhCN
 
-const i18n = createI18n<[MessageSchema], 'zh-CN' | 'en-US'>({
+const i18n = createI18n<[MessageSchema], 'zh-CN' | 'en-US', false>({
   legacy: false,
   locale: localStorage.getItem('locale') || 'zh-CN',
   fallbackLocale: 'zh-CN',

@@ -14,7 +14,7 @@ async function initializeTheme() {
   try {
     const settings = await window.electronAPI.settings.get()
     if (settings?.general?.language === 'zh-CN' || settings?.general?.language === 'en-US') {
-      i18n.global.locale = settings.general.language
+      i18n.global.locale.value = settings.general.language
       localStorage.setItem('locale', settings.general.language)
       document.documentElement.lang = settings.general.language
     }
